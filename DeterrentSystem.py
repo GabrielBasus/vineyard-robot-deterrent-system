@@ -22,6 +22,7 @@ from TaskGenerator import TaskGenerator, TaskAssigner
 class EventBus:
     def __init__(self, robots: Dict[str, Robot]):
         self.robots = robots
+    
     def send_boundary_events(self, events: List[Dict], source_id: str):
         for ev in events:
             rid = ev['target_robot']
@@ -29,6 +30,15 @@ class EventBus:
                 self.robots[rid].ingest_boundary_event(
                     x=ev['x'], y=ev['y'], t=ev['t'],
                     weight=ev.get('weight', 0.35), sigma=ev.get('sigma'), omega=ev.get('omega')
+                )
+    
+    def send_intervention_events(self, events: List[Dict], source_id: str):
+        for ev in events:
+            rid = ev['target_robot']
+            if rid in self.robots and rid != source_id:
+                self.robots[rid].ingest_intervention_event(
+                    x=ev['x'], y=ev['y'], t=ev['t'],
+                    weight=ev.get('weight', 1.0), sigma=ev.get('sigma'), omega_inhib=ev.get('omega_inhib')
                 )
 
 def make_robot_profiles(robots_def, rng, uav_fraction=0.4):
@@ -392,6 +402,9 @@ def run_simulation_frames_persistent(
                         elif t >= tr["started_hold"] + hold_time_s:
                             tr["state"] = "done"
                             completed_tasks.append(tr)
+                            robots[rid].ingest_intervention_event(tr["x"], tr["y"], t, weight=1.0)
+                            b = robots[rid].intervention_boundary_events(tr["x"], tr["y"], t, weight=1.0)
+                            EventBus(robots).send_intervention_events(b, source_id=rid)
                             if mon is not None and getattr(mon, 'enabled', False):
                                 mon.event_task('complete', tr)
 

@@ -21,8 +21,10 @@ class OnlineSESTPP:
     - SESTPP parameters:
         sigma: spatial kernel bandwidth
         omega: temporal decay constant
+        omega_inhib: inhibition temporal decay constant
         alpha_in: self-excitation magnitude
-        alpha_cross: cross-excitation magnitude
+        alpha_cross: cross-excitation magnitude\
+        alpha_inhib: inhibition event magnitude
         mu_base: base background rate
         bg_ema: background rate EMA update factor
     Outputs:
@@ -31,11 +33,13 @@ class OnlineSESTPP:
     - advance_time(dt): decay trigger mass and update intensity
     - add_local_event(x, y): add self-exciting event at (x, y)
     - add_cross_event(x, y, weight, sigma, omega): add cross-exciting event at (x, y)
+    - add_intervention_event(x, y, weight, sigma, omega_inhib): add inhibiting event at (x, y)
     - hotspots(top_k, merge_radius, use_excess, mask_poly): get top-k hotspots
 """
 class OnlineSESTPP:
     def __init__(self, x_min, x_max, y_min, y_max, nx, ny,
-                 sigma=15.0, omega=600.0, alpha_in=0.25, alpha_cross=0.10,
+                 sigma=15.0, omega=600.0, omega_inhib=600.0,
+                 alpha_in=0.25, alpha_cross=0.10, alpha_inhib=0.20,
                  mu_base=1e-4, bg_ema=1e-6):
         self.nx, self.ny = nx, ny
         self.x_min, self.x_max = x_min, x_max
@@ -44,10 +48,13 @@ class OnlineSESTPP:
         self.dy = (y_max - y_min) / (ny - 1)
         self.sigma = float(sigma)
         self.omega = float(omega)
+        self.omega_inhib = float(omega_inhib)
         self.alpha_in = float(alpha_in)
         self.alpha_cross = float(alpha_cross)
+        self.alpha_inhib = float(alpha_inhib)
         self.mu = np.full((ny, nx), mu_base, float)
         self.trigger_mass = np.zeros((ny, nx), float)
+        self.inhib_mass = np.zeros((ny, nx), float)
         self.lam = np.full((ny, nx), mu_base, float)
         self.bg_ema = float(bg_ema)
         self.t_now = 0.0
@@ -70,12 +77,15 @@ class OnlineSESTPP:
         s = G.sum(); G = G / (s if s > 0 else 1.0)
         self.G = G
 
-    def set_params(self, alpha_in=None, alpha_cross=None, sigma=None, omega=None, bg_ema=None):
+    def set_params(self, alpha_in=None, alpha_cross=None, alpha_inhib=None, 
+                   sigma=None, omega=None, omega_inhib=None, bg_ema=None):
         if alpha_in is not None: self.alpha_in = float(alpha_in)
         if alpha_cross is not None: self.alpha_cross = float(alpha_cross)
+        if alpha_inhib is not None: self.alpha_inhib = float(alpha_inhib)
         if sigma is not None:
             self.sigma = float(sigma); self._rebuild_kernel()
         if omega is not None: self.omega = float(omega)
+        if omega_inhib is not None: self.omega_inhib = float(omega_inhib)
         if bg_ema is not None: self.bg_ema = float(bg_ema)
 
     def time_multiplier(self, t: float) -> float:
@@ -93,24 +103,29 @@ class OnlineSESTPP:
 
     def advance_time(self, dt: float):
         if dt <= 0: return
-        decay = math.exp(-dt / self.omega)
-        self.trigger_mass *= decay
+        decay_trig = math.exp(-dt / self.omega)
+        decay_inhib = math.exp(-dt / self.omega_inhib)
+        self.trigger_mass *= decay_trig
+        self.inhib_mass *= decay_inhib
         self.t_now += dt
-        self.lam = self.mu * self.time_multiplier(self.t_now) + self.trigger_mass
+        self.lam = np.clip(self.mu * self.time_multiplier(self.t_now) + self.trigger_mass - self.inhib_mass, 0.0, None)
 
     def _stamp(self, x, y, amp: float):
+        self._stamp_to(self.trigger_mass, x, y, amp)
+
+    def _stamp_to(self, grid, x, y, amp: float):
         iy, ix = self.world_to_idx(x, y)
         y0 = max(0, iy - self.k_rad); y1 = min(self.ny, iy + self.k_rad + 1)
         x0 = max(0, ix - self.k_rad); x1 = min(self.nx, ix + self.k_rad + 1)
         ky0 = y0 - (iy - self.k_rad); ky1 = ky0 + (y1 - y0)
         kx0 = x0 - (ix - self.k_rad); kx1 = kx0 + (x1 - x0)
-        self.trigger_mass[y0:y1, x0:x1] += amp * self.G[ky0:ky1, kx0:kx1]
+        grid[y0:y1, x0:x1] += amp * self.G[ky0:ky1, kx0:kx1]
 
     def add_local_event(self, x, y):
         self._stamp(x, y, self.alpha_in)
         iy, ix = self.world_to_idx(x, y)
         self.mu[iy, ix] = max(1e-6, (1-self.bg_ema)*self.mu[iy, ix] + self.bg_ema*self.lam[iy, ix])
-        self.lam = self.mu * self.time_multiplier(self.t_now) + self.trigger_mass
+        self.lam = np.clip(self.mu * self.time_multiplier(self.t_now) + self.trigger_mass - self.inhib_mass, 0.0, None)
 
     def add_cross_event(self, x, y, weight=0.35, sigma=None, omega=None):
         if sigma is not None:
@@ -122,7 +137,19 @@ class OnlineSESTPP:
             self.sigma = orig_sigma; self._rebuild_kernel()
         if omega is not None:
             self.omega = orig_omega
-        self.lam = self.mu * self.time_multiplier(self.t_now) + self.trigger_mass
+        self.lam = np.clip(self.mu * self.time_multiplier(self.t_now) + self.trigger_mass - self.inhib_mass, 0.0, None)
+
+    def add_intervention_event(self, x, y, weight=1.0, sigma=None, omega_inhib=None):
+        if sigma is not None:
+            orig_sigma = self.sigma; self.sigma = float(sigma); self._rebuild_kernel()
+        if omega_inhib is not None:
+            orig_omega_inhib = self.omega_inhib; self.omega_inhib = float(omega_inhib)
+        self._stamp_to(self.inhib_mass, x, y, self.alpha_inhib * float(weight))
+        if sigma is not None:
+            self.sigma = orig_sigma; self._rebuild_kernel()
+        if omega_inhib is not None:
+            self.omega_inhib = orig_omega_inhib
+        self.lam = np.clip(self.mu * self.time_multiplier(self.t_now) + self.trigger_mass - self.inhib_mass, 0.0, None)
 
     """
     Get top-k hotspots as list of dicts: {'x': float, 'y': float, 'score': float}
