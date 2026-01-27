@@ -1,15 +1,18 @@
 from setuptools import find_packages, setup
+from glob import glob
+from os.path import join
 
 package_name = 'bird-deterrent-vineyard'
 
 setup(
     name=package_name,
     version='0.0.0',
-    packages=find_packages(exclude=['test']),
+    packages=find_packages(exclude=['test', 'bird-deterrent-vineyard']),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+        (join('share', package_name), ['package.xml']),
+        (join('share', package_name, 'msg'), glob('msg/*.msg')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -20,6 +23,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'central_coordinator = bird_deterrent_vineyard.central_coordinator:main',
+            'robot_executor = bird_deterrent_vineyard.robot_executor:main',
         ],
     },
 )

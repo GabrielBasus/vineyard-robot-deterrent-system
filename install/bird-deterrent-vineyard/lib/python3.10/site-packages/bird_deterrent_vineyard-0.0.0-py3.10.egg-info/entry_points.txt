@@ -1,0 +1,4 @@
+[console_scripts]
+central_coordinator = bird_deterrent_vineyard.central_coordinator:main
+robot_executor = bird_deterrent_vineyard.robot_executor:main
+
