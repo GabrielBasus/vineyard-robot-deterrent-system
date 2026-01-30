@@ -53,7 +53,10 @@ class TaskGenerator:
                              deterring_window_s: float = 0.0,
                              min_hotspot_score: float = 1e-4,
                              hotspot_spacing_m: float = 25.0,
-                             jitter_m: float = 4.0):
+                             jitter_m: float = 4.0,
+                             horizon_s: float = 300.0,
+                             cost_per_m: float = 0.0,
+                             weight_fn=None):
         """
         Build patrolling-from-hotspots tasks for each robot at 'now_t'.
         Optionally keep a small deterring window if you also want clustered deterring here.
@@ -67,19 +70,8 @@ class TaskGenerator:
             recent_pts = [(x,y) for (x,y,t) in rob.recent_events if (now_t - t) <= deterring_window_s]
             deterring_points = cluster_points(recent_pts, self.merge_radius_m) if deterring_window_s > 0 else []
 
-            # (optional) clustered deterring now
-            for (dx, dy) in deterring_points:
-                self._add({
-                    'robot_id': rid,
-                    'type': 'deterring',
-                    'x': float(dx), 'y': float(dy),
-                    'time': float(now_t),
-                    'origin': 'detection',
-                    'score': 0.0
-                })
-
-            # hotspots from SESTPP excess λ-μ
-            # Get more candidates than we’ll keep, then thin for spacing
+            # hotspots from SESTPP excess lambda-mu
+            # Get more candidates than we'll keep, then thin for spacing
             raw = rob.m.hotspots(
                 top_k=max(hotspot_top_k*3, hotspot_top_k),
                 merge_radius=max(self.merge_radius_m, hotspot_spacing_m*0.5),
@@ -98,28 +90,57 @@ class TaskGenerator:
             # Add a tiny random jitter to decorrelate grid alignment
             import random, math
 
-                # Cooldown gate for patrols per robot
-            next_ok = self._next_allowed.get(rid, -1e9)
-            patrolled = 0
+            def _weight_at(x, y):
+                return float(weight_fn(x, y)) if weight_fn is not None else 1.0
+
+            def _field_score(x, y):
+                iy, ix = rob.m.world_to_idx(x, y)
+                return float(rob.m.lam[iy, ix] - rob.m.mu[iy, ix])
+
+            def _action_score(x, y, base_score):
+                # Expected future reduction proxy using inhibition time constant.
+                omega_u = float(rob.m.omega_inhib)
+                time_factor = omega_u * (1.0 - math.exp(-horizon_s / max(omega_u, 1e-9)))
+                w = _weight_at(x, y)
+                rx, ry = _robot_pose_guess(rob)
+                dist = math.hypot(x - rx, y - ry)
+                return w * base_score * time_factor - cost_per_m * dist
+
+            # Build candidate list: hotspots (patrolling) + optional deterring clusters
+            candidates = []
             for (hx, hy, hs) in picks:
-                if now_t < next_ok:
-                    break
                 if any((hx-dx)**2 + (hy-dy)**2 <= self.merge_radius_m**2 for (dx,dy) in deterring_points):
                     continue
-                jx = (random.uniform(-1,1) * jitter_m)
-                jy = (random.uniform(-1,1) * jitter_m)
-                self._add({
-                    'robot_id': rid,
-                    'type': 'patrolling',
-                    'x': float(hx + jx), 'y': float(hy + jy),
-                    'time': float(now_t),
-                    'origin': 'hotspot',
-                    'score': float(hs)
-                })
-                patrolled += 1
-                self._next_allowed[rid] = now_t + self._cooldown
-                if patrolled >= 1:   # at most one new patrol per robot per cycle
-                    break
+                candidates.append(("patrolling", hx, hy, float(hs), "hotspot"))
+
+            for (dx, dy) in deterring_points:
+                base = _field_score(dx, dy)
+                candidates.append(("deterring", dx, dy, base, "detection"))
+
+            # Cooldown gate for patrols per robot
+            next_ok = self._next_allowed.get(rid, -1e9)
+            if now_t >= next_ok and candidates:
+                best = None
+                for (ttype, x, y, base, origin) in candidates:
+                    if base < min_hotspot_score:
+                        continue
+                    score = _action_score(x, y, base)
+                    if best is None or score > best[0]:
+                        best = (score, ttype, x, y, origin, base)
+
+                if best is not None:
+                    _score, ttype, x, y, origin, base = best
+                    jx = (random.uniform(-1,1) * jitter_m) if ttype == "patrolling" else 0.0
+                    jy = (random.uniform(-1,1) * jitter_m) if ttype == "patrolling" else 0.0
+                    self._add({
+                        'robot_id': rid,
+                        'type': ttype,
+                        'x': float(x + jx), 'y': float(y + jy),
+                        'time': float(now_t),
+                        'origin': origin,
+                        'score': float(_score)
+                    })
+                    self._next_allowed[rid] = now_t + self._cooldown
 
             # fallback if nothing for this robot at this time slice
             # Optional fallback (off by default). If you re-enable it, consider
