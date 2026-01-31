@@ -1,0 +1,33 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/detection__type_support.cpp.o"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/detection__type_support.cpp.o.d"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/point2_d__type_support.cpp.o"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/point2_d__type_support.cpp.o.d"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/polygon2_d__type_support.cpp.o"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/polygon2_d__type_support.cpp.o.d"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/robot_pose__type_support.cpp.o"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/robot_pose__type_support.cpp.o.d"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/task__type_support.cpp.o"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/task__type_support.cpp.o.d"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/task_status__type_support.cpp.o"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/task_status__type_support.cpp.o.d"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/zone__type_support.cpp.o"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/zone__type_support.cpp.o.d"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/zones__type_support.cpp.o"
+  "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/zones__type_support.cpp.o.d"
+  "libbird_deterrent_vineyard_msgs__rosidl_typesupport_c.pdb"
+  "libbird_deterrent_vineyard_msgs__rosidl_typesupport_c.so"
+  "rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/detection__type_support.cpp"
+  "rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/point2_d__type_support.cpp"
+  "rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/polygon2_d__type_support.cpp"
+  "rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/robot_pose__type_support.cpp"
+  "rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/task__type_support.cpp"
+  "rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/task_status__type_support.cpp"
+  "rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/zone__type_support.cpp"
+  "rosidl_typesupport_c/bird_deterrent_vineyard_msgs/msg/zones__type_support.cpp"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

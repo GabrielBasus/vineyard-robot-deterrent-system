@@ -1,0 +1,26 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from bird_deterrent_vineyard_msgs/msg/Task.msg
+// generated code does not contain a copyright notice
+
+
+module bird_deterrent_vineyard_msgs {
+  module msg {
+    struct Task {
+      string id;
+
+      string type;
+
+      double x;
+
+      double y;
+
+      double time;
+
+      string assigned_primary;
+
+      string assigned_secondary;
+
+      float score;
+    };
+  };
+};

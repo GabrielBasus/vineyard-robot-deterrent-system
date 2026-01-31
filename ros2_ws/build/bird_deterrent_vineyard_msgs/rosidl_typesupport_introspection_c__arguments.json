@@ -1,0 +1,33 @@
+{
+  "package_name": "bird_deterrent_vineyard_msgs",
+  "output_dir": "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_typesupport_introspection_c/bird_deterrent_vineyard_msgs",
+  "template_dir": "/opt/ros/humble/share/rosidl_typesupport_introspection_c/resource",
+  "idl_tuples": [
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Detection.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Point2D.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Polygon2D.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/RobotPose.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Task.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/TaskStatus.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Zone.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Zones.idl"
+  ],
+  "target_dependencies": [
+    "/opt/ros/humble/lib/rosidl_typesupport_introspection_c/rosidl_typesupport_introspection_c",
+    "/opt/ros/humble/local/lib/python3.10/dist-packages/rosidl_typesupport_introspection_c/__init__.py",
+    "/opt/ros/humble/share/rosidl_typesupport_introspection_c/resource/idl__rosidl_typesupport_introspection_c.h.em",
+    "/opt/ros/humble/share/rosidl_typesupport_introspection_c/resource/idl__type_support.c.em",
+    "/opt/ros/humble/share/rosidl_typesupport_introspection_c/resource/msg__rosidl_typesupport_introspection_c.h.em",
+    "/opt/ros/humble/share/rosidl_typesupport_introspection_c/resource/msg__type_support.c.em",
+    "/opt/ros/humble/share/rosidl_typesupport_introspection_c/resource/srv__rosidl_typesupport_introspection_c.h.em",
+    "/opt/ros/humble/share/rosidl_typesupport_introspection_c/resource/srv__type_support.c.em",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Detection.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Point2D.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Polygon2D.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/RobotPose.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Task.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/TaskStatus.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Zone.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Zones.idl"
+  ]
+}

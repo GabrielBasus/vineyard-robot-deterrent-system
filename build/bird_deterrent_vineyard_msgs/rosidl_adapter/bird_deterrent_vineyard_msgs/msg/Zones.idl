@@ -1,0 +1,15 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from bird_deterrent_vineyard_msgs/msg/Zones.msg
+// generated code does not contain a copyright notice
+
+#include "bird_deterrent_vineyard/msg/Zone.idl"
+
+module bird_deterrent_vineyard_msgs {
+  module msg {
+    struct Zones {
+      double t;
+
+      sequence<bird_deterrent_vineyard::msg::Zone> zones;
+    };
+  };
+};

@@ -1,0 +1,4 @@
+source;share/bird_deterrent_vineyard_msgs/local_setup.bash
+source;share/bird_deterrent_vineyard_msgs/local_setup.dsv
+source;share/bird_deterrent_vineyard_msgs/local_setup.sh
+source;share/bird_deterrent_vineyard_msgs/local_setup.zsh

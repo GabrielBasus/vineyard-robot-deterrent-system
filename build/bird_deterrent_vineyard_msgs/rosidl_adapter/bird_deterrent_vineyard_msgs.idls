@@ -1,0 +1,8 @@
+/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Point2D.idl
+/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Polygon2D.idl
+/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Zone.idl
+/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Zones.idl
+/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Detection.idl
+/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Task.idl
+/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/TaskStatus.idl
+/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/RobotPose.idl

@@ -1,0 +1,9 @@
+float64 t
+string event
+string robot_id
+string task_id
+string type
+float64 x
+float64 y
+string role
+string extra

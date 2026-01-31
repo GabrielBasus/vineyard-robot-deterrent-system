@@ -1,0 +1,17 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from bird_deterrent_vineyard_msgs/msg/Zone.msg
+// generated code does not contain a copyright notice
+
+#include "bird_deterrent_vineyard/msg/Polygon2D.idl"
+
+module bird_deterrent_vineyard_msgs {
+  module msg {
+    struct Zone {
+      string robot_id;
+
+      bird_deterrent_vineyard::msg::Polygon2D polygon;
+
+      sequence<string> neighbors;
+    };
+  };
+};

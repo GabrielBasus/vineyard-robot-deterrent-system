@@ -1,0 +1,40 @@
+file(REMOVE_RECURSE
+  "CMakeFiles/bird_deterrent_vineyard_msgs__cpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/detection__builder.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/detection__struct.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/detection__traits.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/point2_d__builder.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/point2_d__struct.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/point2_d__traits.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/polygon2_d__builder.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/polygon2_d__struct.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/polygon2_d__traits.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/robot_pose__builder.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/robot_pose__struct.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/robot_pose__traits.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/task__builder.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/task__struct.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/task__traits.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/task_status__builder.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/task_status__struct.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/task_status__traits.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/zone__builder.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/zone__struct.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/zone__traits.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/zones__builder.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/zones__struct.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detail/zones__traits.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/detection.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/point2_d.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/polygon2_d.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/robot_pose.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/task.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/task_status.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/zone.hpp"
+  "rosidl_generator_cpp/bird_deterrent_vineyard_msgs/msg/zones.hpp"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang )
+  include(CMakeFiles/bird_deterrent_vineyard_msgs__cpp.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

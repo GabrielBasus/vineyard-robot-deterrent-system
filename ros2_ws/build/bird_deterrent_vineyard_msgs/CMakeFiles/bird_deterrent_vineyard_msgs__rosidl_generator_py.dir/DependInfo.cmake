@@ -1,0 +1,28 @@
+
+# Consider dependencies only in project.
+set(CMAKE_DEPENDS_IN_PROJECT_ONLY OFF)
+
+# The set of languages for which implicit dependencies are needed:
+set(CMAKE_DEPENDS_LANGUAGES
+  )
+
+# The set of dependency files which are needed:
+set(CMAKE_DEPENDS_DEPENDENCY_FILES
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_detection_s.c" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_detection_s.c.o" "gcc" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_detection_s.c.o.d"
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_point2_d_s.c" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_point2_d_s.c.o" "gcc" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_point2_d_s.c.o.d"
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_polygon2_d_s.c" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_polygon2_d_s.c.o" "gcc" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_polygon2_d_s.c.o.d"
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_robot_pose_s.c" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_robot_pose_s.c.o" "gcc" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_robot_pose_s.c.o.d"
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_task_s.c" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_task_s.c.o" "gcc" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_task_s.c.o.d"
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_task_status_s.c" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_task_status_s.c.o" "gcc" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_task_status_s.c.o.d"
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_zone_s.c" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_zone_s.c.o" "gcc" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_zone_s.c.o.d"
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_zones_s.c" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_zones_s.c.o" "gcc" "CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_py.dir/rosidl_generator_py/bird_deterrent_vineyard_msgs/msg/_zones_s.c.o.d"
+  )
+
+# Targets to which this target links.
+set(CMAKE_TARGET_LINKED_INFO_FILES
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_typesupport_c.dir/DependInfo.cmake"
+  "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/CMakeFiles/bird_deterrent_vineyard_msgs__rosidl_generator_c.dir/DependInfo.cmake"
+  )
+
+# Fortran module output directory.
+set(CMAKE_Fortran_TARGET_MODULE_DIR "")

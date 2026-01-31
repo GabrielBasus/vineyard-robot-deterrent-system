@@ -1,0 +1,13 @@
+{
+  "package_name": "bird_deterrent_vineyard_msgs",
+  "non_idl_tuples": [
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/src/bird_deterrent_vineyard_msgs:msg/Detection.msg",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/src/bird_deterrent_vineyard_msgs:msg/Point2D.msg",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/src/bird_deterrent_vineyard_msgs:msg/Polygon2D.msg",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/src/bird_deterrent_vineyard_msgs:msg/RobotPose.msg",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/src/bird_deterrent_vineyard_msgs:msg/Task.msg",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/src/bird_deterrent_vineyard_msgs:msg/TaskStatus.msg",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/src/bird_deterrent_vineyard_msgs:msg/Zone.msg",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/src/bird_deterrent_vineyard_msgs:msg/Zones.msg"
+  ]
+}

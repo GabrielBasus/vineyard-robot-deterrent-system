@@ -1,0 +1,28 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from bird_deterrent_vineyard_msgs/msg/TaskStatus.msg
+// generated code does not contain a copyright notice
+
+
+module bird_deterrent_vineyard_msgs {
+  module msg {
+    struct TaskStatus {
+      double t;
+
+      string event;
+
+      string robot_id;
+
+      string task_id;
+
+      string type;
+
+      double x;
+
+      double y;
+
+      string role;
+
+      string extra;
+    };
+  };
+};

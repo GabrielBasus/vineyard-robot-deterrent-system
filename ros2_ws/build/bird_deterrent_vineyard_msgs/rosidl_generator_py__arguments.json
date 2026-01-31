@@ -1,0 +1,38 @@
+{
+  "package_name": "bird_deterrent_vineyard_msgs",
+  "output_dir": "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_generator_py/bird_deterrent_vineyard_msgs",
+  "template_dir": "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource",
+  "idl_tuples": [
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Detection.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Point2D.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Polygon2D.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/RobotPose.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Task.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/TaskStatus.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Zone.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs:msg/Zones.idl"
+  ],
+  "target_dependencies": [
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../../../lib/rosidl_generator_py/rosidl_generator_py",
+    "/opt/ros/humble/local/lib/python3.10/dist-packages/rosidl_generator_py/__init__.py",
+    "/opt/ros/humble/local/lib/python3.10/dist-packages/rosidl_generator_py/generate_py_impl.py",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_action_pkg_typesupport_entry_point.c.em",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_action.py.em",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_idl_pkg_typesupport_entry_point.c.em",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_idl_support.c.em",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_idl.py.em",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_msg_pkg_typesupport_entry_point.c.em",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_msg_support.c.em",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_msg.py.em",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_srv_pkg_typesupport_entry_point.c.em",
+    "/opt/ros/humble/share/rosidl_generator_py/cmake/../resource/_srv.py.em",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Detection.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Point2D.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Polygon2D.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/RobotPose.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Task.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/TaskStatus.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Zone.idl",
+    "/home/gabrielbasus/Thesis/vineyard-robot-deterrent-ROS/ros2_ws/build/bird_deterrent_vineyard_msgs/rosidl_adapter/bird_deterrent_vineyard_msgs/msg/Zones.idl"
+  ]
+}

@@ -1,0 +1,16 @@
+msg/Detection.idl
+msg/Detection.msg
+msg/Point2D.idl
+msg/Point2D.msg
+msg/Polygon2D.idl
+msg/Polygon2D.msg
+msg/RobotPose.idl
+msg/RobotPose.msg
+msg/Task.idl
+msg/Task.msg
+msg/TaskStatus.idl
+msg/TaskStatus.msg
+msg/Zone.idl
+msg/Zone.msg
+msg/Zones.idl
+msg/Zones.msg
