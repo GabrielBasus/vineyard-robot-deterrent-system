@@ -1,6 +1,6 @@
 from typing import Dict, List
 from Robot import Robot
-from ZonePartitioner import polygon_centroid, point_in_polygon, Point
+from ZonePartitioner import polygon_centroid, point_in_polygon, point_to_poly_distance, Point
 from Robot import RobotProfile
 import math
 
@@ -55,8 +55,15 @@ class TaskGenerator:
                              hotspot_spacing_m: float = 25.0,
                              jitter_m: float = 4.0,
                              horizon_s: float = 300.0,
-                             cost_per_m: float = 0.0,
-                             weight_fn=None):
+                             weight_fn=None,
+                             profiles: Dict[str, RobotProfile] | None = None,
+                             cost_w_eta: float = 1.0,
+                             spinup_by_type: Dict[str, float] | None = None,
+                             deterring_modes: Dict[str, Dict] | None = None,
+                             value_edge_gain: float = 0.5,
+                             value_edge_scale: float = 30.0,
+                             value_block_gain: float = 0.3,
+                             value_block_size: float = 80.0):
         """
         Build patrolling-from-hotspots tasks for each robot at 'now_t'.
         Optionally keep a small deterring window if you also want clustered deterring here.
@@ -72,11 +79,12 @@ class TaskGenerator:
 
             # hotspots from SESTPP excess lambda-mu
             # Get more candidates than we'll keep, then thin for spacing
+            mask = rob.zone_polygon if rob.zone_polygon else None
             raw = rob.m.hotspots(
                 top_k=max(hotspot_top_k*3, hotspot_top_k),
                 merge_radius=max(self.merge_radius_m, hotspot_spacing_m*0.5),
                 use_excess=True,
-                mask_poly=rob.zone_polygon
+                mask_poly=mask
             )
             # Score filter + Poisson-disk style thinning
             cand = [(h['x'], h['y'], h['score']) for h in raw if h.get('score', 0.0) >= min_hotspot_score]
@@ -89,47 +97,104 @@ class TaskGenerator:
             # avoid hotspots that coincide with deterring clusters
             # Add a tiny random jitter to decorrelate grid alignment
             import random, math
+            if deterring_modes is None:
+                deterring_modes = {
+                    "formation": {"beta": 0.30, "omega": 800.0, "sigma": 18.0, "w_eta": 1.0, "fixed_cost": 0.0},
+                    "laser":     {"beta": 0.45, "omega": 400.0, "sigma": 10.0, "w_eta": 1.5, "fixed_cost": 0.0},
+                    "biosonic":  {"beta": 0.25, "omega": 600.0, "sigma": 20.0, "w_eta": 1.2, "fixed_cost": 0.0},
+                }
 
             def _weight_at(x, y):
-                return float(weight_fn(x, y)) if weight_fn is not None else 1.0
+                if weight_fn is not None:
+                    return float(weight_fn(x, y))
+                # Static value map: edges + coarse blocks (default).
+                dist_edge = point_to_poly_distance((x, y), rob.zone_polygon) if rob.zone_polygon else 0.0
+                edge_w = value_edge_gain * math.exp(-dist_edge / max(value_edge_scale, 1e-9))
+                bx = math.sin(2.0 * math.pi * x / max(value_block_size, 1e-9))
+                by = math.sin(2.0 * math.pi * y / max(value_block_size, 1e-9))
+                block_w = value_block_gain * (0.5 + 0.5 * bx * by)
+                return 1.0 + edge_w + block_w
 
             def _field_score(x, y):
                 iy, ix = rob.m.world_to_idx(x, y)
                 return float(rob.m.lam[iy, ix] - rob.m.mu[iy, ix])
 
-            def _action_score(x, y, base_score):
-                # Expected future reduction proxy using inhibition time constant.
-                omega_u = float(rob.m.omega_inhib)
-                time_factor = omega_u * (1.0 - math.exp(-horizon_s / max(omega_u, 1e-9)))
-                w = _weight_at(x, y)
+            def _kernel_weight_sum_sigma(x, y, sigma_u):
+                rad = int(math.ceil(3.0 * sigma_u / max(rob.m.dx, rob.m.dy)))
+                iy, ix = rob.m.world_to_idx(x, y)
+                y0 = max(0, iy - rad); y1 = min(rob.m.ny, iy + rad + 1)
+                x0 = max(0, ix - rad); x1 = min(rob.m.nx, ix + rad + 1)
+                acc = 0.0
+                for yy in range(y0, y1):
+                    wy = rob.m.ys[yy]
+                    for xx in range(x0, x1):
+                        wx = rob.m.xs[xx]
+                        dx = wx - x
+                        dy = wy - y
+                        k = math.exp(-0.5 * (dx*dx + dy*dy) / max(sigma_u**2, 1e-9))
+                        acc += _weight_at(wx, wy) * k
+                return acc
+
+            def _cost_eta(x, y, w_eta_override=None, fixed_cost=0.0):
                 rx, ry = _robot_pose_guess(rob)
                 dist = math.hypot(x - rx, y - ry)
-                return w * base_score * time_factor - cost_per_m * dist
+                speed = 1.0
+                spin = 0.0
+                if profiles is not None and rid in profiles:
+                    prof = profiles[rid]
+                    speed = max(float(prof.speed_mps), 1e-6)
+                    if spinup_by_type is not None:
+                        spin = float(spinup_by_type.get(prof.type, 0.0))
+                w_eta = cost_w_eta if w_eta_override is None else float(w_eta_override)
+                return w_eta * (dist / max(speed, 1e-6) + spin) + float(fixed_cost)
+
+            def _action_score_patrol(x, y):
+                # Patrol: use local field as benefit proxy.
+                omega_u = float(rob.m.omega_inhib)
+                time_factor = omega_u * (1.0 - math.exp(-horizon_s / max(omega_u, 1e-9)))
+                delta_a = float(rob.m.dx * rob.m.dy)
+                benefit = _field_score(x, y) * time_factor * delta_a
+                return benefit - _cost_eta(x, y)
+
+            def _action_score_deterrence(x, y, mode):
+                params = deterring_modes.get(mode, {})
+                beta = float(params.get("beta", rob.m.alpha_inhib))
+                omega_u = float(params.get("omega", rob.m.omega_inhib))
+                sigma_u = float(params.get("sigma", rob.m.sigma))
+                w_eta = float(params.get("w_eta", cost_w_eta))
+                fixed_cost = float(params.get("fixed_cost", 0.0))
+                time_factor = omega_u * (1.0 - math.exp(-horizon_s / max(omega_u, 1e-9)))
+                delta_a = float(rob.m.dx * rob.m.dy)
+                benefit = beta * time_factor * delta_a * _kernel_weight_sum_sigma(x, y, sigma_u)
+                return benefit - _cost_eta(x, y, w_eta_override=w_eta, fixed_cost=fixed_cost)
 
             # Build candidate list: hotspots (patrolling) + optional deterring clusters
             candidates = []
             for (hx, hy, hs) in picks:
                 if any((hx-dx)**2 + (hy-dy)**2 <= self.merge_radius_m**2 for (dx,dy) in deterring_points):
                     continue
-                candidates.append(("patrolling", hx, hy, float(hs), "hotspot"))
+                candidates.append(("patrolling", hx, hy, "hotspot", None))
 
             for (dx, dy) in deterring_points:
-                base = _field_score(dx, dy)
-                candidates.append(("deterring", dx, dy, base, "detection"))
+                for mode in deterring_modes.keys():
+                    candidates.append(("deterring", dx, dy, "detection", mode))
 
             # Cooldown gate for patrols per robot
             next_ok = self._next_allowed.get(rid, -1e9)
             if now_t >= next_ok and candidates:
                 best = None
-                for (ttype, x, y, base, origin) in candidates:
-                    if base < min_hotspot_score:
+                for (ttype, x, y, origin, mode) in candidates:
+                    if _field_score(x, y) < min_hotspot_score:
                         continue
-                    score = _action_score(x, y, base)
+                    if ttype == "deterring":
+                        score = _action_score_deterrence(x, y, mode)
+                    else:
+                        score = _action_score_patrol(x, y)
                     if best is None or score > best[0]:
-                        best = (score, ttype, x, y, origin, base)
+                        best = (score, ttype, x, y, origin, mode)
 
                 if best is not None:
-                    _score, ttype, x, y, origin, base = best
+                    _score, ttype, x, y, origin, mode = best
                     jx = (random.uniform(-1,1) * jitter_m) if ttype == "patrolling" else 0.0
                     jy = (random.uniform(-1,1) * jitter_m) if ttype == "patrolling" else 0.0
                     self._add({
@@ -138,6 +203,7 @@ class TaskGenerator:
                         'x': float(x + jx), 'y': float(y + jy),
                         'time': float(now_t),
                         'origin': origin,
+                        'mode': mode,
                         'score': float(_score)
                     })
                     self._next_allowed[rid] = now_t + self._cooldown
@@ -190,6 +256,7 @@ class TaskGenerator:
             'y': float(task['y']),
             'time': float(task['time']),
             'origin': task.get('origin', 'unknown'),      # 'detection'|'hotspot'|'fallback'
+            'mode': task.get('mode'),
             'score': float(task.get('score', 0.0)),
         })
 
@@ -227,7 +294,18 @@ class TaskAssigner:
           {task: <task>, primary: <robot_id>, secondary: <robot_id or None>, details: {...}}
         or None if no eligible robot.
         """
-        eligible = [rid for rid in self.P if self._eligible(self.P[rid], task)]
+        owner = task.get("robot_id")
+        local_pool = []
+        if owner in self.R:
+            local_pool.append(owner)
+            local_pool.extend([rid for rid in self.R[owner].neighbors if rid not in local_pool])
+
+        # Try owner+neighbors first to avoid one robot monopolizing all tasks.
+        eligible = [rid for rid in local_pool if rid in self.P and self._eligible(self.P[rid], task)]
+        scope = "local"
+        if not eligible:
+            eligible = [rid for rid in self.P if self._eligible(self.P[rid], task)]
+            scope = "global_fallback"
         if not eligible:
             return None
 
@@ -244,7 +322,12 @@ class TaskAssigner:
             if secondary is None:
                 secondary = scored[1][1]
 
-        return {"task": task, "primary": primary, "secondary": secondary, "details": {"scores": scored[:3]}}
+        return {
+            "task": task,
+            "primary": primary,
+            "secondary": secondary,
+            "details": {"scores": scored[:3], "scope": scope}
+        }
 
     # ---------- helpers ----------
     def _eligible(self, prof: RobotProfile, task: dict) -> bool:

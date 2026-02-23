@@ -49,6 +49,7 @@ from dataclasses import dataclass, fields
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import csv
 import os
+import shutil
 import time
 
 Point = Tuple[float, float]
@@ -105,6 +106,23 @@ class HotspotRow:
     score: float
 
 
+@dataclass
+class RobotDiagRow:
+    t: float
+    rid: str
+    battery: float
+    state: str
+    task: str
+    goal_x: float
+    goal_y: float
+    eff_goal_x: float
+    eff_goal_y: float
+    dist_to_goal: float
+    lane_cur: float
+    lane_tgt: float
+    at_headland: int
+
+
 def _ser_poly(poly: Optional[Poly]) -> str:
     """Serialize polygon to a compact string: 'x1 y1|x2 y2|...'."""
     if not poly:
@@ -136,6 +154,7 @@ class TelemetrySim:
         self._tasks: List[TaskRow] = []
         self._msgs:  List[MessageRow] = []
         self._hots:  List[HotspotRow] = []
+        self._rdiag: List[RobotDiagRow] = []
 
         # for incremental flush
         self._last_flush = 0.0
@@ -239,6 +258,42 @@ class TelemetrySim:
                 )
             )
 
+    def robot_diag(
+        self,
+        t: float,
+        rid: str,
+        battery: float,
+        state: str,
+        task: str,
+        goal_x: float,
+        goal_y: float,
+        eff_goal_x: float,
+        eff_goal_y: float,
+        dist_to_goal: float,
+        lane_cur: float,
+        lane_tgt: float,
+        at_headland: int,
+    ) -> None:
+        if not self.enabled:
+            return
+        self._rdiag.append(
+            RobotDiagRow(
+                t=float(t),
+                rid=str(rid),
+                battery=float(battery),
+                state=str(state),
+                task=str(task),
+                goal_x=float(goal_x),
+                goal_y=float(goal_y),
+                eff_goal_x=float(eff_goal_x),
+                eff_goal_y=float(eff_goal_y),
+                dist_to_goal=float(dist_to_goal),
+                lane_cur=float(lane_cur),
+                lane_tgt=float(lane_tgt),
+                at_headland=int(at_headland),
+            )
+        )
+
     # -------- export / live flush -------- #
 
     def export_csv(self, out_dir: str) -> None:
@@ -252,6 +307,7 @@ class TelemetrySim:
         self._write_csv(os.path.join(out_dir, "tasks.csv"),       self._tasks, TaskRow)
         self._write_csv(os.path.join(out_dir, "messages.csv"),    self._msgs,  MessageRow)
         self._write_csv(os.path.join(out_dir, "hotspots.csv"),    self._hots,  HotspotRow)
+        self._write_csv(os.path.join(out_dir, "robot_diagnostics.csv"), self._rdiag, RobotDiagRow)
 
     def flush_live(self, out_dir: str, min_interval_s: float = 0.5) -> None:
         """
@@ -274,6 +330,66 @@ class TelemetrySim:
         self._append_csv(os.path.join(out_dir, "tasks.csv"),       self._tasks, TaskRow, clear=True)
         self._append_csv(os.path.join(out_dir, "messages.csv"),    self._msgs,  MessageRow, clear=True)
         self._append_csv(os.path.join(out_dir, "hotspots.csv"),    self._hots,  HotspotRow, clear=True)
+        self._append_csv(os.path.join(out_dir, "robot_diagnostics.csv"), self._rdiag, RobotDiagRow, clear=True)
+
+    def prepare_live_dir(
+        self,
+        out_dir: str,
+        clear_existing: bool = True,
+        prompt_save_existing: bool = False,
+        backup_on_save: bool = True,
+    ) -> None:
+        """
+        Prepare live telemetry directory at the start of a run.
+
+        Behavior:
+        - If clear_existing=False: ensure directory exists, do nothing else.
+        - If clear_existing=True and files exist:
+            - If prompt_save_existing=True: ask user whether to save previous run.
+            - If save requested and backup_on_save=True: move directory to timestamped backup.
+            - Otherwise: remove known telemetry CSVs in-place.
+        """
+        if not self.enabled:
+            return
+
+        os.makedirs(out_dir, exist_ok=True)
+        known_files = [
+            "robot_poses.csv",
+            "zones.csv",
+            "tasks.csv",
+            "messages.csv",
+            "hotspots.csv",
+            "robot_diagnostics.csv",
+        ]
+        existing = [f for f in known_files if os.path.exists(os.path.join(out_dir, f))]
+        if not clear_existing or not existing:
+            return
+
+        save_existing = False
+        if prompt_save_existing:
+            try:
+                ans = input(
+                    f"Telemetry folder '{out_dir}' has previous data. Save backup before overwrite? [y/N]: "
+                ).strip().lower()
+                save_existing = ans in ("y", "yes")
+            except Exception:
+                save_existing = False
+
+        if save_existing and backup_on_save:
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            backup_dir = f"{out_dir}_backup_{ts}"
+            # Move full folder so all prior artifacts are preserved.
+            shutil.move(out_dir, backup_dir)
+            os.makedirs(out_dir, exist_ok=True)
+            print(f"[telemetry] previous run moved to: {backup_dir}")
+            return
+
+        for fname in existing:
+            try:
+                os.remove(os.path.join(out_dir, fname))
+            except OSError:
+                pass
+        print(f"[telemetry] cleared existing CSVs in: {out_dir}")
 
     # -------- internal CSV helpers -------- #
 
