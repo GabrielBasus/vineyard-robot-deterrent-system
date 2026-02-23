@@ -23,6 +23,8 @@ import streamlit as st
 st.set_page_config(page_title="Vineyard Multi-Robot — Live Monitor",
                    layout="wide")
 
+_CORE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ---------------------------- data loading ---------------------------- #
 
 def _empty_df(cols):
@@ -40,6 +42,16 @@ def _read_csv(path, cols):
     except Exception:
         return _empty_df(cols)
 
+def _resolve_data_dir(raw_dir: str) -> str:
+    d = os.path.expanduser(str(raw_dir))
+    if os.path.isabs(d):
+        return d
+    cwd_candidate = os.path.abspath(d)
+    core_candidate = os.path.abspath(os.path.join(_CORE_DIR, d))
+    if os.path.exists(cwd_candidate):
+        return cwd_candidate
+    return core_candidate
+
 def load_data(data_dir: str):
     poses = _read_csv(os.path.join(data_dir, "robot_poses.csv"),
                       ["t", "rid", "x", "y"])
@@ -50,7 +62,15 @@ def load_data(data_dir: str):
                        "type", "x", "y", "score", "extra"])
     hots  = _read_csv(os.path.join(data_dir, "hotspots.csv"),
                       ["t", "rid", "rank", "x", "y", "score"])
-    return poses, zones, tasks, hots
+    rdiag = _read_csv(
+        os.path.join(data_dir, "robot_diagnostics.csv"),
+        [
+            "t", "rid", "battery", "state", "task",
+            "goal_x", "goal_y", "eff_goal_x", "eff_goal_y",
+            "dist_to_goal", "lane_cur", "lane_tgt", "at_headland",
+        ],
+    )
+    return poses, zones, tasks, hots, rdiag
 
 def parse_poly(s: str | float | None):
     if not isinstance(s, str) or not s:
@@ -92,7 +112,7 @@ def active_tasks_df(tasks: pd.DataFrame) -> pd.DataFrame:
     active = last[~last["event"].isin(["complete", "cancel"])]
     return active.sort_values("t", ascending=False)
 
-def make_map(zones, poses, tasks, hots):
+def make_map(zones, poses, tasks, hots, rdiag):
     xmin, xmax, ymin, ymax = world_bounds(zones, poses)
     fig = go.Figure()
 
@@ -114,10 +134,17 @@ def make_map(zones, poses, tasks, hots):
     # robot positions (latest per rid)
     if not poses.empty:
         last_pose = poses.sort_values("t").groupby("rid").tail(1)
+        labels = last_pose["rid"].astype(str)
+        if not rdiag.empty:
+            last_diag = rdiag.sort_values("t").groupby("rid").tail(1).set_index("rid")
+            labels = [
+                f"{rid} ({last_diag.loc[rid, 'state']})" if rid in last_diag.index else rid
+                for rid in last_pose["rid"].astype(str).tolist()
+            ]
         fig.add_trace(go.Scatter(
             x=last_pose["x"], y=last_pose["y"],
             mode="markers+text",
-            text=last_pose["rid"],
+            text=labels,
             textposition="top center",
             marker=dict(size=10),
             name="robots"
@@ -156,16 +183,35 @@ def make_map(zones, poses, tasks, hots):
 
 st.title("🍇 Vineyard Multi-Robot — Live Monitor")
 
-data_dir = st.sidebar.text_input("Telemetry folder", value="telemetry_live")
+data_dir_input = st.sidebar.text_input("Telemetry folder", value="telemetry_live")
+data_dir = _resolve_data_dir(data_dir_input)
 refresh_ms = st.sidebar.slider("Refresh every (ms)", 200, 3000, 800, 50)
+target_sim_s = st.sidebar.number_input("Target sim time (s)", min_value=1, value=24 * 3600, step=60)
+st.sidebar.caption(f"Resolved path: {data_dir}")
 
 col_map, col_tasks = st.columns([2, 1], gap="large")
 
-poses, zones, tasks, hots = load_data(data_dir)
+poses, zones, tasks, hots, rdiag = load_data(data_dir)
+
+# Simulation progress bar (based on latest telemetry timestamp).
+t_candidates = []
+if not poses.empty:
+    t_candidates.append(float(poses["t"].max()))
+if not tasks.empty:
+    t_candidates.append(float(tasks["t"].max()))
+if not hots.empty:
+    t_candidates.append(float(hots["t"].max()))
+if not rdiag.empty:
+    t_candidates.append(float(rdiag["t"].max()))
+latest_t = max(t_candidates) if t_candidates else 0.0
+progress = min(max(latest_t / float(target_sim_s), 0.0), 1.0)
+st.sidebar.markdown("### Simulation Progress")
+st.sidebar.progress(progress)
+st.sidebar.caption(f"{latest_t:.0f}s / {float(target_sim_s):.0f}s ({progress*100:.1f}%)")
 
 with col_map:
     st.subheader("Live Map")
-    fig = make_map(zones, poses, tasks, hots)
+    fig = make_map(zones, poses, tasks, hots, rdiag)
     st.plotly_chart(fig, use_container_width=True)
 
 with col_tasks:
@@ -179,6 +225,23 @@ with col_tasks:
         )
     else:
         st.write("No active tasks.")
+
+st.subheader("Robot diagnostics")
+if not rdiag.empty:
+    latest_diag = rdiag.sort_values("t").groupby("rid").tail(1)
+    st.dataframe(
+        latest_diag[
+            [
+                "t", "rid", "battery", "state", "task", "dist_to_goal",
+                "goal_x", "goal_y", "eff_goal_x", "eff_goal_y",
+                "lane_cur", "lane_tgt", "at_headland",
+            ]
+        ].sort_values("rid"),
+        use_container_width=True,
+        height=280,
+    )
+else:
+    st.caption("No robot diagnostics yet. Make sure simulation calls mon.robot_diag(...).")
 
 st.sidebar.markdown("---")
 st.sidebar.caption("Dashboard auto-refreshes based on your slider.")
