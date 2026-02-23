@@ -22,8 +22,9 @@ It implements an intervention-aware spatiotemporal intensity model, decentralize
   - Live telemetry CSV output
   - Streamlit dashboard with map/tasks/robot diagnostics
 - **Experiment scripts**
-  - `run_24h_experiment.py` (sequential sweep + thesis summary outputs)
-  - `run_24h_experiment_parallel.py` (multiprocessing sweep)
+  - `run_24h_experiment.py` (sequential 24h sweep, headless, thesis summary outputs)
+  - `run_24h_experiment_parallel.py` (multiprocessing 24h sweep, headless, faster)
+  - `demo_optimal_proposed.py` (single-file visual demo using best proposed config)
 
 ## Quick Start
 
@@ -45,6 +46,18 @@ Run faster parallel sweep:
 python run_24h_experiment_parallel.py --profile fast --max-workers 12
 ```
 
+Run a visual demo of the best proposed configuration (from summary CSV):
+
+```powershell
+python demo_optimal_proposed.py
+```
+
+Save demo as video:
+
+```powershell
+python demo_optimal_proposed.py --duration-s 1800 --fps 10 --save-path demo.mp4
+```
+
 Launch live dashboard (if telemetry is being flushed by a running sim):
 
 ```powershell
@@ -59,9 +72,15 @@ Typical experiment outputs include:
 - per-run metrics CSVs
 - experiment manifest CSVs (parameter traceability)
 - thesis summary CSV/Markdown (sequential script)
+- profile-specific parallel outputs (`*_parallel_fast.csv`, `*_parallel_final.csv`)
 
 ## Experiments Documentation
 
 Detailed instructions for experiment workflows and CLI options are in:
 
 - `EXPERIMENTS.md`
+
+## Notes on Visualization vs Batch Runs
+
+- `run_24h_experiment.py` and `run_24h_experiment_parallel.py` are configured for **headless batch data collection** (no visualization).
+- `demo_optimal_proposed.py` is intended for **visual presentation/demo** of a selected best proposed configuration.

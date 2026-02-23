@@ -3,7 +3,7 @@ from itertools import product
 
 import pandas as pd
 
-from DeterrentSystem import run_baseline_suite
+import DeterrentSystem as ds
 
 
 def _mode_pack(scale_beta=1.0, scale_cost=1.0):
@@ -54,6 +54,10 @@ def _flatten_run_metrics(result, seed_start, exp_id, scenario_id, tune_id):
 
 
 def main():
+    # Force headless 24h batch mode (no live telemetry/visualization side effects).
+    if getattr(ds, "mon", None) is not None:
+        ds.mon.enabled = False
+
     # --------------------- 24h base simulation params --------------------- #
     num_runs = 12
     seed_start = 1000
@@ -144,7 +148,7 @@ def main():
             run_kwargs.update({k: v for k, v in s.items() if k != "scenario_id"})
             run_kwargs.update({k: v for k, v in t.items() if k not in {"tune_id", "tune_beta_scale", "tune_cost_scale"}})
 
-            result = run_baseline_suite(
+            result = ds.run_baseline_suite(
                 num_runs=num_runs,
                 seed_start=seed_start,
                 report_each_run=True,

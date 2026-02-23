@@ -9,7 +9,7 @@ import time
 
 import pandas as pd
 
-from DeterrentSystem import run_baseline_suite
+import DeterrentSystem as ds
 
 
 def _mode_pack(scale_beta=1.0, scale_cost=1.0):
@@ -59,6 +59,10 @@ def _flatten_run_metrics(result, seed_start, exp_id, scenario_id, tune_id):
 
 
 def _run_one_experiment(job):
+    # Worker-side headless mode.
+    if getattr(ds, "mon", None) is not None:
+        ds.mon.enabled = False
+
     exp_tag = job["exp_tag"]
     scenario_id = job["scenario_id"]
     tune_id = job["tune_id"]
@@ -67,7 +71,7 @@ def _run_one_experiment(job):
     run_kwargs = deepcopy(job["run_kwargs"])
     started = time.time()
 
-    result = run_baseline_suite(
+    result = ds.run_baseline_suite(
         num_runs=num_runs,
         seed_start=seed_start,
         report_each_run=False,
