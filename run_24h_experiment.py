@@ -188,10 +188,100 @@ def main():
     runs_df.to_csv(per_run_csv, index=False)
     manifest_df.to_csv(manifest_csv, index=False)
 
+    # --------------------- Final thesis-ready combined summary --------------------- #
+    # Build a single table that combines comparison stats with run-level counts
+    # and adds easy-to-read ranking fields.
+    summary_df = comparison_df.copy()
+    if not runs_df.empty:
+        run_counts = (
+            runs_df.groupby(["exp_id", "scenario_id", "tune_id", "baseline"], as_index=False)
+            .agg(
+                n_runs=("run_idx", "nunique"),
+                n_samples_response=("response_samples", "sum"),
+                mean_completed_tasks=("completed_tasks_total", "mean"),
+                mean_travel_ugv=("travel_distance_ugv", "mean"),
+                mean_energy_ugv=("energy_ugv", "mean"),
+            )
+        )
+        summary_df = summary_df.merge(
+            run_counts,
+            on=["exp_id", "scenario_id", "tune_id", "baseline"],
+            how="left",
+        )
+
+    # Within each experiment setting, rank baselines by key objectives.
+    summary_df["rank_exposure"] = (
+        summary_df.groupby(["exp_id"])["value_weighted_exposure_mean"].rank(method="min", ascending=True).astype(int)
+    )
+    summary_df["rank_response"] = (
+        summary_df.groupby(["exp_id"])["mean_response_time_s_mean"].rank(method="min", ascending=True).astype(int)
+    )
+    summary_df["rank_task_eff"] = (
+        summary_df.groupby(["exp_id"])["tasks_per_unit_distance_mean"].rank(method="min", ascending=False).astype(int)
+    )
+    summary_df["rank_comm"] = (
+        summary_df.groupby(["exp_id"])["boundary_message_count_mean"].rank(method="min", ascending=True).astype(int)
+    )
+
+    summary_df["composite_rank_score"] = (
+        summary_df["rank_exposure"]
+        + summary_df["rank_response"]
+        + summary_df["rank_task_eff"]
+        + summary_df["rank_comm"]
+    )
+    summary_df["rank_overall"] = (
+        summary_df.groupby(["exp_id"])["composite_rank_score"].rank(method="min", ascending=True).astype(int)
+    )
+
+    final_summary_csv = "thesis_summary_24h_sweep.csv"
+    summary_df = summary_df.sort_values(["exp_id", "rank_overall", "baseline"]).reset_index(drop=True)
+    summary_df.to_csv(final_summary_csv, index=False)
+
+    # Also emit a concise markdown report for thesis meetings.
+    final_summary_md = "thesis_summary_24h_sweep.md"
+    lines = []
+    lines.append("# 24h Experiment Sweep Summary")
+    lines.append("")
+    lines.append(f"- Total settings: {len(scenario_grid) * len(tune_grid)}")
+    lines.append(f"- Runs per setting (per baseline): {num_runs}")
+    lines.append("")
+    lines.append("## Best baseline per experiment setting")
+    lines.append("")
+    if not summary_df.empty:
+        winners = summary_df[summary_df["rank_overall"] == 1].copy()
+        winners = winners[
+            [
+                "exp_id",
+                "scenario_id",
+                "tune_id",
+                "baseline",
+                "value_weighted_exposure_mean",
+                "mean_response_time_s_mean",
+                "tasks_per_unit_distance_mean",
+                "boundary_message_count_mean",
+                "composite_rank_score",
+            ]
+        ]
+        lines.append(winners.to_markdown(index=False))
+    else:
+        lines.append("_No data available._")
+    lines.append("")
+    lines.append("## Output files")
+    lines.append("")
+    lines.append(f"- `{comparison_csv}`: baseline-level mean/variance per setting")
+    lines.append(f"- `{per_run_csv}`: per-run metrics")
+    lines.append(f"- `{manifest_csv}`: full parameter manifest")
+    lines.append(f"- `{final_summary_csv}`: combined thesis-ready summary table")
+
+    with open(final_summary_md, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
     print("\nSaved files:")
     print(f"- {comparison_csv} (baseline summary for each scenario/tuning)")
     print(f"- {per_run_csv} (per-run metrics for each scenario/tuning)")
     print(f"- {manifest_csv} (full parameter manifest)")
+    print(f"- {final_summary_csv} (combined thesis-ready summary table)")
+    print(f"- {final_summary_md} (readable summary report)")
     print(f"\nTotal experiment settings: {len(scenario_grid) * len(tune_grid)}")
 
 
