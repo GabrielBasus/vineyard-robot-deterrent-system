@@ -87,6 +87,29 @@ Most important plots to review:
 - `results/winner_count_by_baseline.png` (who wins across settings)
 - `results/mean_rank_heatmap.png` (ranking stability by scenario)
 
+### Key Plots
+
+Value-weighted exposure (primary metric):
+
+![Value-weighted exposure boxplot](results/boxplot_exposure.png)
+
+Response time distribution:
+
+![Response time boxplot](results/boxplot_response_time.png)
+
+Task efficiency distribution:
+
+![Task efficiency boxplot](results/boxplot_task_efficiency.png)
+
+Exposure vs response tradeoff (nominal scenario):
+
+![Exposure-response tradeoff](results/tradeoff_exposure_vs_response_S2_nominal.png)
+
+Win count and ranking stability:
+
+![Winner count by baseline](results/winner_count_by_baseline.png)
+![Mean rank heatmap](results/mean_rank_heatmap.png)
+
 You can also open the generated summary tables:
 
 - `thesis_summary_24h_sweep.csv` / `thesis_summary_24h_sweep.md` (sequential)
