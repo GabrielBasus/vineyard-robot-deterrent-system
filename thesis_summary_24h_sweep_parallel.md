@@ -1,0 +1,113 @@
+# 24h Parallel Experiment Sweep Summary
+
+- Profile: final
+- Total settings: 72
+- Runs per setting (per baseline): 12
+
+## Best baseline per experiment setting
+
+| exp_id   | scenario_id                 | tune_id   | baseline        |   value_weighted_exposure_mean |   mean_response_time_s_mean |   tasks_per_unit_distance_mean |   boundary_message_count_mean |   composite_rank_score |
+|:---------|:----------------------------|:----------|:----------------|-------------------------------:|----------------------------:|-------------------------------:|------------------------------:|-----------------------:|
+| E001     | S1_low_pressure_short_range | T01       | prediction_only |                        75911.8 |                     202.147 |                     0.0235711  |                       629.5   |                      7 |
+| E002     | S1_low_pressure_short_range | T02       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      6 |
+| E003     | S1_low_pressure_short_range | T03       | prediction_only |                        76042.2 |                     204.778 |                     0.0234427  |                       655.333 |                      8 |
+| E003     | S1_low_pressure_short_range | T03       | proposed        |                        76145.3 |                     200.012 |                     0.0235965  |                      1291     |                      8 |
+| E003     | S1_low_pressure_short_range | T03       | reactive        |                        76035.7 |                     104.846 |                     0.00807443 |                      1673.25  |                      8 |
+| E004     | S1_low_pressure_short_range | T04       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      6 |
+| E005     | S1_low_pressure_short_range | T05       | prediction_only |                        76022.8 |                     203.143 |                     0.0236088  |                       633.917 |                      6 |
+| E006     | S1_low_pressure_short_range | T06       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      6 |
+| E007     | S1_low_pressure_short_range | T07       | prediction_only |                        76071.7 |                     202.109 |                     0.0238354  |                       655.333 |                      7 |
+| E008     | S1_low_pressure_short_range | T08       | prediction_only |                        76045.8 |                     207.303 |                     0.0184325  |                       627.083 |                      7 |
+| E008     | S1_low_pressure_short_range | T08       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      7 |
+| E009     | S1_low_pressure_short_range | T09       | prediction_only |                        75637.6 |                     203.785 |                     0.0235307  |                       662.917 |                      7 |
+| E010     | S1_low_pressure_short_range | T10       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      6 |
+| E011     | S1_low_pressure_short_range | T11       | prediction_only |                        75731.9 |                     204.551 |                     0.0235116  |                       627.833 |                      7 |
+| E012     | S1_low_pressure_short_range | T12       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      6 |
+| E013     | S1_low_pressure_short_range | T13       | prediction_only |                        76017.5 |                     202.23  |                     0.02353    |                       638     |                      7 |
+| E014     | S1_low_pressure_short_range | T14       | prediction_only |                        75987.1 |                     203.543 |                     0.0183356  |                       639.75  |                      7 |
+| E014     | S1_low_pressure_short_range | T14       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      7 |
+| E015     | S1_low_pressure_short_range | T15       | prediction_only |                        75819.9 |                     203.544 |                     0.0235817  |                       678     |                      7 |
+| E016     | S1_low_pressure_short_range | T16       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      6 |
+| E017     | S1_low_pressure_short_range | T17       | prediction_only |                        75867.8 |                     200.115 |                     0.0236942  |                       658.083 |                      6 |
+| E018     | S1_low_pressure_short_range | T18       | prediction_only |                        75924.8 |                     206.207 |                     0.0183809  |                       629.25  |                      7 |
+| E018     | S1_low_pressure_short_range | T18       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      7 |
+| E019     | S1_low_pressure_short_range | T19       | prediction_only |                        75930.4 |                     202.326 |                     0.0237683  |                       622.25  |                      6 |
+| E020     | S1_low_pressure_short_range | T20       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      6 |
+| E021     | S1_low_pressure_short_range | T21       | prediction_only |                        76056.2 |                     206.567 |                     0.0235569  |                       658.25  |                      8 |
+| E021     | S1_low_pressure_short_range | T21       | proposed        |                        76145.3 |                     200.012 |                     0.0235965  |                      1291     |                      8 |
+| E021     | S1_low_pressure_short_range | T21       | reactive        |                        76035.7 |                     104.846 |                     0.00807443 |                      1673.25  |                      8 |
+| E022     | S1_low_pressure_short_range | T22       | prediction_only |                        75948.9 |                     206.371 |                     0.018424   |                       631.667 |                      7 |
+| E022     | S1_low_pressure_short_range | T22       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      7 |
+| E023     | S1_low_pressure_short_range | T23       | prediction_only |                        75893.9 |                     204.183 |                     0.0235538  |                       655.25  |                      7 |
+| E024     | S1_low_pressure_short_range | T24       | proposed        |                        75972.7 |                     204.444 |                     0.0184273  |                      1306.5   |                      6 |
+| E025     | S2_nominal                  | T01       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E026     | S2_nominal                  | T02       | proposed        |                       142829   |                     303.953 |                     0.0141793  |                      4576.92  |                      7 |
+| E027     | S2_nominal                  | T03       | proposed        |                       143336   |                     291.874 |                     0.0180422  |                      4452.08  |                      7 |
+| E028     | S2_nominal                  | T04       | proposed        |                       143157   |                     302.983 |                     0.0142715  |                      4614.75  |                      7 |
+| E029     | S2_nominal                  | T05       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E030     | S2_nominal                  | T06       | prediction_only |                       143630   |                     309.099 |                     0.0141971  |                      2623.5   |                      8 |
+| E030     | S2_nominal                  | T06       | proposed        |                       143352   |                     303.299 |                     0.0141887  |                      4606     |                      8 |
+| E030     | S2_nominal                  | T06       | reactive        |                       143353   |                     123.744 |                     0.00975597 |                      3948.92  |                      8 |
+| E031     | S2_nominal                  | T07       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E032     | S2_nominal                  | T08       | reactive        |                       143353   |                     123.744 |                     0.00975597 |                      3948.92  |                      7 |
+| E033     | S2_nominal                  | T09       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E034     | S2_nominal                  | T10       | proposed        |                       143223   |                     304.43  |                     0.0142803  |                      4585.92  |                      7 |
+| E035     | S2_nominal                  | T11       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E036     | S2_nominal                  | T12       | proposed        |                       143343   |                     307.081 |                     0.0142449  |                      4693     |                      7 |
+| E037     | S2_nominal                  | T13       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E038     | S2_nominal                  | T14       | reactive        |                       143353   |                     123.744 |                     0.00975597 |                      3948.92  |                      7 |
+| E039     | S2_nominal                  | T15       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E040     | S2_nominal                  | T16       | proposed        |                       143161   |                     305.665 |                     0.0142495  |                      4393.25  |                      7 |
+| E041     | S2_nominal                  | T17       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E042     | S2_nominal                  | T18       | prediction_only |                       143302   |                     317.318 |                     0.0140677  |                      2683.5   |                      7 |
+| E043     | S2_nominal                  | T19       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E044     | S2_nominal                  | T20       | proposed        |                       143129   |                     302.518 |                     0.0142695  |                      4450.25  |                      7 |
+| E045     | S2_nominal                  | T21       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E046     | S2_nominal                  | T22       | prediction_only |                       143563   |                     305.254 |                     0.0143598  |                      2714     |                      8 |
+| E046     | S2_nominal                  | T22       | proposed        |                       143194   |                     300.819 |                     0.0141802  |                      4537.75  |                      8 |
+| E046     | S2_nominal                  | T22       | reactive        |                       143353   |                     123.744 |                     0.00975597 |                      3948.92  |                      8 |
+| E047     | S2_nominal                  | T23       | reactive        |                       143440   |                     121.185 |                     0.00911622 |                      3894.75  |                      7 |
+| E048     | S2_nominal                  | T24       | proposed        |                       143255   |                     300.712 |                     0.0142973  |                      4490.42  |                      7 |
+| E049     | S3_high_pressure_long_range | T01       | prediction_only |                       347452   |                     378.475 |                     0.0136218  |                      9856.25  |                      8 |
+| E049     | S3_high_pressure_long_range | T01       | proposed        |                       347293   |                     357.26  |                     0.0129057  |                     10226.8   |                      8 |
+| E049     | S3_high_pressure_long_range | T01       | reactive        |                       339904   |                     534.66  |                     0.00984781 |                      9770.17  |                      8 |
+| E050     | S3_high_pressure_long_range | T02       | prediction_only |                       347346   |                     427.925 |                     0.0134009  |                      9399.42  |                      6 |
+| E051     | S3_high_pressure_long_range | T03       | prediction_only |                       348199   |                     375.726 |                     0.0134784  |                      9975.17  |                      8 |
+| E051     | S3_high_pressure_long_range | T03       | proposed        |                       347686   |                     363.738 |                     0.0124891  |                     10046.7   |                      8 |
+| E051     | S3_high_pressure_long_range | T03       | reactive        |                       339904   |                     534.66  |                     0.00984781 |                      9770.17  |                      8 |
+| E052     | S3_high_pressure_long_range | T04       | prediction_only |                       346803   |                     436.705 |                     0.0133843  |                      9285.5   |                      7 |
+| E053     | S3_high_pressure_long_range | T05       | prediction_only |                       346822   |                     381.423 |                     0.0136854  |                      9020.5   |                      6 |
+| E054     | S3_high_pressure_long_range | T06       | prediction_only |                       347103   |                     432.79  |                     0.0130941  |                      9158.17  |                      6 |
+| E055     | S3_high_pressure_long_range | T07       | prediction_only |                       347273   |                     379.982 |                     0.0140761  |                     10281     |                      8 |
+| E055     | S3_high_pressure_long_range | T07       | proposed        |                       348385   |                     359.179 |                     0.0123996  |                     10261     |                      8 |
+| E055     | S3_high_pressure_long_range | T07       | reactive        |                       339904   |                     534.66  |                     0.00984781 |                      9770.17  |                      8 |
+| E056     | S3_high_pressure_long_range | T08       | prediction_only |                       345765   |                     436.246 |                     0.0131934  |                     10148.4   |                      7 |
+| E057     | S3_high_pressure_long_range | T09       | prediction_only |                       348198   |                     374.762 |                     0.0135599  |                      9898     |                      8 |
+| E057     | S3_high_pressure_long_range | T09       | proposed        |                       347548   |                     365.804 |                     0.0124998  |                     10393.2   |                      8 |
+| E057     | S3_high_pressure_long_range | T09       | reactive        |                       339904   |                     534.66  |                     0.00984781 |                      9770.17  |                      8 |
+| E058     | S3_high_pressure_long_range | T10       | prediction_only |                       346194   |                     435.876 |                     0.0132856  |                      8824.17  |                      7 |
+| E059     | S3_high_pressure_long_range | T11       | prediction_only |                       348113   |                     377.041 |                     0.0133516  |                     10212.9   |                      8 |
+| E059     | S3_high_pressure_long_range | T11       | proposed        |                       347831   |                     365.924 |                     0.0123082  |                     10257.8   |                      8 |
+| E059     | S3_high_pressure_long_range | T11       | reactive        |                       339904   |                     534.66  |                     0.00984781 |                      9770.17  |                      8 |
+| E060     | S3_high_pressure_long_range | T12       | prediction_only |                       346442   |                     432.337 |                     0.0128226  |                      8804.42  |                      7 |
+| E061     | S3_high_pressure_long_range | T13       | prediction_only |                       347902   |                     381.124 |                     0.0133378  |                      9477.5   |                      7 |
+| E062     | S3_high_pressure_long_range | T14       | prediction_only |                       347322   |                     432.567 |                     0.0129406  |                      9361.42  |                      6 |
+| E063     | S3_high_pressure_long_range | T15       | prediction_only |                       347391   |                     378.19  |                     0.0127698  |                      9725.17  |                      7 |
+| E064     | S3_high_pressure_long_range | T16       | prediction_only |                       345849   |                     434.971 |                     0.013394   |                      9186.25  |                      6 |
+| E065     | S3_high_pressure_long_range | T17       | prediction_only |                       347560   |                     372.925 |                     0.0129583  |                      8980.25  |                      6 |
+| E066     | S3_high_pressure_long_range | T18       | prediction_only |                       347828   |                     439.277 |                     0.0127132  |                      9093.17  |                      7 |
+| E067     | S3_high_pressure_long_range | T19       | proposed        |                       347936   |                     369.633 |                     0.0126736  |                      9530.83  |                      7 |
+| E068     | S3_high_pressure_long_range | T20       | prediction_only |                       346422   |                     429.028 |                     0.0130461  |                      9467.08  |                      7 |
+| E069     | S3_high_pressure_long_range | T21       | prediction_only |                       346888   |                     376.216 |                     0.0140891  |                      9400.08  |                      6 |
+| E070     | S3_high_pressure_long_range | T22       | prediction_only |                       345647   |                     432.235 |                     0.0136469  |                      9490.58  |                      7 |
+| E071     | S3_high_pressure_long_range | T23       | prediction_only |                       347521   |                     375.296 |                     0.0135837  |                      9963.08  |                      8 |
+| E071     | S3_high_pressure_long_range | T23       | proposed        |                       347583   |                     368.055 |                     0.0124482  |                      9904.5   |                      8 |
+| E071     | S3_high_pressure_long_range | T23       | reactive        |                       339904   |                     534.66  |                     0.00984781 |                      9770.17  |                      8 |
+| E072     | S3_high_pressure_long_range | T24       | prediction_only |                       346158   |                     442.325 |                     0.0131539  |                      9408.83  |                      7 |
+
+## Output files
+
+- `baseline_comparison_24h_sweep_parallel.csv`: baseline-level mean/variance per setting
+- `baseline_runs_24h_sweep_parallel.csv`: per-run metrics
+- `experiment_manifest_24h_sweep_parallel.csv`: full parameter manifest
+- `thesis_summary_24h_sweep_parallel.csv`: combined thesis-ready summary table

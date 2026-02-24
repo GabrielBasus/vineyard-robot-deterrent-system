@@ -67,13 +67,22 @@ python run_24h_experiment_parallel.py --profile fast --limit-settings 4 --num-ru
 - `--ny <int>`
 - `--limit-settings <int>`
 
-Parallel outputs (suffix depends on profile):
+Parallel outputs:
 
-- `baseline_comparison_24h_sweep_parallel_fast.csv` or `_final.csv`
-- `baseline_runs_24h_sweep_parallel_fast.csv` or `_final.csv`
-- `experiment_manifest_24h_sweep_parallel_fast.csv` or `_final.csv`
+- Fast profile (`--profile fast`)
+  - `baseline_comparison_24h_sweep_parallel_fast.csv`
+  - `baseline_runs_24h_sweep_parallel_fast.csv`
+  - `experiment_manifest_24h_sweep_parallel_fast.csv`
+  - `thesis_summary_24h_sweep_parallel_fast.csv`
+  - `thesis_summary_24h_sweep_parallel_fast.md`
+- Final profile (`--profile final`, default)
+  - `baseline_comparison_24h_sweep_parallel.csv`
+  - `baseline_runs_24h_sweep_parallel.csv`
+  - `experiment_manifest_24h_sweep_parallel.csv`
+  - `thesis_summary_24h_sweep_parallel.csv`
+  - `thesis_summary_24h_sweep_parallel.md`
 
-## Suggested Thesis Workflow
+## Running Suggestion
 
 1. Run fast profile to identify promising parameter regions.
 2. Run final profile for selected settings (or full final sweep).
@@ -81,13 +90,7 @@ Parallel outputs (suffix depends on profile):
    - per-run metrics from `baseline_runs...csv`
    - mean/variance comparisons from `baseline_comparison...csv`
    - experiment configuration traceability from `experiment_manifest...csv`
-   - final meeting-ready summary from `thesis_summary_24h_sweep.*` (sequential run)
-
-## Performance Notes (i9-13900HX)
-
-- Start with `--max-workers 8`, then test `12`.
-- If system becomes memory/CPU saturated, reduce worker count.
-- Keep visualization tools (animation/Streamlit) off during large sweeps.
+   - final meeting-ready summary from `thesis_summary_24h_sweep.*` (sequential) or `thesis_summary_24h_sweep_parallel.*` (parallel)
 
 ## Reproducibility
 

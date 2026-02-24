@@ -3,8 +3,7 @@ __pycache__/
 *.pyc
 
 # Telemetry output folders
-telemetry_live/
-telemetry_out/
+telemetry*
 
 Backup/
 Spatio-Temporal-Point-Process-Simulator/

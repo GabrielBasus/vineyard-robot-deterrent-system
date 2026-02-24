@@ -175,7 +175,7 @@ def _build_grids(profile: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Parallel 24h experiment sweep")
-    parser.add_argument("--profile", choices=["fast", "final"], default="fast")
+    parser.add_argument("--profile", choices=["fast", "final"], default="final")
     parser.add_argument("--max-workers", type=int, default=0, help="0 => auto")
     parser.add_argument("--num-runs", type=int, default=0, help="0 => profile default")
     parser.add_argument("--seed-start", type=int, default=1000)
@@ -271,7 +271,7 @@ def main():
     runs_df = pd.DataFrame(run_rows)
     manifest_df = pd.DataFrame(manifest_rows)
 
-    suffix = f"_{args.profile}"
+    suffix = "_fast" if args.profile == "fast" else ""
     comparison_csv = f"baseline_comparison_24h_sweep_parallel{suffix}.csv"
     per_run_csv = f"baseline_runs_24h_sweep_parallel{suffix}.csv"
     manifest_csv = f"experiment_manifest_24h_sweep_parallel{suffix}.csv"
@@ -279,10 +279,95 @@ def main():
     runs_df.to_csv(per_run_csv, index=False)
     manifest_df.to_csv(manifest_csv, index=False)
 
+    # Match sequential pipeline: produce a combined summary + markdown report.
+    summary_df = comparison_df.copy()
+    if not runs_df.empty:
+        run_counts = (
+            runs_df.groupby(["exp_id", "scenario_id", "tune_id", "baseline"], as_index=False)
+            .agg(
+                n_runs=("run_idx", "nunique"),
+                n_samples_response=("response_samples", "sum"),
+                mean_completed_tasks=("completed_tasks_total", "mean"),
+                mean_travel_ugv=("travel_distance_ugv", "mean"),
+                mean_energy_ugv=("energy_ugv", "mean"),
+            )
+        )
+        summary_df = summary_df.merge(
+            run_counts,
+            on=["exp_id", "scenario_id", "tune_id", "baseline"],
+            how="left",
+        )
+
+    summary_df["rank_exposure"] = (
+        summary_df.groupby(["exp_id"])["value_weighted_exposure_mean"].rank(method="min", ascending=True).astype(int)
+    )
+    summary_df["rank_response"] = (
+        summary_df.groupby(["exp_id"])["mean_response_time_s_mean"].rank(method="min", ascending=True).astype(int)
+    )
+    summary_df["rank_task_eff"] = (
+        summary_df.groupby(["exp_id"])["tasks_per_unit_distance_mean"].rank(method="min", ascending=False).astype(int)
+    )
+    summary_df["rank_comm"] = (
+        summary_df.groupby(["exp_id"])["boundary_message_count_mean"].rank(method="min", ascending=True).astype(int)
+    )
+    summary_df["composite_rank_score"] = (
+        summary_df["rank_exposure"]
+        + summary_df["rank_response"]
+        + summary_df["rank_task_eff"]
+        + summary_df["rank_comm"]
+    )
+    summary_df["rank_overall"] = (
+        summary_df.groupby(["exp_id"])["composite_rank_score"].rank(method="min", ascending=True).astype(int)
+    )
+
+    final_summary_csv = f"thesis_summary_24h_sweep_parallel{suffix}.csv"
+    final_summary_md = f"thesis_summary_24h_sweep_parallel{suffix}.md"
+    summary_df = summary_df.sort_values(["exp_id", "rank_overall", "baseline"]).reset_index(drop=True)
+    summary_df.to_csv(final_summary_csv, index=False)
+
+    lines = []
+    lines.append("# 24h Parallel Experiment Sweep Summary")
+    lines.append("")
+    lines.append(f"- Profile: {args.profile}")
+    lines.append(f"- Total settings: {len(jobs)}")
+    lines.append(f"- Runs per setting (per baseline): {num_runs}")
+    lines.append("")
+    lines.append("## Best baseline per experiment setting")
+    lines.append("")
+    if not summary_df.empty:
+        winners = summary_df[summary_df["rank_overall"] == 1].copy()
+        winners = winners[
+            [
+                "exp_id",
+                "scenario_id",
+                "tune_id",
+                "baseline",
+                "value_weighted_exposure_mean",
+                "mean_response_time_s_mean",
+                "tasks_per_unit_distance_mean",
+                "boundary_message_count_mean",
+                "composite_rank_score",
+            ]
+        ]
+        lines.append(winners.to_markdown(index=False))
+    else:
+        lines.append("_No data available._")
+    lines.append("")
+    lines.append("## Output files")
+    lines.append("")
+    lines.append(f"- `{comparison_csv}`: baseline-level mean/variance per setting")
+    lines.append(f"- `{per_run_csv}`: per-run metrics")
+    lines.append(f"- `{manifest_csv}`: full parameter manifest")
+    lines.append(f"- `{final_summary_csv}`: combined thesis-ready summary table")
+    with open(final_summary_md, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
     print("\nSaved files:")
     print(f"- {comparison_csv}")
     print(f"- {per_run_csv}")
     print(f"- {manifest_csv}")
+    print(f"- {final_summary_csv}")
+    print(f"- {final_summary_md}")
     print(f"Wall time: {time.time() - started:.1f}s")
 
 
