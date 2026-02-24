@@ -74,6 +74,24 @@ Typical experiment outputs include:
 - thesis summary CSV/Markdown (sequential script)
 - profile-specific parallel outputs (`*_parallel_fast.csv`, `*_parallel_final.csv`)
 
+## Results Snapshot
+
+After running experiments and plotting (`python plot_experiment_results.py`), key figures are saved in `results/`.
+
+Most important plots to review:
+
+- `results/boxplot_exposure.png` (primary outcome: value-weighted exposure)
+- `results/boxplot_response_time.png` (responsiveness)
+- `results/boxplot_task_efficiency.png` (task efficiency)
+- `results/tradeoff_exposure_vs_response_S2_nominal.png` (core tradeoff view)
+- `results/winner_count_by_baseline.png` (who wins across settings)
+- `results/mean_rank_heatmap.png` (ranking stability by scenario)
+
+You can also open the generated summary tables:
+
+- `thesis_summary_24h_sweep.csv` / `thesis_summary_24h_sweep.md` (sequential)
+- `thesis_summary_24h_sweep_parallel.csv` / `thesis_summary_24h_sweep_parallel.md` (parallel)
+
 ## Experiments Documentation
 
 Detailed instructions for experiment workflows and CLI options are in:
