@@ -15,4 +15,5 @@ Spatio-Temporal-Point-Process-Simulator/
 
 # IDE files
 .vscode/
-.idea/
+.idea/# Local virtual environment
+.venv/

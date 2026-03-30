@@ -48,6 +48,11 @@ def _flatten_run_metrics(result, seed_start, exp_id, scenario_id, tune_id):
                     "energy_uav": float(energy_by_type.get("UAV", float("nan"))),
                     "boundary_message_count": int(m.get("boundary_message_count", 0)),
                     "boundary_bytes_sent": int(m.get("boundary_bytes_sent", 0)),
+                    "forecast_recall_at_k": float(m.get("forecast_recall_at_k", float("nan"))),
+                    "forecast_precision_at_k": float(m.get("forecast_precision_at_k", float("nan"))),
+                    "forecast_hotspot_hit_rate": float(m.get("forecast_hotspot_hit_rate", float("nan"))),
+                    "forecast_lead_time_s": float(m.get("forecast_lead_time_s", float("nan"))),
+                    "forecast_samples": int(m.get("forecast_samples", 0)),
                 }
             )
     return rows

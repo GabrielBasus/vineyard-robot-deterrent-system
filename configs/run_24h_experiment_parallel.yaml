@@ -1,0 +1,21 @@
+runner:
+  profile: fast
+  max_workers: 0
+  num_runs: 5
+  seed_start: 1000
+  limit_settings: 0
+  scenario_scope: s23
+  time_metrics_period_s: 900.0
+
+simulation:
+  dt: 5.0
+  nx: 80
+  ny: 64
+  time_horizons_h: [24]
+
+sweep:
+  tune_preset: diagnostic_like
+
+winner:
+  enable_winner_profile: false
+  winner_profile_id: F1

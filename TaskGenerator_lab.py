@@ -1,6 +1,6 @@
-from typing import Dict, List, Mapping
+from typing import Dict, List
 from Robot import Robot
-from ZonePartitioner import polygon_area, polygon_centroid, point_in_polygon, point_to_poly_distance, Point
+from ZonePartitioner import polygon_centroid, point_in_polygon, point_to_poly_distance, Point
 from Robot import RobotProfile
 import math
 import numpy as np
@@ -36,7 +36,7 @@ class TaskGenerator:
         # Per-robot cluster memory for preventive model-scored deterring gates.
         self._deterring_cluster_state: dict[tuple[str, int, int], dict] = {}
         self._last_model_deterring_fire: dict[tuple[str, int, int], dict] = {}
-        self._diag_model_deterring_llr_values: list[float] = []
+        self._debug_patrol_pipeline: dict[str, dict] = {}
         self.diag_counts = {
             "model_deterring_candidates_total": 0,
             "model_deterring_rejected_cooldown": 0,
@@ -58,18 +58,12 @@ class TaskGenerator:
             "model_deterring_pass_sprt": 0,
             "model_deterring_rejected_sprt_pending": 0,
             "model_deterring_rejected_sprt_negative": 0,
-            "model_deterring_rejected_sprt_margin": 0,
             "model_deterring_pass_chance": 0,
             "model_deterring_rejected_chance": 0,
             "model_deterring_pass_utility_ratio": 0,
             "model_deterring_rejected_utility_ratio": 0,
-            "model_deterring_rejected_selection_weight": 0,
             "model_deterring_pass_capacity": 0,
             "model_deterring_rejected_capacity": 0,
-            "model_deterring_cluster_key_total": 0,
-            "model_deterring_cluster_key_reused": 0,
-            "model_deterring_cluster_key_churn": 0,
-            "model_deterring_cluster_key_new": 0,
             "model_deterring_llr_sum": 0.0,
             "model_deterring_llr_samples": 0,
             "model_deterring_llr_max": float("-inf"),
@@ -78,6 +72,174 @@ class TaskGenerator:
             "model_deterring_deltaJ_per_cost_sum": 0.0,
             "model_deterring_deltaJ_per_cost_samples": 0,
         }
+
+    def patrol_debug_snapshot(self) -> dict[str, dict]:
+        return {
+            str(rid): {
+                "local_hotspots_raw": [dict(row) for row in stages.get("local_hotspots_raw", [])],
+                "local_hotspots_score_filtered": [dict(row) for row in stages.get("local_hotspots_score_filtered", [])],
+                "local_hotspots_spaced": [dict(row) for row in stages.get("local_hotspots_spaced", [])],
+                "raw_patrol_candidates": [dict(row) for row in stages.get("raw_patrol_candidates", [])],
+                "score_stats": dict(stages.get("score_stats", {})),
+            }
+            for rid, stages in self._debug_patrol_pipeline.items()
+        }
+
+    def _stable_mc_seed(self, rid: str, now_t: float, salt: int = 0) -> int:
+        seed = 2166136261
+        for ch in str(rid):
+            seed = ((seed ^ ord(ch)) * 16777619) & 0xFFFFFFFF
+        seed = ((seed ^ int(round(float(now_t) * 10.0))) * 16777619) & 0xFFFFFFFF
+        seed = ((seed ^ int(salt)) * 16777619) & 0xFFFFFFFF
+        return int(seed)
+
+    def _rank_field_points(self, field, xs, ys, top_k: int, merge_radius: float, mask_poly=None) -> List[Dict]:
+        arr = np.asarray(field, dtype=float)
+        if arr.size == 0:
+            return []
+        k_short = min(arr.size, max(5 * int(top_k), int(top_k)))
+        flat_idx = np.argpartition(arr.ravel(), -k_short)[-k_short:]
+        flat_sorted = flat_idx[np.argsort(arr.ravel()[flat_idx])[::-1]]
+        picks = []
+        coords = []
+        nx = int(len(xs))
+        for idx in flat_sorted:
+            iy, ix = divmod(int(idx), nx)
+            score = float(arr[iy, ix])
+            if score <= 0.0:
+                continue
+            x = float(xs[ix])
+            y = float(ys[iy])
+            if mask_poly and (not point_in_polygon(x, y, mask_poly)):
+                continue
+            if any((x - px) ** 2 + (y - py) ** 2 <= merge_radius ** 2 for (px, py) in coords):
+                continue
+            coords.append((x, y))
+            picks.append({"x": x, "y": y, "score": score})
+            if len(picks) >= int(top_k):
+                break
+        return picks
+
+    def _monte_carlo_patrol_points(
+        self,
+        *,
+        rob: "Robot",
+        rid: str,
+        now_t: float,
+        hotspot_top_k: int,
+        merge_radius: float,
+        mask_poly,
+        use_excess: bool,
+        horizon_s: float,
+        rollouts: int,
+        max_events_per_rollout: int,
+    ) -> tuple[list[dict], dict]:
+        xs = np.asarray(rob.m.xs, dtype=float)
+        ys = np.asarray(rob.m.ys, dtype=float)
+        area = float(rob.m.dx * rob.m.dy)
+        horizon = max(float(horizon_s), 1e-6)
+        rollouts = max(1, int(rollouts))
+        max_events_per_rollout = max(1, int(max_events_per_rollout))
+        raw_top_k = max(int(hotspot_top_k), 6 * int(hotspot_top_k))
+
+        base_field = np.asarray(rob.m.lam - rob.m.mu if use_excess else rob.m.lam, dtype=float)
+        field = np.clip(base_field, 0.0, None)
+        if mask_poly:
+            mask = np.zeros_like(field, dtype=bool)
+            for iy, wy in enumerate(ys):
+                for ix, wx in enumerate(xs):
+                    if point_in_polygon(float(wx), float(wy), mask_poly):
+                        mask[iy, ix] = True
+            field = np.where(mask, field, 0.0)
+
+        event_mass = field * area * horizon
+        total_mean = float(np.sum(event_mass))
+        positive = np.flatnonzero(event_mass.ravel() > 0.0)
+        meta = {
+            "generation_mode": "monte_carlo",
+            "mc_rollouts": int(rollouts),
+            "mc_horizon_s": float(horizon),
+            "mc_use_excess": bool(use_excess),
+            "mc_total_expected_events": float(total_mean),
+            "mc_total_samples": 0,
+            "mc_nonzero_cells": 0,
+            "mc_fallback_used": False,
+        }
+
+        if positive.size == 0 or total_mean <= 0.0:
+            meta["mc_fallback_used"] = True
+            fallback = self._rank_field_points(
+                field=field,
+                xs=xs,
+                ys=ys,
+                top_k=raw_top_k,
+                merge_radius=float(merge_radius),
+                mask_poly=mask_poly,
+            )
+            return fallback, meta
+
+        probs = event_mass.ravel()[positive].astype(float)
+        probs_sum = float(np.sum(probs))
+        if probs_sum <= 0.0:
+            meta["mc_fallback_used"] = True
+            fallback = self._rank_field_points(
+                field=field,
+                xs=xs,
+                ys=ys,
+                top_k=raw_top_k,
+                merge_radius=float(merge_radius),
+                mask_poly=mask_poly,
+            )
+            return fallback, meta
+        probs /= probs_sum
+
+        rng = np.random.default_rng(
+            self._stable_mc_seed(
+                rid,
+                now_t,
+                salt=(31 * int(hotspot_top_k) + 17 * int(rollouts) + int(use_excess)),
+            )
+        )
+        sample_counts = np.zeros(event_mass.size, dtype=np.int64)
+        total_samples = 0
+        for _ in range(rollouts):
+            n_events = int(rng.poisson(total_mean))
+            n_events = min(n_events, max_events_per_rollout)
+            if n_events <= 0:
+                continue
+            draws = rng.choice(positive, size=n_events, replace=True, p=probs)
+            sample_counts += np.bincount(draws, minlength=event_mass.size)
+            total_samples += n_events
+
+        meta["mc_total_samples"] = int(total_samples)
+        sampled = np.flatnonzero(sample_counts > 0)
+        meta["mc_nonzero_cells"] = int(sampled.size)
+
+        if sampled.size == 0:
+            meta["mc_fallback_used"] = True
+            fallback = self._rank_field_points(
+                field=field,
+                xs=xs,
+                ys=ys,
+                top_k=raw_top_k,
+                merge_radius=float(merge_radius),
+                mask_poly=mask_poly,
+            )
+            return fallback, meta
+
+        sampled_scores = sample_counts[sampled].astype(float) / float(rollouts)
+        order = sampled[np.argsort(sampled_scores)[::-1]]
+        raw = []
+        for idx in order[:raw_top_k]:
+            iy, ix = divmod(int(idx), int(rob.m.nx))
+            raw.append(
+                {
+                    "x": float(xs[ix]),
+                    "y": float(ys[iy]),
+                    "score": float(sample_counts[idx]) / float(rollouts),
+                }
+            )
+        return raw, meta
 
     # -------- immediate tasks (called right when detections arrive) --------
     def on_detection(self, robot_id: str, x: float, y: float, t: float):
@@ -110,33 +272,31 @@ class TaskGenerator:
                              deterring_max_eta_s: float = 120.0,
                              deterring_busy_min_support_override: int = 1,
                              deterring_busy_risk_override: float = 0.20,
-                             enable_predicted_deltaJ_gate: bool = False,
                              min_predicted_deltaJ_for_model_deterring: float = 0.0,
                              model_deterring_gate_policy: str = "heuristic",
                              model_deterring_sprt_alpha: float = 0.05,
                              model_deterring_sprt_beta: float = 0.20,
                              model_deterring_sprt_patch_radius_m: float | None = None,
-                             model_deterring_min_sprt_margin: float = 0.0,
                              model_deterring_chance_threshold: float = 0.20,
                              model_deterring_min_deltaJ_per_cost: float = 0.15,
-                             model_deterring_min_selection_weight: float = 0.0,
                              preventive_capacity_remaining_by_robot: Dict[str, float] | None = None,
                              preventive_capacity_ready_by_robot: Dict[str, bool] | None = None,
                              replan_interval_s: float | None = None,
                              busy_deterring_robots=None,
                              recent_deterrence_events: List[dict] | None = None,
                              min_hotspot_score: float = 1e-4,
-                             patrol_hotspot_filter_mode: str = "percentile",
-                             patrol_hotspot_score_percentile: float = 97.0,
+                             patrol_hotspot_filter_mode: str = "absolute",
+                             patrol_hotspot_score_percentile: float = 90.0,
                              patrol_hotspot_keep_top_k: int | None = None,
-                             patrol_feedback_inhibition_retention: float = 1.0,
+                             patrol_point_generation_mode: str = "hotspots",
+                             patrol_mc_rollouts: int = 64,
+                             patrol_mc_max_events_per_rollout: int = 24,
+                             patrol_mc_use_excess: bool = True,
                              hotspot_spacing_m: float = 25.0,
                              jitter_m: float = 4.0,
                              horizon_s: float = 300.0,
                              weight_fn=None,
                              profiles: Dict[str, RobotProfile] | None = None,
-                             robot_poses: Mapping[str, tuple[float, float]] | None = None,
-                             rng=None,
                              cost_w_eta: float = 1.0,
                              spinup_by_type: Dict[str, float] | None = None,
                              deterring_modes: Dict[str, Dict] | None = None,
@@ -172,12 +332,10 @@ class TaskGenerator:
         sprt_beta = min(max(float(model_deterring_sprt_beta), 1e-6), 1.0 - 1e-6)
         sprt_accept = math.log((1.0 - sprt_beta) / sprt_alpha)
         sprt_reject = math.log(sprt_beta / (1.0 - sprt_alpha))
-        sprt_margin = max(0.0, float(model_deterring_min_sprt_margin))
         patch_radius = float(model_deterring_sprt_patch_radius_m) if model_deterring_sprt_patch_radius_m is not None else float(self.merge_radius_m)
         patch_radius = max(patch_radius, 1e-6)
         chance_threshold = min(max(float(model_deterring_chance_threshold), 0.0), 1.0)
         min_deltaJ_per_cost = float(model_deterring_min_deltaJ_per_cost)
-        min_selection_weight = min(max(float(model_deterring_min_selection_weight), 0.0), 1.0)
         count_window_s = float(replan_interval_s) if replan_interval_s is not None else float(deterring_window_s)
         count_window_s = max(count_window_s, 1e-6)
         filter_mode = str(patrol_hotspot_filter_mode).strip().lower()
@@ -188,7 +346,10 @@ class TaskGenerator:
             percentile *= 100.0
         percentile = min(max(percentile, 0.0), 100.0)
         keep_top_k = hotspot_top_k if patrol_hotspot_keep_top_k is None else max(1, int(patrol_hotspot_keep_top_k))
-        patrol_inhib_retention = min(max(float(patrol_feedback_inhibition_retention), 0.0), 1.0)
+        point_generation_mode = str(patrol_point_generation_mode).strip().lower()
+        if point_generation_mode not in ("hotspots", "monte_carlo"):
+            point_generation_mode = "hotspots"
+        self._debug_patrol_pipeline = {}
 
         for rid, rob in robots.items():
             # keep model time consistent
@@ -203,60 +364,30 @@ class TaskGenerator:
                 else []
             )
 
-            patrol_field_cache = {"excess": None}
-
-            def _patrol_field_grid():
-                if patrol_field_cache["excess"] is None:
-                    if abs(patrol_inhib_retention - 1.0) <= 1e-12:
-                        patrol_field_cache["excess"] = (rob.m.lam - rob.m.mu).copy()
-                    else:
-                        base_lam = rob.m.mu * rob.m.time_multiplier(rob.m.t_now) + rob.m.trigger_mass
-                        patrol_lam = np.clip(base_lam - patrol_inhib_retention * rob.m.inhib_mass, 0.0, None)
-                        patrol_field_cache["excess"] = patrol_lam - rob.m.mu
-                return patrol_field_cache["excess"]
-
-            def _patrol_field_score(x, y):
-                if abs(patrol_inhib_retention - 1.0) <= 1e-12:
-                    return _field_score(x, y)
-                iy, ix = rob.m.world_to_idx(x, y)
-                return float(_patrol_field_grid()[iy, ix])
-
-            def _patrol_hotspots(top_k, merge_radius, mask_poly):
-                if abs(patrol_inhib_retention - 1.0) <= 1e-12:
-                    return rob.m.hotspots(
-                        top_k=top_k,
-                        merge_radius=merge_radius,
-                        use_excess=True,
-                        mask_poly=mask_poly,
-                    )
-                field = _patrol_field_grid()
-                k_short = min(field.size, max(5 * int(top_k), int(top_k)))
-                flat_idx = np.argpartition(field.ravel(), -k_short)[-k_short:]
-                flat_sorted = flat_idx[np.argsort(field.ravel()[flat_idx])[::-1]]
-                picks = []
-                coords = []
-                for idx in flat_sorted:
-                    iy, ix = divmod(idx, rob.m.nx)
-                    x = float(rob.m.xs[ix])
-                    y = float(rob.m.ys[iy])
-                    if mask_poly and (not point_in_polygon(x, y, mask_poly)):
-                        continue
-                    if any((x - px) ** 2 + (y - py) ** 2 <= merge_radius ** 2 for (px, py) in coords):
-                        continue
-                    coords.append((x, y))
-                    picks.append({"x": x, "y": y, "score": float(field[iy, ix])})
-                    if len(picks) >= int(top_k):
-                        break
-                return picks
-
             # hotspots from SESTPP excess lambda-mu
             # Get more candidates than we'll keep, then thin for spacing
             mask = rob.zone_polygon if rob.zone_polygon else None
-            raw = _patrol_hotspots(
-                top_k=max(hotspot_top_k * 3, hotspot_top_k),
-                merge_radius=max(self.merge_radius_m, hotspot_spacing_m * 0.5),
-                mask_poly=mask,
-            )
+            generation_meta = {"generation_mode": str(point_generation_mode)}
+            if point_generation_mode == "monte_carlo":
+                raw, generation_meta = self._monte_carlo_patrol_points(
+                    rob=rob,
+                    rid=str(rid),
+                    now_t=float(now_t),
+                    hotspot_top_k=int(hotspot_top_k),
+                    merge_radius=max(self.merge_radius_m, hotspot_spacing_m * 0.5),
+                    mask_poly=mask,
+                    use_excess=bool(patrol_mc_use_excess),
+                    horizon_s=float(horizon_s),
+                    rollouts=int(patrol_mc_rollouts),
+                    max_events_per_rollout=int(patrol_mc_max_events_per_rollout),
+                )
+            else:
+                raw = rob.m.hotspots(
+                    top_k=max(hotspot_top_k*3, hotspot_top_k),
+                    merge_radius=max(self.merge_radius_m, hotspot_spacing_m*0.5),
+                    use_excess=True,
+                    mask_poly=mask
+                )
             def _quantile(sorted_vals, pct):
                 if not sorted_vals:
                     return float("nan")
@@ -276,14 +407,18 @@ class TaskGenerator:
                 filtered_hotspots = [h for h in raw if float(h.get("score", 0.0)) >= threshold_applied]
             elif filter_mode == "percentile":
                 threshold_applied = _quantile(raw_scores, percentile)
-                filtered_hotspots = (
-                    [h for h in raw if float(h.get("score", 0.0)) >= threshold_applied]
-                    if math.isfinite(threshold_applied)
-                    else []
-                )
-            else:
+                if not math.isfinite(threshold_applied):
+                    threshold_applied = float("nan")
+                    filtered_hotspots = []
+                else:
+                    filtered_hotspots = [h for h in raw if float(h.get("score", 0.0)) >= threshold_applied]
+            else:  # top_k
                 ranked_hotspots = sorted(raw, key=lambda h: float(h.get("score", 0.0)), reverse=True)
                 filtered_hotspots = ranked_hotspots[: int(keep_top_k)]
+                threshold_applied = (
+                    float(filtered_hotspots[-1].get("score", 0.0))
+                    if filtered_hotspots else float("nan")
+                )
             # Score filter + Poisson-disk style thinning
             cand = [(h['x'], h['y'], h['score']) for h in filtered_hotspots]
             picks = []
@@ -291,9 +426,63 @@ class TaskGenerator:
                 if any((hx-px)**2 + (hy-py)**2 <= hotspot_spacing_m**2 for (px,py,_) in picks):
                     continue
                 picks.append((hx, hy, hs))
+            patrol_debug = {
+                "local_hotspots_raw": [
+                    {
+                        "robot_id": str(rid),
+                        "x": float(h.get("x", 0.0)),
+                        "y": float(h.get("y", 0.0)),
+                        "score": float(h.get("score", 0.0)),
+                    }
+                    for h in raw
+                ],
+                "local_hotspots_score_filtered": [
+                    {
+                        "robot_id": str(rid),
+                        "x": float(h.get("x", 0.0)),
+                        "y": float(h.get("y", 0.0)),
+                        "score": float(h.get("score", 0.0)),
+                    }
+                    for h in filtered_hotspots
+                ],
+                "local_hotspots_spaced": [
+                    {
+                        "robot_id": str(rid),
+                        "x": float(hx),
+                        "y": float(hy),
+                        "score": float(hs),
+                    }
+                    for (hx, hy, hs) in picks
+                ],
+                "raw_patrol_candidates": [],
+                "score_stats": {
+                    "robot_id": str(rid),
+                    "filter_mode": str(filter_mode),
+                    "generation_mode": str(generation_meta.get("generation_mode", point_generation_mode)),
+                    "threshold_applied": float(threshold_applied) if math.isfinite(threshold_applied) else float("nan"),
+                    "raw_count": int(len(raw)),
+                    "score_filtered_count": int(len(filtered_hotspots)),
+                    "spaced_count": int(len(picks)),
+                    "score_min": float(raw_scores[0]) if raw_scores else float("nan"),
+                    "score_mean": float(sum(raw_scores) / len(raw_scores)) if raw_scores else float("nan"),
+                    "score_p50": _quantile(raw_scores, 50.0),
+                    "score_p75": _quantile(raw_scores, 75.0),
+                    "score_p90": _quantile(raw_scores, 90.0),
+                    "score_p95": _quantile(raw_scores, 95.0),
+                    "score_max": float(raw_scores[-1]) if raw_scores else float("nan"),
+                    "mc_total_expected_events": float(generation_meta.get("mc_total_expected_events", float("nan"))),
+                    "mc_total_samples": float(generation_meta.get("mc_total_samples", float("nan"))),
+                    "mc_nonzero_cells": float(generation_meta.get("mc_nonzero_cells", float("nan"))),
+                    "mc_rollouts": float(generation_meta.get("mc_rollouts", float("nan"))),
+                    "mc_horizon_s": float(generation_meta.get("mc_horizon_s", float("nan"))),
+                    "mc_use_excess": bool(generation_meta.get("mc_use_excess", patrol_mc_use_excess)),
+                    "mc_fallback_used": bool(generation_meta.get("mc_fallback_used", False)),
+                },
+            }
 
             # avoid hotspots that coincide with deterring clusters
-            # Add a tiny deterministic jitter to decorrelate grid alignment.
+            # Add a tiny random jitter to decorrelate grid alignment
+            import random
             if deterring_modes is None:
                 deterring_modes = {
                     "formation": {"beta": 0.30, "omega": 800.0, "sigma": 18.0, "w_eta": 1.0, "fixed_cost": 0.0},
@@ -361,9 +550,9 @@ class TaskGenerator:
                 return max(delta_a * time_factor * acc, 1e-9)
 
             def _patch_expectation_count_window(x, y, sigma_u, field_name):
-                # SPRT compares a hard count of detections inside the patch window,
-                # so the expected count must use the same hard patch footprint.
-                rad = int(math.ceil(patch_radius / max(rob.m.dx, rob.m.dy)))
+                # SPRT should compare counts observed over the current count/replan window
+                # against count-window expectations, not horizon-scale expectations.
+                rad = int(math.ceil(3.0 * sigma_u / max(rob.m.dx, rob.m.dy)))
                 iy, ix = rob.m.world_to_idx(x, y)
                 y0 = max(0, iy - rad); y1 = min(rob.m.ny, iy + rad + 1)
                 x0 = max(0, ix - rad); x1 = min(rob.m.nx, ix + rad + 1)
@@ -380,32 +569,12 @@ class TaskGenerator:
                         dyw = wy - y
                         if (dxw * dxw + dyw * dyw) > patch_r2:
                             continue
-                        acc += float(field[yy, xx])
+                        k = math.exp(-0.5 * (dxw * dxw + dyw * dyw) / max(sigma_u ** 2, 1e-9))
+                        acc += float(field[yy, xx]) * k
                 return max(delta_a * time_factor * acc, 1e-9)
 
-            def _patch_area_in_zone(x, y):
-                rad = int(math.ceil(patch_radius / max(rob.m.dx, rob.m.dy)))
-                iy, ix = rob.m.world_to_idx(x, y)
-                y0 = max(0, iy - rad); y1 = min(rob.m.ny, iy + rad + 1)
-                x0 = max(0, ix - rad); x1 = min(rob.m.nx, ix + rad + 1)
-                delta_a = float(rob.m.dx * rob.m.dy)
-                acc = 0.0
-                patch_r2 = patch_radius ** 2
-                for yy in range(y0, y1):
-                    wy = rob.m.ys[yy]
-                    for xx in range(x0, x1):
-                        wx = rob.m.xs[xx]
-                        dxw = wx - x
-                        dyw = wy - y
-                        if (dxw * dxw + dyw * dyw) > patch_r2:
-                            continue
-                        if (mask is not None) and (not point_in_polygon(wx, wy, mask)):
-                            continue
-                        acc += delta_a
-                return max(acc, delta_a)
-
             def _cost_eta(x, y, w_eta_override=None, fixed_cost=0.0):
-                rx, ry = _robot_pose_guess(rob, robot_pose=(robot_poses or {}).get(rid))
+                rx, ry = _robot_pose_guess(rob)
                 dist = math.hypot(x - rx, y - ry)
                 speed = 1.0
                 spin = 0.0
@@ -418,7 +587,7 @@ class TaskGenerator:
                 return w_eta * (dist / max(speed, 1e-6) + spin) + float(fixed_cost)
 
             def _eta_seconds(x, y):
-                rx, ry = _robot_pose_guess(rob, robot_pose=(robot_poses or {}).get(rid))
+                rx, ry = _robot_pose_guess(rob)
                 dist = math.hypot(x - rx, y - ry)
                 speed = 1.0
                 spin = 0.0
@@ -434,7 +603,7 @@ class TaskGenerator:
                 omega_u = float(rob.m.omega_inhib)
                 time_factor = omega_u * (1.0 - math.exp(-horizon_s / max(omega_u, 1e-9)))
                 delta_a = float(rob.m.dx * rob.m.dy)
-                benefit = _patrol_field_score(x, y) * time_factor * delta_a
+                benefit = _field_score(x, y) * time_factor * delta_a
                 return benefit - _cost_eta(x, y)
 
             def _event_probability(x, y, sigma_u):
@@ -454,23 +623,6 @@ class TaskGenerator:
                 benefit = beta * time_factor * delta_a * _kernel_weight_sum_sigma(x, y, sigma_u)
                 return benefit - _cost_eta(x, y, w_eta_override=w_eta, fixed_cost=fixed_cost)
 
-            def _deterring_selection_weight(cand):
-                llr_val = float(cand.get("llr", 0.0))
-                llr_clip = max(min(llr_val, 20.0), -20.0)
-                posterior_h1 = 1.0 / (1.0 + math.exp(-llr_clip))
-                evidence_margin = max(llr_val - sprt_accept, 0.0)
-                margin_conf = evidence_margin / (1.0 + evidence_margin)
-                recent_count = max(0.0, float(cand.get("recent_detection_count", 0.0)))
-                patch_mu0 = max(float(cand.get("patch_mu0", 1e-6)), 1e-6)
-                count_excess_ratio = recent_count / patch_mu0
-                excess_conf = 1.0 - math.exp(-max(count_excess_ratio - 1.0, 0.0))
-                selection_weight = posterior_h1 * max(margin_conf, excess_conf)
-                return (
-                    float(selection_weight),
-                    float(posterior_h1),
-                    float(count_excess_ratio),
-                )
-
             def _cluster_key(x, y):
                 return (
                     rid,
@@ -483,40 +635,32 @@ class TaskGenerator:
             for (hx, hy, hs) in picks:
                 if any((hx-dx)**2 + (hy-dy)**2 <= self.merge_radius_m**2 for (dx,dy) in deterring_points):
                     continue
-                candidates.append({
+                patrol_candidate = {
                     "type": "patrolling",
                     "x": float(hx),
                     "y": float(hy),
-                    "origin": "hotspot",
+                    "origin": "mc_patrol" if point_generation_mode == "monte_carlo" else "hotspot",
                     "mode": None,
                     "support": 0,
                     "persistence": 0,
                     "risk_conf": 0.0,
                     "eta_s": _eta_seconds(hx, hy),
                     "cluster_key": None,
-                })
+                }
+                candidates.append(patrol_candidate)
+                patrol_debug["raw_patrol_candidates"].append(
+                    {
+                        "robot_id": str(rid),
+                        "x": float(hx),
+                        "y": float(hy),
+                        "score": float(hs),
+                        "eta_s": float(patrol_candidate["eta_s"]),
+                    }
+                )
+            self._debug_patrol_pipeline[str(rid)] = patrol_debug
 
             current_cluster_keys = set()
             if enable_model_scored_deterring:
-                zone_area = float(polygon_area(mask)) if mask else float(
-                    (max(rob.m.xs) - min(rob.m.xs) + float(rob.m.dx))
-                    * (max(rob.m.ys) - min(rob.m.ys) + float(rob.m.dy))
-                )
-                zone_area = max(zone_area, float(rob.m.dx * rob.m.dy))
-                zone_detection_count = float(len(count_pts))
-                prev_robot_states = {
-                    key: st
-                    for key, st in self._deterring_cluster_state.items()
-                    if (key[0] == rid) and ((float(now_t) - float(st.get("last_t", -1e9))) <= persist_gap_s)
-                }
-                prev_robot_centers = [
-                    (
-                        key,
-                        float(st.get("x", float("nan"))),
-                        float(st.get("y", float("nan"))),
-                    )
-                    for key, st in prev_robot_states.items()
-                ]
                 for (dx, dy) in deterring_points:
                     support = sum(
                         1 for (rx, ry) in recent_pts
@@ -528,35 +672,14 @@ class TaskGenerator:
                     )
                     ck = _cluster_key(dx, dy)
                     current_cluster_keys.add(ck)
-                    self.diag_counts["model_deterring_cluster_key_total"] += 1
-                    if ck in prev_robot_states:
-                        self.diag_counts["model_deterring_cluster_key_reused"] += 1
-                    else:
-                        churn_match = any(
-                            math.isfinite(px)
-                            and math.isfinite(py)
-                            and ((px - dx) ** 2 + (py - dy) ** 2) <= (self.merge_radius_m ** 2)
-                            for _, px, py in prev_robot_centers
-                        )
-                        if churn_match:
-                            self.diag_counts["model_deterring_cluster_key_churn"] += 1
-                        else:
-                            self.diag_counts["model_deterring_cluster_key_new"] += 1
                     prev_state = self._deterring_cluster_state.get(ck)
                     if prev_state and (float(now_t) - float(prev_state.get("last_t", -1e9)) <= persist_gap_s):
                         persistence = int(prev_state.get("count", 0)) + 1
-                        prev_obs_sum = float(prev_state.get("obs_count_sum", 0.0))
-                        prev_obs_windows = float(prev_state.get("obs_count_windows", 0.0))
                     else:
                         persistence = 1
-                        prev_obs_sum = 0.0
-                        prev_obs_windows = 0.0
-                    patch_area = _patch_area_in_zone(dx, dy)
-                    patch_mu0 = max(zone_detection_count * (patch_area / zone_area), 1e-6)
-                    obs_count_sum = prev_obs_sum + float(recent_detection_count)
-                    obs_count_windows = prev_obs_windows + 1.0
-                    obs_count_mean = obs_count_sum / max(obs_count_windows, 1.0)
-                    patch_mu1 = max(patch_mu0 * 1.25, obs_count_mean)
+                    patch_mu0 = _patch_expectation_count_window(dx, dy, float(rob.m.sigma), "mu")
+                    patch_mu1 = _patch_expectation_count_window(dx, dy, float(rob.m.sigma), "lam")
+                    patch_mu1 = max(patch_mu1, patch_mu0 * 1.05)
                     llr_prev = float(prev_state.get("llr", 0.0)) if prev_state else 0.0
                     llr_incr = float(recent_detection_count) * math.log(max(patch_mu1, 1e-9) / max(patch_mu0, 1e-9)) - (patch_mu1 - patch_mu0)
                     llr = llr_prev + llr_incr
@@ -586,16 +709,10 @@ class TaskGenerator:
                     self._deterring_cluster_state[ck] = {
                         "count": int(persistence),
                         "last_t": float(now_t),
-                        "x": float(dx),
-                        "y": float(dy),
                         "support": int(support),
                         "llr": float(llr),
                         "last_count_window_start_t": float(now_t - count_window_s),
                         "recent_detection_count": int(recent_detection_count),
-                        "patch_area": float(patch_area),
-                        "obs_count_sum": float(obs_count_sum),
-                        "obs_count_windows": float(obs_count_windows),
-                        "obs_count_mean": float(obs_count_mean),
                         "patch_mu0": float(patch_mu0),
                         "patch_mu1": float(patch_mu1),
                         "p_event": float(best_mode_event_prob or 0.0),
@@ -607,7 +724,6 @@ class TaskGenerator:
                         float(self.diag_counts.get("model_deterring_llr_max", float("-inf"))),
                         float(llr),
                     )
-                    self._diag_model_deterring_llr_values.append(float(llr))
                     self.diag_counts["model_deterring_p_event_sum"] += float(best_mode_event_prob or 0.0)
                     self.diag_counts["model_deterring_p_event_samples"] += 1
                     self.diag_counts["model_deterring_deltaJ_per_cost_sum"] += float(best_mode_deltaJ_per_cost or 0.0)
@@ -627,7 +743,6 @@ class TaskGenerator:
                             "predicted_deltaJ": float(best_mode_score),
                             "llr": float(llr),
                             "recent_detection_count": int(recent_detection_count),
-                            "patch_area": float(patch_area),
                             "patch_mu0": float(patch_mu0),
                             "patch_mu1": float(patch_mu1),
                             "p_event": float(best_mode_event_prob or 0.0),
@@ -674,9 +789,6 @@ class TaskGenerator:
                             if llr_val < sprt_accept:
                                 self.diag_counts["model_deterring_rejected_sprt_pending"] += 1
                                 continue
-                            if llr_val < (sprt_accept + sprt_margin):
-                                self.diag_counts["model_deterring_rejected_sprt_margin"] += 1
-                                continue
                             self.diag_counts["model_deterring_pass_sprt"] += 1
 
                             p_event = float(cand.get("p_event", 0.0))
@@ -703,29 +815,20 @@ class TaskGenerator:
                                     self.diag_counts["model_deterring_rejected_capacity"] += 1
                                     continue
                                 self.diag_counts["model_deterring_pass_capacity"] += 1
-                        elif bool(enable_predicted_deltaJ_gate):
+                        else:
                             if pred_dj < float(min_predicted_deltaJ_for_model_deterring):
                                 self.diag_counts["model_deterring_rejected_predicted_deltaJ"] += 1
                                 continue
                             self.diag_counts["model_deterring_pass_predicted_deltaJ"] += 1
-                        if rid in busy_deterring_robots:
-                            cand_support = int(cand.get("support", 0))
-                            cand_conf = float(cand.get("risk_conf", 0.0))
-                            if (cand_support < busy_support_override) and (cand_conf < busy_risk_override):
-                                self.diag_counts["model_deterring_rejected_busy"] += 1
+                        field_val = _field_score(x, y)
+                        if ttype == "patrolling":
+                            if field_val < min_hotspot_score:
                                 continue
-                        if float(cand.get("eta_s", float("inf"))) > max_eta_s:
-                            self.diag_counts["model_deterring_rejected_eta"] += 1
-                            continue
-                    field_val = _field_score(x, y)
-                    if ttype == "patrolling":
-                        if field_val < min_hotspot_score:
-                            continue
-                    else:
-                        if (deterring_field_threshold is not None) and (field_val < float(deterring_field_threshold)):
-                            self.diag_counts["model_deterring_rejected_field"] += 1
-                            continue
-                        self.diag_counts["model_deterring_pass_field"] += 1
+                        else:
+                            if (deterring_field_threshold is not None) and (field_val < float(deterring_field_threshold)):
+                                self.diag_counts["model_deterring_rejected_field"] += 1
+                                continue
+                            self.diag_counts["model_deterring_pass_field"] += 1
                     if ttype == "deterring":
                         if gate_policy == "heuristic":
                             conf = float(cand.get("risk_conf", _risk_confidence(x, y)))
@@ -740,6 +843,15 @@ class TaskGenerator:
                                 self.diag_counts["model_deterring_rejected_support"] += 1
                                 continue
                             self.diag_counts["model_deterring_pass_support"] += 1
+                        if rid in busy_deterring_robots:
+                            cand_support = int(cand.get("support", 0))
+                            cand_conf = float(cand.get("risk_conf", 0.0))
+                            if (cand_support < busy_support_override) and (cand_conf < busy_risk_override):
+                                self.diag_counts["model_deterring_rejected_busy"] += 1
+                                continue
+                        if float(cand.get("eta_s", float("inf"))) > max_eta_s:
+                            self.diag_counts["model_deterring_rejected_eta"] += 1
+                            continue
                         ck = cand.get("cluster_key")
                         if repeat_block_window > 0.0:
                             has_recent_det = False
@@ -763,26 +875,11 @@ class TaskGenerator:
                                     continue
 
                         score = _action_score_deterrence(x, y, cand["mode"])
-                        selection_weight = 1.0
-                        posterior_h1 = float("nan")
-                        count_excess_ratio = float("nan")
-                        if gate_policy == "sprt_capacity":
-                            selection_weight, posterior_h1, count_excess_ratio = _deterring_selection_weight(cand)
-                            if selection_weight < min_selection_weight:
-                                self.diag_counts["model_deterring_rejected_selection_weight"] += 1
-                                continue
-                            score *= selection_weight
                         det_eligible += 1
                     else:
                         score = _action_score_patrol(x, y)
-                        selection_weight = 1.0
-                        posterior_h1 = float("nan")
-                        count_excess_ratio = float("nan")
                     cand_scored = dict(cand)
                     cand_scored["score"] = float(score)
-                    cand_scored["selection_weight"] = float(selection_weight)
-                    cand_scored["posterior_h1"] = float(posterior_h1)
-                    cand_scored["count_excess_ratio"] = float(count_excess_ratio)
                     if best is None or float(score) > float(best["score"]):
                         best = cand_scored
                     if ttype == "patrolling":
@@ -792,7 +889,7 @@ class TaskGenerator:
                 if best is not None and str(best.get("type", "")).strip().lower() == "deterring" and best_patrol is not None:
                     if gate_policy == "sprt_capacity":
                         patrol_ref = max(0.0, float(best_patrol["score"]))
-                        if float(best["score"]) <= patrol_ref * (1.0 + score_margin):
+                        if float(best.get("predicted_deltaJ", best["score"])) <= patrol_ref * (1.0 + score_margin):
                             self.diag_counts["model_deterring_rejected_margin"] += 1
                             best = best_patrol
                     else:
@@ -808,18 +905,9 @@ class TaskGenerator:
                     origin = str(best.get("origin", "unknown"))
                     mode = best.get("mode")
                     support = int(best.get("support", 0))
-                    if ttype == "patrolling":
-                        if rng is not None:
-                            jx = float(rng.uniform(-1.0, 1.0)) * jitter_m
-                            jy = float(rng.uniform(-1.0, 1.0)) * jitter_m
-                        else:
-                            import random
-                            jx = random.uniform(-1, 1) * jitter_m
-                            jy = random.uniform(-1, 1) * jitter_m
-                    else:
-                        jx = 0.0
-                        jy = 0.0
-                    task_added = self._add({
+                    jx = (random.uniform(-1,1) * jitter_m) if ttype == "patrolling" else 0.0
+                    jy = (random.uniform(-1,1) * jitter_m) if ttype == "patrolling" else 0.0
+                    self._add({
                         'robot_id': rid,
                         'type': ttype,
                         'x': float(x + jx), 'y': float(y + jy),
@@ -835,11 +923,8 @@ class TaskGenerator:
                         'p_event': float(best.get("p_event", 0.0)),
                         'deltaJ_per_cost': float(best.get("deltaJ_per_cost", 0.0)),
                         'llr': float(best.get("llr", 0.0)),
-                        'selection_weight': float(best.get("selection_weight", 1.0)),
-                        'posterior_h1': float(best.get("posterior_h1", float("nan"))),
-                        'count_excess_ratio': float(best.get("count_excess_ratio", float("nan"))),
                     })
-                    if ttype == "deterring" and task_added:
+                    if ttype == "deterring":
                         self.diag_counts["model_deterring_generated"] += 1
                         ck = best.get("cluster_key")
                         if ck is not None:
@@ -847,7 +932,7 @@ class TaskGenerator:
                                 "t": float(now_t),
                                 "support": int(support),
                             }
-                    elif ttype == "patrolling" and det_eligible > 0:
+                    elif det_eligible > 0:
                         self.diag_counts["model_deterring_not_selected"] += int(det_eligible)
                     self._next_allowed[rid] = now_t + self._cooldown
 
@@ -890,7 +975,7 @@ class TaskGenerator:
             round(float(task['time']), self._dt),
         )
         if key in self._keys:
-            return False
+            return
         self._keys.add(key)
         self._rows.append({
             'robot_id': task['robot_id'],
@@ -901,6 +986,7 @@ class TaskGenerator:
             'origin': task.get('origin', 'unknown'),      # 'detection'|'hotspot'|'fallback'
             'mode': task.get('mode'),
             'score': float(task.get('score', 0.0)),
+            # Utility proxy used by lab assignment/queue discipline.
             'utility': float(task.get('utility', task.get('score', 0.0))),
             'support': int(task.get('support', 0)),
             'risk_conf': float(task.get('risk_conf', 0.0)),
@@ -910,11 +996,7 @@ class TaskGenerator:
             'p_event': float(task.get('p_event', 0.0)),
             'deltaJ_per_cost': float(task.get('deltaJ_per_cost', 0.0)),
             'llr': float(task.get('llr', 0.0)),
-            'selection_weight': float(task.get('selection_weight', 1.0)),
-            'posterior_h1': float(task.get('posterior_h1', float("nan"))),
-            'count_excess_ratio': float(task.get('count_excess_ratio', float("nan"))),
         })
-        return True
 
 class TaskAssigner:
     def __init__(self, robots_state: dict[str, "Robot"], profiles: dict[str, RobotProfile], params: dict | None = None):
@@ -932,7 +1014,6 @@ class TaskAssigner:
             "w_health":0.2,   # robot health bonus
             "w_prio":  2.0,   # task-priority weight
             "w_load":  0.8,   # active task load penalty
-            "w_task_value": 0.0,  # optional task-value term (off by default)
             # task-type priorities
             "prio_deterring": 1.0,
             "prio_patrolling": 0.5,
@@ -945,46 +1026,61 @@ class TaskAssigner:
         }
         if params: self.w.update(params)
         self.load_by_robot: dict[str, int] = {}
-        self.robot_poses: dict[str, tuple[float, float]] = {}
 
     def set_load(self, load_by_robot: dict[str, int]):
         self.load_by_robot = {str(k): int(v) for k, v in (load_by_robot or {}).items()}
 
-    def set_robot_poses(self, robot_poses: Mapping[str, tuple[float, float]] | None):
-        self.robot_poses = {
-            str(k): (float(v[0]), float(v[1]))
-            for k, v in (robot_poses or {}).items()
-            if v is not None
-        }
+    def candidate_robot_ids(self, task: dict) -> tuple[list[str], str]:
+        """
+        Returns eligible candidate robots plus scope label using the same policy
+        as assign_task().
+        """
+        owner = task.get("robot_id")
+        if task.get("type") == "deterring":
+            eligible = [rid for rid in self.P if self._eligible(self.P[rid], task)]
+            return eligible, "global_deterring"
+
+        local_pool = []
+        if owner in self.R:
+            local_pool.append(owner)
+            local_pool.extend([rid for rid in self.R[owner].neighbors if rid not in local_pool])
+        eligible = [rid for rid in local_pool if rid in self.P and self._eligible(self.P[rid], task)]
+        if eligible:
+            return eligible, "local"
+        eligible = [rid for rid in self.P if self._eligible(self.P[rid], task)]
+        return eligible, "global_fallback"
+
+    def eligible_robot_ids(self, task: dict) -> list[str]:
+        """Global eligible set (ignores locality-first preference for patrol)."""
+        return [rid for rid in self.P if self._eligible(self.P[rid], task)]
+
+    def score_robot_for_task(self, robot_id: str, task: dict) -> float:
+        prof = self.P.get(robot_id)
+        if prof is None:
+            return float("-inf")
+        if not self._eligible(prof, task):
+            return float("-inf")
+        return float(self._score(prof, task))
+
+    def select_secondary_for_deterring(self, primary: str, scored: list[tuple[float, str]], task: dict) -> str | None:
+        """
+        Shared secondary-selection policy for deterring tasks.
+        """
+        if task.get("type") != "deterring" or len(scored) <= 1:
+            return None
+        for _, rid in scored[1:]:
+            if self.P[primary].type == "UAV" and self.P[rid].type == "UGV":
+                return rid
+        return scored[1][1]
 
     # ---------- public API ----------
-    def assign_task(self, task: dict, eligible_ids: list[str] | None = None) -> dict | None:
+    def assign_task(self, task: dict) -> dict | None:
         """
         Returns an assignment dict:
           {task: <task>, primary: <robot_id>, secondary: <robot_id or None>, details: {...}}
         or None if no eligible robot.
         """
-        if eligible_ids is not None:
-            eligible = [rid for rid in eligible_ids if rid in self.P and self._eligible(self.P[rid], task)]
-            scope = "filtered"
-        else:
-            owner = task.get("robot_id")
-            if task.get("type") == "deterring":
-                # Deterring response is time-critical: rank all eligible robots globally.
-                eligible = [rid for rid in self.P if self._eligible(self.P[rid], task)]
-                scope = "global_deterring"
-            else:
-                local_pool = []
-                if owner in self.R:
-                    local_pool.append(owner)
-                    local_pool.extend([rid for rid in self.R[owner].neighbors if rid not in local_pool])
-
-                # Patrol stays locality-first, then falls back globally.
-                eligible = [rid for rid in local_pool if rid in self.P and self._eligible(self.P[rid], task)]
-                scope = "local"
-                if not eligible:
-                    eligible = [rid for rid in self.P if self._eligible(self.P[rid], task)]
-                    scope = "global_fallback"
+        eligible, scope = self.candidate_robot_ids(task)
         if not eligible:
             return None
 
@@ -992,14 +1088,7 @@ class TaskAssigner:
         scored.sort(reverse=True, key=lambda x: x[0])
         primary = scored[0][1]
 
-        secondary = None
-        if task["type"] == "deterring" and len(scored) > 1:
-            # pick a second unit for handoff/sustain (prefer UGV if primary is UAV)
-            for _, rid in scored[1:]:
-                if self.P[primary].type == "UAV" and self.P[rid].type == "UGV":
-                    secondary = rid; break
-            if secondary is None:
-                secondary = scored[1][1]
+        secondary = self.select_secondary_for_deterring(primary, scored, task)
 
         return {
             "task": task,
@@ -1025,7 +1114,7 @@ class TaskAssigner:
 
         # Distance from robot to task. Use robot anchor or zone centroid as current pose.
         rob = self.R[prof.id]
-        rx, ry = _robot_pose_guess(rob, robot_pose=self.robot_poses.get(prof.id))
+        rx, ry = _robot_pose_guess(rob)
         dist = math.hypot(task["x"] - rx, task["y"] - ry)
 
         spin = w["uav_spinup_s"] if prof.type == "UAV" else w["ugv_spinup_s"]
@@ -1034,7 +1123,6 @@ class TaskAssigner:
         cap = prof.deterrent_eff if task["type"] == "deterring" else 1.0
         zone_bonus = 1.0 if point_in_polygon(task["x"], task["y"], rob.zone_polygon) else 0.0
         load = float(self.load_by_robot.get(prof.id, 0))
-        task_value = float(task.get("utility", task.get("score", 0.0)))
 
         return (w["w_cap"]   * cap
               - w["w_eta"]   * eta
@@ -1042,15 +1130,12 @@ class TaskAssigner:
               + w["w_zone"]  * zone_bonus
               + w["w_health"]* prof.health
               + w["w_prio"]  * prio
-              + w["w_task_value"] * task_value
               - w["w_load"]  * load)
 
-def _robot_pose_guess(rob: "Robot", robot_pose: tuple[float, float] | None = None) -> tuple[float,float]:
+def _robot_pose_guess(rob: "Robot") -> tuple[float,float]:
     """
     If you don't track live robot poses yet, use the zone centroid as a proxy.
     Replace with your real (x,y) when available.
     """
-    if robot_pose is not None:
-        return float(robot_pose[0]), float(robot_pose[1])
     cx, cy = polygon_centroid(rob.zone_polygon)
     return float(cx), float(cy)

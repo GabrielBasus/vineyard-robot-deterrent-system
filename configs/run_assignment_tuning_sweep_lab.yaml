@@ -1,0 +1,41 @@
+runner:
+  stage: phase4_refine
+  num_runs: 2
+  seed_start: 2000
+  t_end: 3600.0
+  dt: 5.0
+  baselines: [prediction_only, proposed]
+  methods: [hungarian]
+  outdir: results/assignment_tuning_from_yaml
+  resume: true
+  max_workers: 1
+
+planner:
+  distance_costs: [0.006]
+  switch_penalties: [1.0]
+  replan_periods: [60]
+  assigner_w_task_values: [0.0]
+
+gating:
+  gate_policies: [sprt_capacity]
+  sprt_alpha_values: [0.05, 0.10]
+  sprt_beta_values: [0.20]
+  chance_threshold_values: [0.15, 0.20]
+  min_deltaj_per_cost_values: [0.10, 0.15]
+  capacity_rho_max_values: [0.85]
+  risk_thresholds: [0.35]
+  min_persistence_replans: [2]
+  max_eta_values: [120.0]
+  score_margin_values: [0.05]
+  budget_per_hr: [4]
+  budget_modes: [count_per_hour]
+  budget_utility_per_hr: [5.0]
+  deterring_windows: [90.0]
+  min_predicted_deltaj_values: [0.0]
+
+ground_truth:
+  beta_true_values: [0.25, 0.35]
+
+inputs:
+  use_phase1_winner: true
+  phase1_manifest: results/assignment_tuning_sweep_lab_phase1_fast/assignment_tuning_manifest_lab.json

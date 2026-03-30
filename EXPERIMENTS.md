@@ -4,8 +4,10 @@ This repo includes two experiment runners:
 
 - `run_24h_experiment.py` (sequential, baseline/stable)
 - `run_24h_experiment_parallel.py` (multiprocessing, faster)
+- `demo_live_day_vineyard.py` (single-file, audience-friendly visual demo)
 
-Both are designed for 24-hour simulated vineyard experiments and export CSVs for thesis analysis.
+The first two are designed for 24-hour simulated vineyard experiments and export CSVs for thesis analysis.
+The demo script is for live visualization and presentation.
 
 ## Requirements
 
@@ -97,3 +99,37 @@ Parallel outputs:
 - Keep `seed_start` fixed for comparable reruns.
 - Commit experiment scripts and CSV outputs (or archive outputs with commit hash).
 - Save the manifest CSV with every run for exact parameter traceability.
+
+## 3) Live Demo Script (Presentation Mode)
+
+Run:
+
+```powershell
+python demo_live_day_vineyard.py
+```
+
+What it does:
+
+- Runs a full 24h simulated day in a live visualization.
+- Uses low-pressure ground-truth defaults for a readable non-technical demo.
+- Shows separate visuals for:
+  - ground truth birds (green X),
+  - detections (red X),
+  - active deterring tasks (orange circles),
+  - active patrol tasks (blue diamonds),
+  - completed tasks (gray dots).
+
+Useful options:
+
+```powershell
+# faster-than-realtime playback
+python demo_live_day_vineyard.py --sim-speed 30
+
+# custom map and robot marker size
+python demo_live_day_vineyard.py --W 500 --H 500 --robot-radius-m 0.9
+```
+
+Notes:
+
+- `--sim-speed 1.0` is real-time (default).
+- Use experiment runners for CSV-based analysis; use demo script for presentations.
