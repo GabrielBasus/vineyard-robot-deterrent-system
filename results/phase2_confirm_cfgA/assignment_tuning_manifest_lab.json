@@ -1,0 +1,72 @@
+{
+  "num_runs": 10,
+  "seed_start": 3000,
+  "seed_list": [
+    3000,
+    3001,
+    3002,
+    3003,
+    3004,
+    3005,
+    3006,
+    3007,
+    3008,
+    3009
+  ],
+  "t_end": 10800.0,
+  "dt": 5.0,
+  "baselines": [
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "hungarian"
+  ],
+  "stage": "phase2",
+  "distance_costs": [
+    0.006
+  ],
+  "switch_penalties": [
+    1.0
+  ],
+  "replan_periods_s": [
+    90
+  ],
+  "model_deterring_risk_thresholds": [
+    0.25
+  ],
+  "model_deterring_budget_per_robot_per_hr": [
+    5
+  ],
+  "model_deterring_window_s": [
+    90.0
+  ],
+  "beta_true_values": [
+    0.45
+  ],
+  "phase1_manifest": "results/assignment_tuning_sweep_lab_phase1_fast/assignment_tuning_manifest_lab.json",
+  "use_phase1_winner": true,
+  "resume": true,
+  "checkpoint_path": "results\\phase2_confirm_cfgA\\assignment_tuning_runs_lab.checkpoint.csv",
+  "max_workers": 8,
+  "best_hungarian_scenario": {
+    "best_scenario": "d0.006_s1_rp90_rt0.25_bh5_dw90_bt0.45",
+    "row": {
+      "scenario_id": "d0.006_s1_rp90_rt0.25_bh5_dw90_bt0.45",
+      "assignment_method": "hungarian",
+      "assignment_distance_cost_per_m": 0.006,
+      "assignment_switch_penalty": 1.0,
+      "task_replan_period_s": 90.0,
+      "model_deterring_risk_threshold": 0.25,
+      "model_deterring_budget_per_robot_per_hr": 5.0,
+      "model_deterring_window_s": 90.0,
+      "beta_true": 0.45,
+      "exp_improve_pct_mean": 0.00194459828056619,
+      "resp_improve_pct_mean": 1.3427763070291567,
+      "comm_increase_pct_mean": 61.521117824217754,
+      "runtime_ms_mean": 2.3309645454435306,
+      "failures_mean": 0.0,
+      "hard_reject": false
+    }
+  }
+}

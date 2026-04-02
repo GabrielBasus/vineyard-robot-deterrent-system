@@ -1,0 +1,82 @@
+{
+  "current_repo": {
+    "path": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code",
+    "branch": "share-for-ai-20260330",
+    "commit": "c74a62945105fb655edc4fb94a1951b480dbb9a6",
+    "dirty": true
+  },
+  "main_repo": {
+    "path": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code-main",
+    "branch": "main",
+    "commit": "950adbabb055cc1e470c44efb3e0a165f16f3904",
+    "dirty": false
+  },
+  "benchmark_params": {
+    "num_runs": 5,
+    "seed_start": 1000,
+    "max_workers": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "T_end": 3600.0,
+    "dt": 5.0,
+    "fps": 1,
+    "NX": 80,
+    "NY": 64,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 60.0,
+    "planner_profile": "",
+    "proposed_preventive_policy": "",
+    "use_frozen_calibration": false,
+    "calibration_ranking_path": "",
+    "calibration_manifest_path": "",
+    "calibration_config_id": ""
+  },
+  "systems": [
+    {
+      "label": "proposed",
+      "repo_key": "current",
+      "description": "Current workspace with predictive patrol, intervention feedback, and model-scored preventive deterring enabled.",
+      "params": {
+        "simulation_mode": "proposed",
+        "enable_patrolling": true,
+        "enable_intervention_feedback": true,
+        "include_fallback_patrol": true,
+        "enable_model_scored_deterring": true
+      }
+    },
+    {
+      "label": "prediction_only",
+      "repo_key": "current",
+      "description": "Current workspace with predictive patrol enabled, but without intervention feedback or model-scored preventive deterring.",
+      "params": {
+        "simulation_mode": "prediction_only",
+        "enable_patrolling": true,
+        "enable_intervention_feedback": false,
+        "include_fallback_patrol": true,
+        "enable_model_scored_deterring": false
+      }
+    },
+    {
+      "label": "main",
+      "repo_key": "main",
+      "description": "Sibling main worktree benchmarked with its native supported defaults.",
+      "params": {}
+    },
+    {
+      "label": "reactive",
+      "repo_key": "current",
+      "description": "Current workspace in detections-only mode with no predictive patrol, no intervention feedback, and no model-scored preventive deterring.",
+      "params": {
+        "simulation_mode": "reactive",
+        "enable_patrolling": false,
+        "enable_intervention_feedback": false,
+        "include_fallback_patrol": false,
+        "enable_model_scored_deterring": false
+      }
+    }
+  ]
+}

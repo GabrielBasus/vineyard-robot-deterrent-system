@@ -1,0 +1,42 @@
+{
+  "summary": {
+    "frame_count": 721,
+    "duration_s": 3600.0,
+    "robot_count": 6,
+    "completed_tasks_total": 1145,
+    "completed_deterring_total": 708,
+    "completed_patrolling_total": 437,
+    "completed_tasks_per_hour": 1145.0,
+    "mean_completion_latency_s": 186.0,
+    "mean_deterring_latency_s": 215.614406779661,
+    "mean_patrolling_latency_s": 138.02059496567506,
+    "total_robot_distance_m": 11448.206044769428,
+    "mean_robot_distance_m": 1908.0343407949047,
+    "tasks_per_km_travel": 100.01567018643408,
+    "mean_active_tasks": 85.54646324549238,
+    "mean_active_deterring": 64.20249653259361,
+    "mean_active_patrolling": 21.34396671289875,
+    "max_active_tasks": 156,
+    "final_active_tasks": 142,
+    "robot_moving_fraction": 0.3296296296296296,
+    "system": "main",
+    "seed": 1003,
+    "repo": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code-main",
+    "supported_call_kwargs": {
+      "W": 500.0,
+      "H": 500.0,
+      "T_end": 3600.0,
+      "dt": 5.0,
+      "fps": 1,
+      "NX": 80,
+      "NY": 64,
+      "Nrobots": 6,
+      "uav_fraction": 0.0,
+      "task_replan_period_s": 45.0,
+      "arrival_radius_m": 3.0,
+      "hold_time_s": 20.0,
+      "seed": 1003
+    },
+    "sample_every_s": 60.0
+  }
+}

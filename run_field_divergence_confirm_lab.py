@@ -15,12 +15,44 @@ import pandas as pd
 import compare_field_divergence_lab as cfd
 import DeterrentSystem_assignment_lab as ds
 from config_loader import add_config_argument, parse_args_with_config
+from planner_profiles import apply_planner_profile_defaults, explicit_cli_dests
+from thesis_experiment_workflow import render_execution_order_lines, render_stage_readme_lines, stage_manifest
 
 
 FIELD_DIVERGENCE_CONFIRM_CONFIG_ALIASES = {
     **cfd.FIELD_DIVERGENCE_CONFIG_ALIASES,
     "runner.seeds": "seeds",
+    "planner.profile": "planner_profile",
+    "gating.model_deterring_min_persistence_replans": "model_deterring_min_persistence_replans",
+    "gating.model_deterring_max_eta_s": "model_deterring_max_eta_s",
+    "gating.model_deterring_score_margin": "model_deterring_score_margin",
+    "gating.model_deterring_budget_per_robot_per_hr": "model_deterring_budget_per_robot_per_hr",
+    "gating.model_deterring_budget_mode": "model_deterring_budget_mode",
+    "gating.model_deterring_budget_utility_per_robot_per_hr": "model_deterring_budget_utility_per_robot_per_hr",
 }
+
+
+FIELD_DIVERGENCE_CONFIRM_PROFILE_DEST_MAP = {
+    "assigner_w_task_value": "assigner_w_task_value",
+    "model_deterring_window_s": "model_deterring_window_s",
+    "model_deterring_min_persistence_replans": "model_deterring_min_persistence_replans",
+    "model_deterring_max_eta_s": "model_deterring_max_eta_s",
+    "model_deterring_score_margin": "model_deterring_score_margin",
+    "model_deterring_budget_per_robot_per_hr": "model_deterring_budget_per_robot_per_hr",
+    "model_deterring_budget_mode": "model_deterring_budget_mode",
+    "model_deterring_budget_utility_per_robot_per_hr": "model_deterring_budget_utility_per_robot_per_hr",
+    "model_deterring_gate_policy": "model_deterring_gate_policy",
+    "model_deterring_chance_threshold": "model_deterring_chance_threshold",
+    "model_deterring_min_deltaJ_per_cost": "model_deterring_min_deltaj_per_cost",
+}
+
+FIELD_DIVERGENCE_CONFIRM_ACCEPTANCE_FAILURE_MODES = (
+    "no_meaningful_field_divergence",
+    "filter_collapse",
+    "raw_patrol_candidate_collapse",
+    "selected_patrol_collapse",
+    "active_patrol_collapse",
+)
 
 
 def _parse_int_list(text: str) -> List[int]:
@@ -37,11 +69,130 @@ def _aggregate_metric(per_seed_df: pd.DataFrame, col: str) -> dict:
     arr = pd.to_numeric(per_seed_df[col], errors="coerce").dropna().to_numpy(dtype=float)
     n = int(arr.size)
     if n == 0:
-        return {"metric": col, "n": 0, "mean": float("nan"), "std": float("nan"), "ci95": float("nan")}
+        return {
+            "metric": col,
+            "n": 0,
+            "mean": float("nan"),
+            "std": float("nan"),
+            "ci95": float("nan"),
+            "lower_ci95": float("nan"),
+            "upper_ci95": float("nan"),
+        }
     mean = float(np.mean(arr))
     std = float(np.std(arr, ddof=1)) if n > 1 else 0.0
     ci95 = float(1.96 * std / math.sqrt(n)) if n > 1 else 0.0
-    return {"metric": col, "n": n, "mean": mean, "std": std, "ci95": ci95}
+    return {
+        "metric": col,
+        "n": n,
+        "mean": mean,
+        "std": std,
+        "ci95": ci95,
+        "lower_ci95": float(mean - ci95),
+        "upper_ci95": float(mean + ci95),
+    }
+
+
+def _aggregate_acceptance_status(mean: float, ci95: float, threshold: float, relation: str) -> tuple[str, float, float]:
+    mean_f = cfd._safe_float(mean)
+    ci95_f = cfd._safe_float(ci95)
+    if not np.isfinite(mean_f):
+        return "WARN", float("nan"), float("nan")
+    lower = float(mean_f - ci95_f) if np.isfinite(ci95_f) else mean_f
+    upper = float(mean_f + ci95_f) if np.isfinite(ci95_f) else mean_f
+    if relation == ">=":
+        if lower >= threshold:
+            return "PASS", lower, upper
+        if upper < threshold:
+            return "FAIL", lower, upper
+        return "WARN", lower, upper
+    if relation == "<=":
+        if upper <= threshold:
+            return "PASS", lower, upper
+        if lower > threshold:
+            return "FAIL", lower, upper
+        return "WARN", lower, upper
+    raise ValueError(f"Unsupported relation: {relation}")
+
+
+def _build_confirm_acceptance_df(aggregate_df: pd.DataFrame) -> pd.DataFrame:
+    aggregate_by_metric = {
+        str(row["metric"]): row
+        for row in aggregate_df.to_dict("records")
+    }
+    spec_by_name = {spec["failure_mode"]: spec for spec in cfd.FIELD_DIVERGENCE_ACCEPTANCE_SPECS}
+    selected_specs = [
+        spec_by_name[name]
+        for name in FIELD_DIVERGENCE_CONFIRM_ACCEPTANCE_FAILURE_MODES
+        if name in spec_by_name
+    ]
+
+    field_spec = spec_by_name["no_meaningful_field_divergence"]
+    field_stats = aggregate_by_metric.get(str(field_spec["metric"]), {})
+    field_threshold = float(cfd.FIELD_DIVERGENCE_ACCEPTANCE_THRESHOLDS[field_spec["threshold_key"]])
+    field_status, field_lower, field_upper = _aggregate_acceptance_status(
+        field_stats.get("mean", float("nan")),
+        field_stats.get("ci95", float("nan")),
+        field_threshold,
+        str(field_spec["relation"]),
+    )
+
+    rows = []
+    for spec in selected_specs:
+        metric = str(spec["metric"])
+        stats = aggregate_by_metric.get(metric, {})
+        mean = cfd._safe_float(stats.get("mean", float("nan")))
+        ci95 = cfd._safe_float(stats.get("ci95", float("nan")))
+        threshold = float(cfd.FIELD_DIVERGENCE_ACCEPTANCE_THRESHOLDS[spec["threshold_key"]])
+        relation = str(spec["relation"])
+
+        if spec.get("requires_field_divergence", False) and field_status != "PASS":
+            status = "WARN"
+            lower = cfd._safe_float(mean - ci95) if np.isfinite(mean) and np.isfinite(ci95) else mean
+            upper = cfd._safe_float(mean + ci95) if np.isfinite(mean) and np.isfinite(ci95) else mean
+            note = "Aggregate field-divergence evidence is not yet robust enough to interpret this downstream stage."
+        else:
+            status, lower, upper = _aggregate_acceptance_status(mean, ci95, threshold, relation)
+            if status == "PASS":
+                note = str(spec["pass_note"])
+            elif status == "FAIL":
+                note = str(spec["fail_note"])
+            else:
+                note = "CI95 straddles the acceptance threshold, so the aggregate result is borderline."
+
+        rows.append(
+            {
+                "failure_mode": str(spec["failure_mode"]),
+                "status": status,
+                "triggered": int(status == "FAIL"),
+                "metric": metric,
+                "mean": mean,
+                "ci95": ci95,
+                "lower_ci95": lower,
+                "upper_ci95": upper,
+                "threshold": threshold,
+                "relation": relation,
+                "note": note,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _confirm_acceptance_markdown_lines(acceptance_df: pd.DataFrame) -> List[str]:
+    lines = [
+        "## Acceptance Summary",
+        "| Failure mode | Status | Evidence | Acceptance test | Note |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for row in acceptance_df.to_dict("records"):
+        evidence = (
+            f"`{row['metric']}`={cfd._format_metric_value(cfd._safe_float(row['mean']))} "
+            f"(CI95 [{cfd._format_metric_value(cfd._safe_float(row['lower_ci95']))}, "
+            f"{cfd._format_metric_value(cfd._safe_float(row['upper_ci95']))}])"
+        )
+        test = f"`{row['metric']}` {row['relation']} {cfd._format_metric_value(cfd._safe_float(row['threshold']))}"
+        lines.append(f"| `{row['failure_mode']}` | {row['status']} | {evidence} | {test} | {row['note']} |")
+    return lines
 
 
 def _plot_confirm_bars(per_seed_df: pd.DataFrame, outdir: Path) -> List[Path]:
@@ -108,6 +259,12 @@ def _build_sim_kwargs(args: argparse.Namespace) -> dict:
         "patrol_hotspot_score_percentile": float(args.patrol_hotspot_score_percentile),
         "patrol_hotspot_keep_top_k": int(args.patrol_hotspot_keep_top_k),
         "model_deterring_window_s": float(args.model_deterring_window_s),
+        "model_deterring_min_persistence_replans": int(args.model_deterring_min_persistence_replans),
+        "model_deterring_max_eta_s": float(args.model_deterring_max_eta_s),
+        "model_deterring_score_margin": float(args.model_deterring_score_margin),
+        "model_deterring_budget_per_robot_per_hr": int(args.model_deterring_budget_per_robot_per_hr),
+        "model_deterring_budget_mode": str(args.model_deterring_budget_mode),
+        "model_deterring_budget_utility_per_robot_per_hr": float(args.model_deterring_budget_utility_per_robot_per_hr),
         "model_deterring_gate_policy": str(args.model_deterring_gate_policy),
         "model_deterring_sprt_alpha": float(args.model_deterring_sprt_alpha),
         "model_deterring_sprt_beta": float(args.model_deterring_sprt_beta),
@@ -142,11 +299,23 @@ def main() -> None:
     parser.add_argument("--assignment-switch-penalty", type=float, default=1.0)
     parser.add_argument("--task-replan-period-s", type=float, default=90.0)
     parser.add_argument("--assigner-w-task-value", type=float, default=0.0)
+    parser.add_argument(
+        "--planner-profile",
+        type=str,
+        default="",
+        help="Optional named planner preset. Example: thesis_confirm",
+    )
     parser.add_argument("--patrol-min-hotspot-score", type=float, default=1e-4)
     parser.add_argument("--patrol-hotspot-filter-mode", type=str, default="percentile")
     parser.add_argument("--patrol-hotspot-score-percentile", type=float, default=90.0)
     parser.add_argument("--patrol-hotspot-keep-top-k", type=int, default=6)
     parser.add_argument("--model-deterring-window-s", type=float, default=90.0)
+    parser.add_argument("--model-deterring-min-persistence-replans", type=int, default=2)
+    parser.add_argument("--model-deterring-max-eta-s", type=float, default=120.0)
+    parser.add_argument("--model-deterring-score-margin", type=float, default=0.05)
+    parser.add_argument("--model-deterring-budget-per-robot-per-hr", type=int, default=4)
+    parser.add_argument("--model-deterring-budget-mode", type=str, default="count_per_hour")
+    parser.add_argument("--model-deterring-budget-utility-per-robot-per-hr", type=float, default=5.0)
     parser.add_argument("--model-deterring-gate-policy", type=str, default="heuristic")
     parser.add_argument("--model-deterring-sprt-alpha", type=float, default=0.05)
     parser.add_argument("--model-deterring-sprt-beta", type=float, default=0.20)
@@ -158,6 +327,15 @@ def main() -> None:
     parser.add_argument("--model-beta-scale", type=float, default=1.0)
     parser.add_argument("--outdir", type=str, default="results/field_divergence_confirm")
     args, config_meta = parse_args_with_config(parser, aliases=FIELD_DIVERGENCE_CONFIRM_CONFIG_ALIASES)
+    protected_profile_dests = explicit_cli_dests(parser) | set(config_meta.get("config_overrides", {}).keys())
+    planner_profile, planner_profile_values = apply_planner_profile_defaults(
+        vars(args),
+        getattr(args, "planner_profile", ""),
+        dest_map=FIELD_DIVERGENCE_CONFIRM_PROFILE_DEST_MAP,
+        protected_dests=protected_profile_dests,
+        stringify=False,
+    )
+    args.planner_profile = planner_profile
 
     if getattr(ds, "mon", None) is not None:
         ds.mon.enabled = False
@@ -349,21 +527,32 @@ def main() -> None:
         "recent_deterrence_patrol_fraction_proposed_mean",
     ]
     aggregate_df = pd.DataFrame([_aggregate_metric(per_seed_df, col) for col in metrics_for_agg])
+    acceptance_df = _build_confirm_acceptance_df(aggregate_df)
+    aggregate_mean_metrics = {
+        str(row["metric"]): cfd._safe_float(row["mean"])
+        for row in aggregate_df.to_dict("records")
+    }
+    bottleneck_hint = cfd._explain_likely_bottleneck(aggregate_mean_metrics)
 
     manifest = {
         "seeds": seeds,
         "sim_kwargs": sim_kwargs,
         "args": vars(args),
         "config": config_meta,
+        "planner_profile": planner_profile,
+        "planner_profile_values": planner_profile_values,
+        "workflow_stage": stage_manifest("field_divergence_confirm"),
     }
 
     per_time_path = outdir / "field_divergence_confirm_per_time.csv"
     per_seed_path = outdir / "field_divergence_confirm_per_seed.csv"
     aggregate_path = outdir / "field_divergence_confirm_aggregate.csv"
+    acceptance_path = outdir / "field_divergence_confirm_acceptance.csv"
     manifest_path = outdir / "field_divergence_confirm_manifest.json"
     per_time_all.to_csv(per_time_path, index=False)
     per_seed_df.to_csv(per_seed_path, index=False)
     aggregate_df.to_csv(aggregate_path, index=False)
+    acceptance_df.to_csv(acceptance_path, index=False)
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     plot_paths = _plot_confirm_bars(per_seed_df, outdir) if not per_seed_df.empty else []
@@ -374,17 +563,36 @@ def main() -> None:
             [
                 "# Field Divergence Confirm",
                 "",
+                *render_stage_readme_lines("field_divergence_confirm"),
+                "",
+                "## Key Outputs",
                 f"- Per-time CSV: `{per_time_path.name}`",
                 f"- Per-seed CSV: `{per_seed_path.name}`",
                 f"- Aggregate CSV: `{aggregate_path.name}`",
+                f"- Acceptance CSV: `{acceptance_path.name}`",
                 f"- Manifest: `{manifest_path.name}`",
                 "",
-                "Key interpretation:",
+                *(_confirm_acceptance_markdown_lines(acceptance_df)),
+                "",
+                "## Interpretation",
+                f"- Likely bottleneck: {bottleneck_hint}",
+                "- All confirm deltas are paired proposed-vs-prediction comparisons on the same seeds before aggregation.",
+                "",
+                "## Aggregate Acceptance Logic",
+                "- `PASS` means the metric CI95 stays on the accepted side of the threshold.",
+                "- `FAIL` means the metric CI95 stays on the rejected side of the threshold.",
+                "- `WARN` means the CI95 straddles the threshold, or upstream field divergence is too weak to interpret downstream collapse.",
+                "- Field divergence requires `suppressed_area_fraction_mean >= 0.10`; downstream overlap means should stay at or below `0.80`.",
+                "",
+                "## Key Interpretation",
                 "- `final_exposure_improve_pct > 0` means proposed lowered exposure relative to prediction-only.",
                 "- `final_response_improve_pct > 0` means proposed improved response time.",
+                f"- Planner profile: `{planner_profile or 'manual'}`",
                 f"- Gate policy: `{args.model_deterring_gate_policy}`",
                 "- Low patrol-overlap metrics mean the proposed model is changing actual patrol behavior.",
                 "- Use the aggregate CSV CI95 values to judge whether single-seed improvements look robust.",
+                "",
+                *render_execution_order_lines(),
             ]
         ),
         encoding="utf-8",
@@ -394,6 +602,7 @@ def main() -> None:
     print(f"- {per_time_path}")
     print(f"- {per_seed_path}")
     print(f"- {aggregate_path}")
+    print(f"- {acceptance_path}")
     print(f"- {manifest_path}")
     for p in plot_paths:
         print(f"- {p}")

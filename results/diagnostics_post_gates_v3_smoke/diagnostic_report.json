@@ -1,0 +1,322 @@
+{
+  "parameters": {
+    "T_end": 3600.0,
+    "dt": 5.0,
+    "seed": 2026,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 80,
+    "NY": 64,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "warmup_s": 1800.0,
+    "task_replan_period_s": 45.0,
+    "model_deterring_window_s": 90.0,
+    "model_deterring_risk_threshold": 0.35,
+    "model_deterring_budget_per_robot_per_hr": 4,
+    "model_deterring_min_recent_points": 1,
+    "forecast_horizon_s": 300.0,
+    "forecast_match_radius_m": 20.0,
+    "forecast_top_k": 5,
+    "forecast_eval_period_s": 30.0,
+    "telemetry_clear_on_start": false,
+    "telemetry_prompt_save": false
+  },
+  "prediction_only_final_metrics": {
+    "value_weighted_exposure": 5796.799151800864,
+    "mean_response_time_s": 311.1542417081923,
+    "response_samples": 145,
+    "travel_distance_by_robot": {
+      "r1": 4420.127013347773,
+      "r2": 6924.402380666383,
+      "r3": 5974.3014543141,
+      "r4": 5810.152002554016,
+      "r5": 6006.6099915785235,
+      "r6": 5810.8502177764085
+    },
+    "travel_distance_by_type": {
+      "UGV": 34946.4430602372,
+      "UAV": 0.0
+    },
+    "energy_by_robot": {
+      "r1": 4420.127013347773,
+      "r2": 6924.402380666383,
+      "r3": 5974.3014543141,
+      "r4": 5810.152002554016,
+      "r5": 6006.6099915785235,
+      "r6": 5810.8502177764085
+    },
+    "energy_by_type": {
+      "UGV": 34946.4430602372,
+      "UAV": 0.0
+    },
+    "completed_tasks_by_type": {
+      "deterring": 145,
+      "patrolling": 444
+    },
+    "completed_tasks_total": 589,
+    "tasks_per_unit_distance": 0.016854361944211044,
+    "exposure_per_completed_task": 9.841764264517595,
+    "score_per_completed_task": -0.3637908354215601,
+    "boundary_message_count": 120,
+    "boundary_bytes_sent": 7680,
+    "boundary_message_count_by_type": {
+      "detection": 120,
+      "intervention": 0
+    },
+    "boundary_bytes_by_type": {
+      "detection": 7680,
+      "intervention": 0
+    },
+    "fleet_task_assigned_fraction": 0.8333333333333334,
+    "fleet_moving_fraction": 0.3333333333333333,
+    "fleet_idle_fraction": 0.16666666666666666,
+    "fleet_idle_no_task_fraction": 0.16666666666666666,
+    "fleet_idle_with_task_fraction": 0.0,
+    "fleet_task_engagement_fraction_so_far": 0.8922792417938045,
+    "fleet_moving_fraction_so_far": 0.6012482662968107,
+    "fleet_idle_no_task_fraction_so_far": 0.10772075820619473,
+    "robot_task_utilization_by_robot": {
+      "r1": 0.6879334257975035,
+      "r2": 1.0,
+      "r3": 0.912621359223301,
+      "r4": 0.9042995839112344,
+      "r5": 0.9403606102635229,
+      "r6": 0.9084604715672677
+    },
+    "robot_idle_fraction_by_robot": {
+      "r1": 0.4119278779472954,
+      "r2": 0.11511789181692095,
+      "r3": 0.21914008321775313,
+      "r4": 0.2274618585298197,
+      "r5": 0.18446601941747573,
+      "r6": 0.22191400832177532
+    },
+    "robot_moving_with_task_fraction_by_robot": {
+      "r1": 0.4563106796116505,
+      "r2": 0.7142857142857143,
+      "r3": 0.6144244105409153,
+      "r4": 0.6005547850208044,
+      "r5": 0.6227461858529819,
+      "r6": 0.5991678224687933
+    },
+    "robot_longest_idle_s_by_robot": {
+      "r1": 445.0,
+      "r2": 65.0,
+      "r3": 270.0,
+      "r4": 370.0,
+      "r5": 220.0,
+      "r6": 230.0
+    },
+    "robot_tail_idle_s_by_robot": {
+      "r1": 445.0,
+      "r2": 0.0,
+      "r3": 0.0,
+      "r4": 0.0,
+      "r5": 0.0,
+      "r6": 0.0
+    },
+    "robot_task_utilization_mean": 0.8922792417938049,
+    "robot_idle_fraction_mean": 0.23000462320850668,
+    "robot_moving_with_task_fraction_mean": 0.6012482662968099,
+    "robot_longest_idle_s_max": 445.0,
+    "robot_tail_idle_s_max": 445.0,
+    "robots_zero_distance_count": 0,
+    "stale_goal_clears": 0,
+    "model_deterring_accepted": 0,
+    "model_deterring_rejected_budget": 0,
+    "model_deterring_generated": 0,
+    "model_deterring_candidates_total": 0,
+    "model_deterring_rejected_cooldown": 0,
+    "model_deterring_rejected_field": 0,
+    "model_deterring_pass_field": 0,
+    "model_deterring_rejected_risk": 0,
+    "model_deterring_pass_risk": 0,
+    "model_deterring_rejected_support": 0,
+    "model_deterring_rejected_persistence": 0,
+    "model_deterring_rejected_repeat_no_new_support": 0,
+    "model_deterring_rejected_eta": 0,
+    "model_deterring_rejected_busy": 0,
+    "model_deterring_rejected_margin": 0,
+    "model_deterring_pass_support": 0,
+    "model_deterring_not_selected": 0,
+    "truth_candidate_events": 2698,
+    "truth_accepted_events": 2647,
+    "truth_suppressed_events": 51,
+    "truth_suppression_rate": 0.018902891030392884,
+    "truth_suppression_effect_mean": 0.0167872472222497,
+    "truth_suppression_effect_sum": 45.291993005629685,
+    "truth_suppression_effect_by_mode": {
+      "direct_detection": 45.291993005629685
+    },
+    "truth_suppression_effect_by_source": {
+      "direct_detection": 45.291993005629685,
+      "model_scored": 0.0
+    },
+    "deterring_actions_completed_total": 145,
+    "deterring_actions_completed_direct_detection": 145,
+    "deterring_actions_completed_model_scored": 0,
+    "deterring_action_precision": 0.593103448275862,
+    "deterring_action_precision_direct_detection": 0.593103448275862,
+    "deterring_action_precision_model_scored": NaN,
+    "suppression_per_deterring_action": 0.3123585724526185,
+    "suppression_per_direct_deterring_action": 0.3123585724526185,
+    "suppression_per_model_deterring_action": NaN,
+    "model_vs_direct_suppression_yield_ratio": NaN,
+    "forecast_recall_at_k": NaN,
+    "forecast_precision_at_k": 0.0,
+    "forecast_hotspot_hit_rate": 0.0,
+    "forecast_lead_time_s": NaN,
+    "forecast_samples": 121
+  },
+  "proposed_final_metrics": {
+    "value_weighted_exposure": 5723.247613811541,
+    "mean_response_time_s": 300.9606863646715,
+    "response_samples": 141,
+    "travel_distance_by_robot": {
+      "r1": 5264.205715767293,
+      "r2": 6729.5964023978695,
+      "r3": 5566.223683281406,
+      "r4": 6189.650924498214,
+      "r5": 6187.90801391811,
+      "r6": 5602.08549566809
+    },
+    "travel_distance_by_type": {
+      "UGV": 35539.67023553098,
+      "UAV": 0.0
+    },
+    "energy_by_robot": {
+      "r1": 5264.205715767293,
+      "r2": 6729.5964023978695,
+      "r3": 5566.223683281406,
+      "r4": 6189.650924498214,
+      "r5": 6187.90801391811,
+      "r6": 5602.08549566809
+    },
+    "energy_by_type": {
+      "UGV": 35539.67023553098,
+      "UAV": 0.0
+    },
+    "completed_tasks_by_type": {
+      "deterring": 141,
+      "patrolling": 426
+    },
+    "completed_tasks_total": 567,
+    "tasks_per_unit_distance": 0.015954002843648746,
+    "exposure_per_completed_task": 10.093911135470089,
+    "score_per_completed_task": -0.03950011842828774,
+    "boundary_message_count": 189,
+    "boundary_bytes_sent": 12728,
+    "boundary_message_count_by_type": {
+      "detection": 110,
+      "intervention": 79
+    },
+    "boundary_bytes_by_type": {
+      "detection": 7040,
+      "intervention": 5688
+    },
+    "fleet_task_assigned_fraction": 1.0,
+    "fleet_moving_fraction": 0.5,
+    "fleet_idle_fraction": 0.16666666666666666,
+    "fleet_idle_no_task_fraction": 0.0,
+    "fleet_idle_with_task_fraction": 0.16666666666666666,
+    "fleet_task_engagement_fraction_so_far": 0.8945908460471551,
+    "fleet_moving_fraction_so_far": 0.610494683310217,
+    "fleet_idle_no_task_fraction_so_far": 0.10540915395284298,
+    "robot_task_utilization_by_robot": {
+      "r1": 0.8085991678224688,
+      "r2": 1.0,
+      "r3": 0.8654646324549237,
+      "r4": 0.8723994452149791,
+      "r5": 0.9431345353675451,
+      "r6": 0.8779472954230236
+    },
+    "robot_idle_fraction_by_robot": {
+      "r1": 0.29403606102635227,
+      "r2": 0.13592233009708737,
+      "r3": 0.2552011095700416,
+      "r4": 0.2302357836338419,
+      "r5": 0.17337031900138697,
+      "r6": 0.24965325936199723
+    },
+    "robot_moving_with_task_fraction_by_robot": {
+      "r1": 0.5395284327323162,
+      "r2": 0.6879334257975035,
+      "r3": 0.5728155339805825,
+      "r4": 0.6449375866851595,
+      "r5": 0.6380027739251041,
+      "r6": 0.579750346740638
+    },
+    "robot_longest_idle_s_by_robot": {
+      "r1": 270.0,
+      "r2": 65.0,
+      "r3": 270.0,
+      "r4": 355.0,
+      "r5": 220.0,
+      "r6": 175.0
+    },
+    "robot_tail_idle_s_by_robot": {
+      "r1": 0.0,
+      "r2": 0.0,
+      "r3": 0.0,
+      "r4": 0.0,
+      "r5": 5.0,
+      "r6": 0.0
+    },
+    "robot_task_utilization_mean": 0.8945908460471568,
+    "robot_idle_fraction_mean": 0.2230698104484512,
+    "robot_moving_with_task_fraction_mean": 0.6104946833102173,
+    "robot_longest_idle_s_max": 355.0,
+    "robot_tail_idle_s_max": 5.0,
+    "robots_zero_distance_count": 0,
+    "stale_goal_clears": 0,
+    "model_deterring_accepted": 0,
+    "model_deterring_rejected_budget": 0,
+    "model_deterring_generated": 0,
+    "model_deterring_candidates_total": 336,
+    "model_deterring_rejected_cooldown": 0,
+    "model_deterring_rejected_field": 103,
+    "model_deterring_pass_field": 1,
+    "model_deterring_rejected_risk": 0,
+    "model_deterring_pass_risk": 1,
+    "model_deterring_rejected_support": 0,
+    "model_deterring_rejected_persistence": 1,
+    "model_deterring_rejected_repeat_no_new_support": 0,
+    "model_deterring_rejected_eta": 0,
+    "model_deterring_rejected_busy": 232,
+    "model_deterring_rejected_margin": 0,
+    "model_deterring_pass_support": 0,
+    "model_deterring_not_selected": 0,
+    "truth_candidate_events": 2667,
+    "truth_accepted_events": 2627,
+    "truth_suppressed_events": 40,
+    "truth_suppression_rate": 0.014998125234345707,
+    "truth_suppression_effect_mean": 0.016029396821296504,
+    "truth_suppression_effect_sum": 42.75040132239778,
+    "truth_suppression_effect_by_mode": {
+      "direct_detection": 42.75040132239778
+    },
+    "truth_suppression_effect_by_source": {
+      "direct_detection": 42.75040132239778,
+      "model_scored": 0.0
+    },
+    "deterring_actions_completed_total": 141,
+    "deterring_actions_completed_direct_detection": 141,
+    "deterring_actions_completed_model_scored": 0,
+    "deterring_action_precision": 0.5106382978723404,
+    "deterring_action_precision_direct_detection": 0.5106382978723404,
+    "deterring_action_precision_model_scored": NaN,
+    "suppression_per_deterring_action": 0.3031943356198424,
+    "suppression_per_direct_deterring_action": 0.3031943356198424,
+    "suppression_per_model_deterring_action": NaN,
+    "model_vs_direct_suppression_yield_ratio": NaN,
+    "forecast_recall_at_k": NaN,
+    "forecast_precision_at_k": 0.0,
+    "forecast_hotspot_hit_rate": 0.0,
+    "forecast_lead_time_s": NaN,
+    "forecast_samples": 121
+  },
+  "critical_recommendations": [
+    "Proposed communication is much higher: tighten boundary broadcast conditions or raise deterrence task admission threshold."
+  ]
+}

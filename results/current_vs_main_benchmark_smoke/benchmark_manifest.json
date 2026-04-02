@@ -1,0 +1,32 @@
+{
+  "current_repo": {
+    "path": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code",
+    "branch": "share-for-ai-20260330",
+    "commit": "c74a62945105fb655edc4fb94a1951b480dbb9a6",
+    "dirty": true
+  },
+  "main_repo": {
+    "path": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code-main",
+    "branch": "main",
+    "commit": "950adbabb055cc1e470c44efb3e0a165f16f3904",
+    "dirty": false
+  },
+  "benchmark_params": {
+    "num_runs": 1,
+    "seed_start": 1000,
+    "W": 500.0,
+    "H": 500.0,
+    "T_end": 60.0,
+    "dt": 5.0,
+    "fps": 1,
+    "NX": 80,
+    "NY": 64,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 15.0,
+    "current_simulation_mode": "proposed"
+  }
+}

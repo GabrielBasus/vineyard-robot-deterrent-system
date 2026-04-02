@@ -47,8 +47,21 @@ PRODUCTION_CONFIG_SECTIONS: Dict[str, tuple[str, ...]] = {
         "assigner_w_load",
         "enable_assignment_task_value_term",
         "assigner_w_task_value",
+        "planner_profile",
+    ),
+    "calibration": (
+        "use_frozen_calibration",
+        "calibration_ranking_path",
+        "calibration_manifest_path",
+        "calibration_config_id",
+        "selected_calibration_config_id",
+        "selected_calibration_source",
+        "selected_calibration_summary_metrics",
     ),
     "gating": (
+        "preventive_policy",
+        "preventive_policy_source",
+        "selective_preventive_enabled",
         "model_deterring_window_s",
         "model_deterring_risk_threshold",
         "model_deterring_risk_scale",
@@ -178,6 +191,7 @@ class ProductionSystemConfig:
     detection: Dict[str, Any]
     task_generation: Dict[str, Any]
     task_priority: Dict[str, Any]
+    calibration: Dict[str, Any]
     gating: Dict[str, Any]
     planner: Dict[str, Any]
     baseline: Dict[str, Any]
@@ -232,6 +246,11 @@ class TaskGenerationStageResult:
                     "time": task.get("time"),
                     "score": task.get("score"),
                     "utility": task.get("utility"),
+                    "predicted_deltaJ": task.get("predicted_deltaJ"),
+                    "p_event": task.get("p_event"),
+                    "deltaJ_per_cost": task.get("deltaJ_per_cost"),
+                    "llr": task.get("llr"),
+                    "selection_weight": task.get("selection_weight"),
                 }
             )
         return {
@@ -256,6 +275,8 @@ class DispatchStageResult:
     accepted_tasks: list[dict]
     rejected_counts: Dict[str, int]
     rejected_model_det_tasks: list[dict]
+    ordering_policy: str
+    ordered_candidate_preview: list[dict]
     replaced_patrol_count: int
     active_load_after_dispatch: Dict[str, int]
     active_patrol_load_after_dispatch: Dict[str, int]
@@ -286,6 +307,8 @@ class DispatchStageResult:
             "rejected_counts": dict(self.rejected_counts),
             "rejected_model_det_count": int(len(self.rejected_model_det_tasks)),
             "rejected_model_det_tasks": list(self.rejected_model_det_tasks),
+            "ordering_policy": str(self.ordering_policy),
+            "ordered_candidate_preview": list(self.ordered_candidate_preview),
             "replaced_patrol_count": int(self.replaced_patrol_count),
             "active_load_after_dispatch": dict(self.active_load_after_dispatch),
             "active_patrol_load_after_dispatch": dict(self.active_patrol_load_after_dispatch),
@@ -530,6 +553,7 @@ def build_production_system_config(
         detection=sections["detection"],
         task_generation=sections["task_generation"],
         task_priority=sections["task_priority"],
+        calibration=sections["calibration"],
         gating=sections["gating"],
         planner=sections["planner"],
         baseline=sections["baseline"],

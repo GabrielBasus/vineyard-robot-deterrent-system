@@ -16,6 +16,7 @@ analysis:
   local_patch_radius_m: 20.0
 
 planner:
+  # profile: thesis_confirm
   assignment_method: hungarian
   assignment_distance_cost_per_m: 0.006
   assignment_switch_penalty: 1.0

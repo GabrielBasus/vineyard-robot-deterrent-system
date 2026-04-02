@@ -1,0 +1,20 @@
+{
+  "checkpoint_version": 3,
+  "num_rows": 4,
+  "last_completed_scenario": "d0.005_s0.5_rp90_rt0.35_bh4_dw90_bt0.35",
+  "last_completed_pair": {
+    "baseline": "proposed",
+    "assignment_method": "hungarian"
+  },
+  "num_runs": 1,
+  "seed_start": 2000,
+  "baselines": [
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "frozen_greedy",
+    "hungarian"
+  ],
+  "max_workers": 1
+}

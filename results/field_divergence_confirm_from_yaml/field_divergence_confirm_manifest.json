@@ -1,0 +1,217 @@
+{
+  "seeds": [
+    2000,
+    2001,
+    2002,
+    2003,
+    2004
+  ],
+  "sim_kwargs": {
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 80,
+    "NY": 64,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "warmup_s": 1800.0,
+    "forecast_horizon_s": 300.0,
+    "forecast_match_radius_m": 20.0,
+    "forecast_top_k": 5,
+    "forecast_eval_period_s": 30.0,
+    "task_replan_period_s": 60.0,
+    "assignment_method": "hungarian",
+    "assignment_distance_cost_per_m": 0.006,
+    "assignment_switch_penalty": 1.0,
+    "assigner_w_task_value": 0.0,
+    "patrol_min_hotspot_score": 0.0001,
+    "patrol_hotspot_filter_mode": "percentile",
+    "patrol_hotspot_score_percentile": 97.0,
+    "patrol_hotspot_keep_top_k": 6,
+    "model_deterring_window_s": 90.0,
+    "model_deterring_min_persistence_replans": 2,
+    "model_deterring_max_eta_s": 120.0,
+    "model_deterring_score_margin": 0.05,
+    "model_deterring_budget_per_robot_per_hr": 4,
+    "model_deterring_budget_mode": "count_per_hour",
+    "model_deterring_budget_utility_per_robot_per_hr": 5.0,
+    "model_deterring_gate_policy": "sprt_capacity",
+    "model_deterring_sprt_alpha": 0.05,
+    "model_deterring_sprt_beta": 0.2,
+    "model_deterring_chance_threshold": 0.2,
+    "model_deterring_min_deltaJ_per_cost": 0.15,
+    "beta_true": 0.35,
+    "omega_true": 600.0,
+    "sigma_true": 12.0,
+    "deterring_modes": {
+      "formation": {
+        "beta": 0.3,
+        "omega": 800.0,
+        "sigma": 18.0,
+        "w_eta": 1.0,
+        "fixed_cost": 0.0
+      },
+      "laser": {
+        "beta": 0.45,
+        "omega": 400.0,
+        "sigma": 10.0,
+        "w_eta": 1.5,
+        "fixed_cost": 0.0
+      },
+      "biosonic": {
+        "beta": 0.25,
+        "omega": 600.0,
+        "sigma": 20.0,
+        "w_eta": 1.2,
+        "fixed_cost": 0.0
+      }
+    },
+    "telemetry_clear_on_start": false,
+    "telemetry_prompt_save": false,
+    "T_end": 3600.0,
+    "dt": 5.0
+  },
+  "args": {
+    "config": "configs/run_field_divergence_confirm_lab.yaml",
+    "seeds": "2000,2001,2002,2003,2004",
+    "t_end": 3600.0,
+    "dt": 5.0,
+    "sample_period_s": 300.0,
+    "hotspot_top_k": 5,
+    "hotspot_match_radius_m": 25.0,
+    "patrol_match_radius_m": 25.0,
+    "recent_deterrence_window_s": 300.0,
+    "recent_deterrence_radius_m": 25.0,
+    "local_patch_radius_m": 20.0,
+    "assignment_method": "hungarian",
+    "assignment_distance_cost_per_m": 0.006,
+    "assignment_switch_penalty": 1.0,
+    "task_replan_period_s": 60.0,
+    "assigner_w_task_value": 0.0,
+    "planner_profile": "",
+    "patrol_min_hotspot_score": 0.0001,
+    "patrol_hotspot_filter_mode": "percentile",
+    "patrol_hotspot_score_percentile": 97.0,
+    "patrol_hotspot_keep_top_k": 6,
+    "model_deterring_window_s": 90.0,
+    "model_deterring_min_persistence_replans": 2,
+    "model_deterring_max_eta_s": 120.0,
+    "model_deterring_score_margin": 0.05,
+    "model_deterring_budget_per_robot_per_hr": 4,
+    "model_deterring_budget_mode": "count_per_hour",
+    "model_deterring_budget_utility_per_robot_per_hr": 5.0,
+    "model_deterring_gate_policy": "sprt_capacity",
+    "model_deterring_sprt_alpha": 0.05,
+    "model_deterring_sprt_beta": 0.2,
+    "model_deterring_chance_threshold": 0.2,
+    "model_deterring_min_deltaj_per_cost": 0.15,
+    "truth_beta_scale": 1.0,
+    "truth_omega_scale": 1.0,
+    "truth_sigma_scale": 1.0,
+    "model_beta_scale": 1.0,
+    "outdir": "results/field_divergence_confirm_from_yaml"
+  },
+  "config": {
+    "config_path": "configs\\run_field_divergence_confirm_lab.yaml",
+    "raw_config": {
+      "runner": {
+        "seeds": [
+          2000,
+          2001,
+          2002,
+          2003,
+          2004
+        ],
+        "outdir": "results/field_divergence_confirm_from_yaml"
+      },
+      "simulation": {
+        "t_end": 3600,
+        "dt": 5.0
+      },
+      "analysis": {
+        "sample_period_s": 300,
+        "hotspot_top_k": 5,
+        "hotspot_match_radius_m": 25.0,
+        "patrol_match_radius_m": 25.0,
+        "recent_deterrence_window_s": 300.0,
+        "recent_deterrence_radius_m": 25.0,
+        "local_patch_radius_m": 20.0
+      },
+      "planner": {
+        "assignment_method": "hungarian",
+        "assignment_distance_cost_per_m": 0.006,
+        "assignment_switch_penalty": 1.0,
+        "task_replan_period_s": 60.0,
+        "assigner_w_task_value": 0.0
+      },
+      "patrol_filter": {
+        "patrol_min_hotspot_score": 0.0001,
+        "patrol_hotspot_filter_mode": "percentile",
+        "patrol_hotspot_score_percentile": 97,
+        "patrol_hotspot_keep_top_k": 6
+      },
+      "gating": {
+        "model_deterring_window_s": 90.0,
+        "model_deterring_gate_policy": "sprt_capacity",
+        "model_deterring_sprt_alpha": 0.05,
+        "model_deterring_sprt_beta": 0.2,
+        "model_deterring_chance_threshold": 0.2,
+        "model_deterring_min_deltaj_per_cost": 0.15
+      },
+      "ground_truth": {
+        "truth_beta_scale": 1.0,
+        "truth_omega_scale": 1.0,
+        "truth_sigma_scale": 1.0
+      },
+      "model": {
+        "model_beta_scale": 1.0
+      }
+    },
+    "config_overrides": {
+      "seeds": "2000,2001,2002,2003,2004",
+      "outdir": "results/field_divergence_confirm_from_yaml",
+      "t_end": 3600.0,
+      "dt": 5.0,
+      "sample_period_s": 300.0,
+      "hotspot_top_k": 5,
+      "hotspot_match_radius_m": 25.0,
+      "patrol_match_radius_m": 25.0,
+      "recent_deterrence_window_s": 300.0,
+      "recent_deterrence_radius_m": 25.0,
+      "local_patch_radius_m": 20.0,
+      "assignment_method": "hungarian",
+      "assignment_distance_cost_per_m": 0.006,
+      "assignment_switch_penalty": 1.0,
+      "task_replan_period_s": 60.0,
+      "assigner_w_task_value": 0.0,
+      "patrol_min_hotspot_score": 0.0001,
+      "patrol_hotspot_filter_mode": "percentile",
+      "patrol_hotspot_score_percentile": 97.0,
+      "patrol_hotspot_keep_top_k": 6,
+      "model_deterring_window_s": 90.0,
+      "model_deterring_gate_policy": "sprt_capacity",
+      "model_deterring_sprt_alpha": 0.05,
+      "model_deterring_sprt_beta": 0.2,
+      "model_deterring_chance_threshold": 0.2,
+      "model_deterring_min_deltaj_per_cost": 0.15,
+      "truth_beta_scale": 1.0,
+      "truth_omega_scale": 1.0,
+      "truth_sigma_scale": 1.0,
+      "model_beta_scale": 1.0
+    }
+  },
+  "planner_profile": "",
+  "planner_profile_values": {},
+  "workflow_stage": {
+    "stage_key": "field_divergence_confirm",
+    "stage_title": "Field Divergence Confirm",
+    "stage_order": 3,
+    "stage_total": 6,
+    "runner": "run_field_divergence_confirm_lab.py",
+    "depends_on": [
+      "field_divergence_lab"
+    ],
+    "optional": false,
+    "order_note": "Only advance once the same-seed proposed-vs-prediction comparisons remain favorable across seeds with defensible CI95 bounds.",
+    "question": "Across matched seeds, is the proposed-vs-prediction field separation robust enough to support downstream planner claims?"
+  }
+}

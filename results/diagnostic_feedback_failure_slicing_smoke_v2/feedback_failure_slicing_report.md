@@ -1,0 +1,46 @@
+# Feedback Failure Slicing Diagnostic
+
+## Parameters
+
+- `runs`: `2`
+- `seed_start`: `2026`
+- `T_end`: `2400.0`
+- `dt`: `5.0`
+- `warmup_s`: `1800.0`
+- `eval_period_s`: `30.0`
+- `forecast_horizon_s`: `300.0`
+- `sample_every_s`: `60.0`
+- `bin_s`: `60.0`
+- `task_replan_period_s`: `60.0`
+- `hotspot_top_k`: `5`
+- `match_radius_m`: `25.0`
+- `support_radius_m`: `25.0`
+- `patrol_hotspot_filter_mode`: `percentile`
+- `patrol_hotspot_score_percentile`: `97.0`
+- `alpha_inhib`: `0.45`
+- `omega_inhib`: `600.0`
+- `mu_base`: `5e-05`
+- `bg_ema`: `1e-06`
+- `intervention_shuffle`: `none`
+
+## Outcome Summary
+
+- `exposure_improve_pct_mean`: `1.928835135638674`
+- `exposure_improve_pct_std`: `1.928835135638674`
+- `response_improve_pct_mean`: `2.515748922168243`
+- `response_improve_pct_std`: `2.515748922168243`
+- `comm_increase_pct_mean`: `40.804794520547944`
+- `runs_exposure_positive`: `1`
+- `runs_response_positive`: `1`
+- `runs_both_positive`: `1`
+
+## Top Exposure Correlates
+
+
+## Top Response Correlates
+
+
+## Conclusions
+
+- Feedback-on proposed is not robust across seeds on exposure.
+- Field-level feedback benefit remains positive on average across the same seeds.

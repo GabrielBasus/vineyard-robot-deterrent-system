@@ -11,6 +11,7 @@ runner:
   max_workers: 1
 
 planner:
+  # profile: thesis_confirm
   distance_costs: [0.006]
   switch_penalties: [1.0]
   replan_periods: [60]

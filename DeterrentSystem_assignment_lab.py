@@ -22,6 +22,7 @@ from SESTPP import OnlineSESTPP
 from Robot import Robot, RobotProfile
 from TaskGenerator_lab import TaskGenerator, TaskAssigner
 import assignment_methods_lab as aml
+from planner_profiles import canonicalize_planner_profile_name, get_planner_profile_values
 
 class EventBus:
     def __init__(self, robots: Dict[str, Robot], bytes_per_boundary_msg: int = 64, bytes_per_intervention_msg: int = 72):
@@ -75,7 +76,14 @@ class EventBus:
                     else:
                         qx = int(round(x))
                         qy = int(round(y))
-                    k = (str(source_id), str(rid), qx, qy)
+                    k = (
+                        str(source_id),
+                        str(rid),
+                        qx,
+                        qy,
+                        None if ev.get('mode') is None else str(ev.get('mode')),
+                        ev.get('action_id'),
+                    )
                     t_last = float(self._last_intervention_key_t.get(k, -1e18))
                     if (t - t_last) < min_interval_s:
                         self.intervention_msg_dropped_debounce += 1
@@ -85,7 +93,12 @@ class EventBus:
                 self.intervention_bytes += self.bytes_per_intervention_msg
                 self.robots[rid].ingest_intervention_event(
                     x=ev['x'], y=ev['y'], t=ev['t'],
-                    weight=w, sigma=ev.get('sigma'), omega_inhib=ev.get('omega_inhib')
+                    weight=w,
+                    sigma=ev.get('sigma'),
+                    omega_inhib=ev.get('omega_inhib'),
+                    mode=ev.get('mode'),
+                    beta=ev.get('beta'),
+                    action_id=ev.get('action_id'),
                 )
 
 def make_robot_profiles(robots_def, rng, uav_fraction=0.4):
@@ -225,7 +238,7 @@ def run_simulation_frames_persistent(
     detect_rate_per_robot=0.01, detect_sigma_m=10.0,
 
     bird_stay_mean_s=20.0,       # how long a bird lingers near a robot (exp. mean)
-    bird_detection_prob=0.10,    # per-step chance to emit a detection while present
+    bird_detection_prob=0.10,    # truth-event observation probability within range; per-step while present in fallback mode
     per_robot_cooldown_s=10.0,   # minimum time between detections for each robot
     max_detections_per_step=2,   # safety cap per step per robot
     
@@ -251,7 +264,8 @@ def run_simulation_frames_persistent(
     prio_patrolling=0.2,
     assigner_w_load=0.8,
     assigner_w_task_value=0.0,
-    assignment_method="frozen_greedy",
+    planner_profile="",
+    assignment_method="hungarian",
     assignment_distance_cost_per_m=0.0,
     assignment_switch_penalty=0.0,
     cbba_max_rounds=25,
@@ -389,6 +403,52 @@ def run_simulation_frames_persistent(
         include_fallback_patrol = mode_defaults[mode_key]["include_fallback_patrol"]
     if enable_model_scored_deterring is None:
         enable_model_scored_deterring = mode_defaults[mode_key]["enable_model_scored_deterring"]
+    planner_profile = canonicalize_planner_profile_name(planner_profile)
+    if planner_profile:
+        planner_profile_values = get_planner_profile_values(planner_profile)
+        assigner_w_task_value = float(planner_profile_values.get("assigner_w_task_value", assigner_w_task_value))
+        model_deterring_window_s = float(
+            planner_profile_values.get("model_deterring_window_s", model_deterring_window_s)
+        )
+        model_deterring_min_persistence_replans = int(
+            planner_profile_values.get(
+                "model_deterring_min_persistence_replans",
+                model_deterring_min_persistence_replans,
+            )
+        )
+        model_deterring_max_eta_s = float(
+            planner_profile_values.get("model_deterring_max_eta_s", model_deterring_max_eta_s)
+        )
+        model_deterring_score_margin = float(
+            planner_profile_values.get("model_deterring_score_margin", model_deterring_score_margin)
+        )
+        model_deterring_budget_per_robot_per_hr = int(
+            planner_profile_values.get(
+                "model_deterring_budget_per_robot_per_hr",
+                model_deterring_budget_per_robot_per_hr,
+            )
+        )
+        model_deterring_budget_mode = str(
+            planner_profile_values.get("model_deterring_budget_mode", model_deterring_budget_mode)
+        )
+        model_deterring_budget_utility_per_robot_per_hr = float(
+            planner_profile_values.get(
+                "model_deterring_budget_utility_per_robot_per_hr",
+                model_deterring_budget_utility_per_robot_per_hr,
+            )
+        )
+        model_deterring_gate_policy = str(
+            planner_profile_values.get("model_deterring_gate_policy", model_deterring_gate_policy)
+        )
+        model_deterring_chance_threshold = float(
+            planner_profile_values.get("model_deterring_chance_threshold", model_deterring_chance_threshold)
+        )
+        model_deterring_min_deltaJ_per_cost = float(
+            planner_profile_values.get(
+                "model_deterring_min_deltaJ_per_cost",
+                model_deterring_min_deltaJ_per_cost,
+            )
+        )
 
     # --- Seed robots & profiles (types/kinematics) ---
     robots_def = []
@@ -502,9 +562,14 @@ def run_simulation_frames_persistent(
     truth_candidate_events = 0
     truth_accepted_events = 0
     truth_suppressed_events = 0
+    truth_detection_opportunities = 0
+    truth_detections_observed = 0
+    truth_detections_missed_range = 0
+    truth_detections_missed_false_negative = 0
     suppression_effect_sum = 0.0
     suppression_effect_by_mode = {}
     suppression_effect_by_source = {"direct_detection": 0.0, "model_scored": 0.0}
+    truth_event_detection_prob = min(max(float(bird_detection_prob), 0.0), 1.0)
     w_cdf = None
     w_shape = None
     dx = W / max(NX - 1, 1)
@@ -582,6 +647,8 @@ def run_simulation_frames_persistent(
 
     def _process_truth_event(x, y, t_now, enqueue_tasks=True, record_metrics=True):
         nonlocal value_weighted_exposure
+        nonlocal truth_detection_opportunities, truth_detections_observed
+        nonlocal truth_detections_missed_range, truth_detections_missed_false_negative
         truth_events.append((x, y, t_now))
         truth_event_times.append(float(t_now))
         recent_truth.append((x, y, t_now))
@@ -594,10 +661,16 @@ def run_simulation_frames_persistent(
             if zone_rr and point_in_polygon(x, y, zone_rr):
                 owner = zid; break
         if owner is not None:
+            truth_detection_opportunities += 1
             # Only detect if within range of the owning robot
             ox, oy = pose[owner]
             if math.hypot(x - ox, y - oy) > detect_range_m:
+                truth_detections_missed_range += 1
                 return
+            if rng.random() > truth_event_detection_prob:
+                truth_detections_missed_false_negative += 1
+                return
+            truth_detections_observed += 1
             b = robots[owner].ingest_detection(x, y, t_now)
             bus.send_boundary_events(b, source_id=owner)
             if enqueue_tasks:
@@ -723,6 +796,9 @@ def run_simulation_frames_persistent(
     assigned_task_value_count = 0
     assignment_solver_calls = 0
     assignment_solver_runtime_ms_total = 0.0
+    assignment_solver_assigned_total = 0
+    assignment_solver_objective_total = 0.0
+    assignment_solver_objective_samples = 0
     assignment_solver_conflicts_resolved = 0
     assignment_solver_unassigned = 0
     assignment_solver_rounds_total = 0
@@ -872,6 +948,8 @@ def run_simulation_frames_persistent(
         nonlocal planner_rejected_patrol_cap, planner_rejected_model_det_cap, planner_replaced_patrol
         nonlocal planner_replaced_low_utility_count, assigned_task_value_sum, assigned_task_value_count
         nonlocal assignment_solver_calls, assignment_solver_runtime_ms_total
+        nonlocal assignment_solver_assigned_total, assignment_solver_objective_total
+        nonlocal assignment_solver_objective_samples
         nonlocal assignment_solver_conflicts_resolved, assignment_solver_unassigned
         nonlocal assignment_solver_rounds_total, assignment_solver_bid_updates
         nonlocal assignment_solver_message_passes, assignment_solver_failures
@@ -1129,6 +1207,11 @@ def run_simulation_frames_persistent(
             dt_ms = (perf_counter() - t0) * 1000.0
             assignment_solver_calls += 1
             assignment_solver_runtime_ms_total += float(dt_ms)
+            assignment_solver_assigned_total += int(res.debug.get("assigned", len(res.primary_by_task_idx)))
+            objective_utility = float(res.debug.get("objective_utility", float("nan")))
+            if math.isfinite(objective_utility):
+                assignment_solver_objective_total += float(objective_utility)
+                assignment_solver_objective_samples += 1
             assignment_solver_conflicts_resolved += int(res.debug.get("conflicts_resolved", 0))
             assignment_solver_rounds_total += int(res.debug.get("rounds", 0))
             assignment_solver_bid_updates += int(res.debug.get("bid_updates", 0))
@@ -1877,24 +1960,44 @@ def run_simulation_frames_persistent(
                                     sigma_u = float(sigma_true)
                                     omega_u = float(omega_true)
                                     mode_label = str(mode) if mode else "direct_detection"
+                                action_id = int(tr.get("id", -1))
                                 recent_deterrences.append({
                                     "x": float(tr["x"]),
                                     "y": float(tr["y"]),
                                     "t": float(t),
                                     "mode": mode_label,
                                     "source": _deterring_source(tr),
-                                    "action_id": int(tr.get("id", -1)),
+                                    "action_id": action_id,
                                     "beta": beta_u,
                                     "sigma": sigma_u,
                                     "omega": omega_u,
                                 })
-                                w = float(params.get("beta", 1.0))
-                                omega_u = float(params.get("omega", robots[rid].m.omega_inhib))
-                                sigma_u = float(params.get("sigma", robots[rid].m.sigma))
+                                feedback_beta = float(params.get("beta", 1.0))
+                                feedback_omega = float(params.get("omega", robots[rid].m.omega_inhib))
+                                feedback_sigma = float(params.get("sigma", robots[rid].m.sigma))
                                 if enable_intervention_feedback:
-                                    robots[rid].ingest_intervention_event(tr["x"], tr["y"], t, weight=w,
-                                                                         sigma=sigma_u, omega_inhib=omega_u)
-                                    b = robots[rid].intervention_boundary_events(tr["x"], tr["y"], t, weight=w)
+                                    robots[rid].ingest_intervention_event(
+                                        tr["x"],
+                                        tr["y"],
+                                        t,
+                                        weight=feedback_beta,
+                                        sigma=feedback_sigma,
+                                        omega_inhib=feedback_omega,
+                                        mode=mode_label,
+                                        beta=feedback_beta,
+                                        action_id=action_id,
+                                    )
+                                    b = robots[rid].intervention_boundary_events(
+                                        tr["x"],
+                                        tr["y"],
+                                        t,
+                                        weight=feedback_beta,
+                                        mode=mode_label,
+                                        sigma=feedback_sigma,
+                                        omega_inhib=feedback_omega,
+                                        beta=feedback_beta,
+                                        action_id=action_id,
+                                    )
                                     bus.send_intervention_events(
                                         b,
                                         source_id=rid,
@@ -2418,6 +2521,10 @@ def run_simulation_frames_persistent(
             "assigner_w_task_value": float(assigner_w_task_value),
             "assignment_solver_calls": int(assignment_solver_calls),
             "assignment_solver_runtime_ms": float(assignment_solver_runtime_ms_total / max(assignment_solver_calls, 1)),
+            "assignment_solver_assigned_mean": float(assignment_solver_assigned_total / max(assignment_solver_calls, 1)),
+            "assignment_solver_objective_mean": float(
+                assignment_solver_objective_total / max(assignment_solver_objective_samples, 1)
+            ) if assignment_solver_objective_samples > 0 else float("nan"),
             "assignment_solver_conflicts_resolved": int(assignment_solver_conflicts_resolved),
             "assignment_solver_unassigned": int(assignment_solver_unassigned),
             "assignment_solver_rounds_mean": float(assignment_solver_rounds_total / max(assignment_solver_calls, 1)),
@@ -2433,6 +2540,10 @@ def run_simulation_frames_persistent(
             "truth_candidate_events": int(truth_candidate_events),
             "truth_accepted_events": int(truth_accepted_events),
             "truth_suppressed_events": int(truth_suppressed_events),
+            "truth_detection_opportunities": int(truth_detection_opportunities),
+            "truth_detections_observed": int(truth_detections_observed),
+            "truth_detections_missed_range": int(truth_detections_missed_range),
+            "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
@@ -2527,6 +2638,10 @@ def run_simulation_frames_persistent(
             "assigner_w_task_value": float(assigner_w_task_value),
             "assignment_solver_calls": int(assignment_solver_calls),
             "assignment_solver_runtime_ms": float(assignment_solver_runtime_ms_total / max(assignment_solver_calls, 1)),
+            "assignment_solver_assigned_mean": float(assignment_solver_assigned_total / max(assignment_solver_calls, 1)),
+            "assignment_solver_objective_mean": float(
+                assignment_solver_objective_total / max(assignment_solver_objective_samples, 1)
+            ) if assignment_solver_objective_samples > 0 else float("nan"),
             "assignment_solver_conflicts_resolved": int(assignment_solver_conflicts_resolved),
             "assignment_solver_unassigned": int(assignment_solver_unassigned),
             "assignment_solver_rounds_mean": float(assignment_solver_rounds_total / max(assignment_solver_calls, 1)),
@@ -2542,6 +2657,10 @@ def run_simulation_frames_persistent(
             "truth_candidate_events": int(truth_candidate_events),
             "truth_accepted_events": int(truth_accepted_events),
             "truth_suppressed_events": int(truth_suppressed_events),
+            "truth_detection_opportunities": int(truth_detection_opportunities),
+            "truth_detections_observed": int(truth_detections_observed),
+            "truth_detections_missed_range": int(truth_detections_missed_range),
+            "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
@@ -2588,8 +2707,17 @@ def run_simulation_frames_persistent(
         total_boundary_msgs = int(bus.boundary_msg_count + bus.intervention_msg_count)
         total_boundary_bytes = int(bus.boundary_bytes + bus.intervention_bytes)
         sim_elapsed_s = max([float(v) for v in robot_time_total.values()] + [1e-9])
+        assignment_obj_mean = (
+            float(assignment_solver_objective_total / assignment_solver_objective_samples)
+            if assignment_solver_objective_samples > 0
+            else float("nan")
+        )
         print(
             "[run metrics] "
+            f"assignment={str(assignment_method)} "
+            f"assign_runtime_ms={float(assignment_solver_runtime_ms_total / max(assignment_solver_calls, 1)):.3f} "
+            f"assign_mean={float(assignment_solver_assigned_total / max(assignment_solver_calls, 1)):.3f} "
+            f"assign_obj_mean={assignment_obj_mean:.3f} "
             f"Jexp={float(value_weighted_exposure):.3f} "
             f"resp_s={mrt:.3f} "
             f"tasks={total_completed} "
@@ -2674,6 +2802,10 @@ def run_metrics_experiments(
                 mrt = m.get("mean_response_time_s", float("nan"))
                 print(
                     f"[run {i+1}/{int(num_runs)} seed={seed}] "
+                    f"assignment={m.get('assignment_method', '')} "
+                    f"assign_runtime_ms={float(m.get('assignment_solver_runtime_ms', float('nan'))):.3f} "
+                    f"assign_mean={float(m.get('assignment_solver_assigned_mean', float('nan'))):.3f} "
+                    f"assign_obj_mean={float(m.get('assignment_solver_objective_mean', float('nan'))):.3f} "
                     f"Jexp={m.get('value_weighted_exposure', float('nan')):.3f} "
                     f"resp_s={mrt:.3f} "
                     f"tasks={m.get('completed_tasks_total', 0)} "
@@ -2774,6 +2906,8 @@ def run_metrics_experiments(
         "assigned_task_value_count": _safe_stats("assigned_task_value_count"),
         "assignment_solver_calls": _safe_stats("assignment_solver_calls"),
         "assignment_solver_runtime_ms": _safe_stats("assignment_solver_runtime_ms"),
+        "assignment_solver_assigned_mean": _safe_stats("assignment_solver_assigned_mean"),
+        "assignment_solver_objective_mean": _safe_stats("assignment_solver_objective_mean"),
         "assignment_solver_conflicts_resolved": _safe_stats("assignment_solver_conflicts_resolved"),
         "assignment_solver_unassigned": _safe_stats("assignment_solver_unassigned"),
         "assignment_solver_rounds_mean": _safe_stats("assignment_solver_rounds_mean"),
@@ -2786,6 +2920,10 @@ def run_metrics_experiments(
         "truth_candidate_events": _safe_stats("truth_candidate_events"),
         "truth_accepted_events": _safe_stats("truth_accepted_events"),
         "truth_suppressed_events": _safe_stats("truth_suppressed_events"),
+        "truth_detection_opportunities": _safe_stats("truth_detection_opportunities"),
+        "truth_detections_observed": _safe_stats("truth_detections_observed"),
+        "truth_detections_missed_range": _safe_stats("truth_detections_missed_range"),
+        "truth_detections_missed_false_negative": _safe_stats("truth_detections_missed_false_negative"),
         "truth_suppression_rate": _safe_stats("truth_suppression_rate"),
         "truth_suppression_effect_mean": _safe_stats("truth_suppression_effect_mean"),
         "truth_suppression_effect_sum": _safe_stats("truth_suppression_effect_sum"),

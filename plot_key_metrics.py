@@ -8,6 +8,9 @@ import numpy as np
 import pandas as pd
 
 
+ARCHIVE_OUTPUTS_DIR = Path("etc/archive_outputs")
+
+
 def _safe_div(num: pd.Series, den: pd.Series) -> pd.Series:
     den2 = den.replace(0, np.nan)
     return num / den2
@@ -61,6 +64,18 @@ def _ensure_delta_columns(summary: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _resolve_summary_csv(path_str: str) -> Path:
+    requested = Path(path_str)
+    if requested.exists():
+        return requested
+
+    archived = ARCHIVE_OUTPUTS_DIR / requested
+    if archived.exists():
+        return archived
+
+    raise FileNotFoundError(f"Missing summary CSV: {requested}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Plot thesis key metrics from summary CSV.")
     parser.add_argument(
@@ -75,9 +90,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    summary_csv = Path(args.summary_csv)
-    if not summary_csv.exists():
-        raise FileNotFoundError(f"Missing summary CSV: {summary_csv}")
+    summary_csv = _resolve_summary_csv(args.summary_csv)
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -235,4 +248,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

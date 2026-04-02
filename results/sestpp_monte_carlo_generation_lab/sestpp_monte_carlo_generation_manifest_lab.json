@@ -1,0 +1,47 @@
+{
+  "script": "run_sestpp_monte_carlo_generation_lab.py",
+  "args": {
+    "config": "",
+    "num_runs": 8,
+    "seed_start": 2026,
+    "t_end": 10800.0,
+    "dt": 5.0,
+    "assignment_method": "hungarian",
+    "baselines": "prediction_only,proposed",
+    "task_replan_period_s": 45.0,
+    "forecast_horizon_s": 300.0,
+    "forecast_match_radius_m": 20.0,
+    "forecast_top_k": 5,
+    "forecast_eval_period_s": 30.0,
+    "patrol_min_hotspot_score": 0.0001,
+    "patrol_hotspot_filter_mode": "percentile",
+    "patrol_hotspot_score_percentile": 90.0,
+    "patrol_hotspot_keep_top_k": 6,
+    "model_deterring_window_s": 90.0,
+    "model_deterring_gate_policy": "heuristic",
+    "model_deterring_sprt_alpha": 0.05,
+    "model_deterring_sprt_beta": 0.2,
+    "model_deterring_chance_threshold": 0.2,
+    "model_deterring_min_deltaj_per_cost": 0.15,
+    "patrol_mc_rollouts": 64,
+    "patrol_mc_max_events_per_rollout": 24,
+    "patrol_mc_use_excess": true,
+    "export_task_debug": false,
+    "outdir": "results/sestpp_monte_carlo_generation_lab",
+    "with_smoke_check": false,
+    "smoke_only": false
+  },
+  "config": {
+    "config_path": "",
+    "raw_config": {},
+    "config_overrides": {}
+  },
+  "extra": {
+    "baselines": [
+      "prediction_only",
+      "proposed"
+    ],
+    "plot_path": "results\\sestpp_monte_carlo_generation_lab\\sestpp_monte_carlo_generation_tradeoff_lab.png",
+    "report_path": "results\\sestpp_monte_carlo_generation_lab\\SESTPP_MONTE_CARLO_GENERATION_README.md"
+  }
+}

@@ -19,6 +19,28 @@ Primary source files:
   - `run_field_divergence_filter_sweep_lab.py:324`
   - `run_assignment_tuning_sweep_lab.py:1090`
 
+## Named Planner Profiles
+
+- `thesis_confirm` is the conservative post-fix planner preset for corrected counterfactual `predicted_deltaJ`, corrected intervention sharing, and corrected preventive admission ordering.
+- Aliases: `post_fix`, `post-fix`.
+
+Resolved values and rationale:
+- `assigner_w_task_value = 0.20` - keeps task value as a moderate tie-break so corrected preventive value matters without overpowering distance and load costs.
+- `model_deterring_window_s = 120.0` - keeps enough recent evidence to stabilize preventive scoring without dragging in stale detections.
+- `model_deterring_min_persistence_replans = 3` - requires three consecutive replans before admission, filtering transient hotspots.
+- `model_deterring_max_eta_s = 90.0` - rejects slow preventive dispatches that are unlikely to realize the corrected deltaJ.
+- `model_deterring_score_margin = 0.20` - requires a meaningful gain over patrol before preventive work can displace patrol capacity.
+- `model_deterring_budget_per_robot_per_hr = 3` - caps preventive admissions per robot so the target is yield, not raw preventive volume.
+- `model_deterring_budget_mode = count_per_hour` - treats the budget as a hard preventive count cap in confirm/tuning presets.
+- `model_deterring_gate_policy = sprt_capacity` - requires both evidence and available capacity instead of heuristic ranking alone.
+- `model_deterring_chance_threshold = 0.25` - blocks lower-confidence preventive candidates after SPRT admission.
+- `model_deterring_min_deltaJ_per_cost = 0.25` - raises the utility-per-cost floor above the loose `0.15` default so only stronger corrected candidates survive.
+
+Activation:
+- Production / lab simulator kwargs: `planner_profile="thesis_confirm"`.
+- Confirm runner CLI / YAML: `--planner-profile thesis_confirm` or `planner.profile: thesis_confirm`.
+- Assignment tuning runner CLI / YAML: `--planner-profile thesis_confirm` or `planner.profile: thesis_confirm`.
+
 ## 1. Production system variables
 
 These are the main top-level inputs exposed by `run_simulation_frames_persistent(...)` in `DeterrentSystem.py`.
@@ -68,7 +90,7 @@ Note:
 - `detect_rate_per_robot` - nominal detection opportunity rate near each robot.
 - `detect_sigma_m` - spatial noise / spread for detections.
 - `bird_stay_mean_s` - mean bird linger time near a robot.
-- `bird_detection_prob` - per-step detection probability while a bird is present.
+- `bird_detection_prob` - detection observation probability for an accepted ground-truth event within range; in the fallback local bird generator, the per-step detection probability while a bird is present.
 - `per_robot_cooldown_s` - minimum time between detections for a given robot.
 - `max_detections_per_step` - safety cap on detections per step.
 - `detect_range_m` - maximum range for using ground-truth events as detections.
@@ -104,6 +126,7 @@ Note:
 - `assigner_w_load` - robot load penalty in assignment.
 - `enable_assignment_task_value_term` - enable task-value term in assignment score.
 - `assigner_w_task_value` - weight for task utility / score during assignment.
+- `planner_profile` - optional named planner preset override (`thesis_confirm`, alias `post_fix`).
 
 ### 1.7 Preventive model-scored deterrence gating
 
@@ -446,6 +469,7 @@ Common controls:
 - `assignment-switch-penalty`
 - `task-replan-period-s`
 - `assigner-w-task-value`
+- `planner-profile`
 - `patrol-min-hotspot-score`
 - `patrol-hotspot-filter-mode`
 - `patrol-hotspot-score-percentile`
@@ -462,7 +486,16 @@ Common controls:
 - `model-beta-scale`
 - `outdir`
 
-### 6.2 Filter-sweep-only controls (`run_field_divergence_filter_sweep_lab.py:324`)
+### 6.2 Confirm-runner-only planner controls (`run_field_divergence_confirm_lab.py`)
+
+- `model-deterring-min-persistence-replans`
+- `model-deterring-max-eta-s`
+- `model-deterring-score-margin`
+- `model-deterring-budget-per-robot-per-hr`
+- `model-deterring-budget-mode`
+- `model-deterring-budget-utility-per-robot-per-hr`
+
+### 6.3 Filter-sweep-only controls (`run_field_divergence_filter_sweep_lab.py:324`)
 
 Additional sweep dimensions:
 - `patrol-filter-modes`
@@ -491,6 +524,7 @@ These are the top-level sweep controls for `run_assignment_tuning_sweep_lab.py:1
 - `switch-penalties`
 - `replan-periods`
 - `assigner-w-task-values`
+- `planner-profile`
 - `phase1-manifest`
 - `use-phase1-winner`
 - `outdir`

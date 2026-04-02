@@ -1,0 +1,52 @@
+{
+  "run_parameters": {
+    "T_end": 300.0,
+    "dt": 10.0,
+    "seed": 2026,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 80,
+    "NY": 64,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "warmup_s": 1800.0,
+    "task_replan_period_s": 45.0,
+    "task_max_age_s": 120.0,
+    "model_deterring_window_s": 90.0,
+    "model_deterring_risk_threshold": 0.35,
+    "model_deterring_budget_per_robot_per_hr": 4,
+    "model_deterring_min_recent_points": 1,
+    "forecast_horizon_s": 300.0,
+    "forecast_match_radius_m": 20.0,
+    "forecast_top_k": 5,
+    "forecast_eval_period_s": 30.0,
+    "telemetry_clear_on_start": false,
+    "telemetry_prompt_save": false
+  },
+  "baselines": [
+    {
+      "name": "reactive",
+      "module": "frozen",
+      "simulation_mode": "reactive",
+      "simple_task_management": false
+    },
+    {
+      "name": "prediction_only",
+      "module": "frozen",
+      "simulation_mode": "prediction_only",
+      "simple_task_management": false
+    },
+    {
+      "name": "proposed",
+      "module": "frozen",
+      "simulation_mode": "proposed",
+      "simple_task_management": false
+    },
+    {
+      "name": "proposed_simple_tasks",
+      "module": "simple",
+      "simulation_mode": "proposed",
+      "simple_task_management": true
+    }
+  ]
+}

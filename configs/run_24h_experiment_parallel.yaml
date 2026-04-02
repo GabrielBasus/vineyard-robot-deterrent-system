@@ -16,6 +16,22 @@ simulation:
 sweep:
   tune_preset: diagnostic_like
 
+planner:
+  profile: ""
+  proposed_preventive_policy: ""
+  # Thesis selective proposed example:
+  # profile: thesis_calibrated_selective_proposed
+  # proposed_preventive_policy: sprt_capacity
+
+calibration:
+  use_frozen_calibration: false
+  ranking_path: ""
+  manifest_path: ""
+  config_id: ""
+  # Frozen SESTPP example:
+  # use_frozen_calibration: true
+  # config_id: C37
+
 winner:
   enable_winner_profile: false
   winner_profile_id: F1

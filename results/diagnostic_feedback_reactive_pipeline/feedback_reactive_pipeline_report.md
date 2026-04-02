@@ -1,0 +1,402 @@
+# Feedback Reactive Pipeline Diagnostic
+
+## Parameters
+
+- `T_end`: `10800.0`
+- `dt`: `5.0`
+- `seed`: `2026`
+- `W`: `500.0`
+- `H`: `500.0`
+- `NX`: `80`
+- `NY`: `64`
+- `Nrobots`: `6`
+- `uav_fraction`: `0.0`
+- `warmup_s`: `1800.0`
+- `task_replan_period_s`: `60.0`
+- `patrol_hotspot_filter_mode`: `percentile`
+- `patrol_hotspot_score_percentile`: `97.0`
+- `alpha_inhib`: `0.45`
+- `omega_inhib`: `600.0`
+- `telemetry_clear_on_start`: `False`
+- `telemetry_prompt_save`: `False`
+- `bin_s`: `30.0`
+- `cluster_spatial_quant_m`: `20.0`
+- `cluster_time_s`: `60.0`
+
+## Mode Summary
+
+### prediction_only
+
+- `detections_total`: `2345`
+- `truth_points_total`: `37531`
+- `direct_det_assignments_total`: `433`
+- `direct_det_completions_total`: `379`
+- `boundary_messages_total`: `329`
+- `intervention_messages_total`: `0`
+- `boundary_messages_per_detection`: `0.14029850746268657`
+- `intervention_messages_per_detection`: `0.0`
+- `assignment_detection_ratio`: `0.18464818763326227`
+- `completion_detection_ratio`: `0.16162046908315564`
+- `mean_assign_lag_s`: `27.677854977425817`
+- `mean_completion_lag_s`: `115.68695402803101`
+- `p90_assign_lag_s`: `50.0`
+- `p90_completion_lag_s`: `175.0`
+- `assignment_detection_l1_mean`: `0.5103433387113444`
+- `completion_detection_l1_mean`: `0.5858049985706106`
+- `active_detection_l1_mean`: `0.5490959418111181`
+- `detections_p95_per_bin`: `15.0`
+- `boundary_messages_p95_per_bin`: `4.5499999999999545`
+- `intervention_messages_p95_per_bin`: `0.0`
+- `assignments_p95_per_bin`: `4.0`
+- `completions_p95_per_bin`: `2.0`
+- `active_direct_p95_per_bin`: `42.0`
+- `detection_fano`: `4.52057309272453`
+- `boundary_message_fano`: `3.9787159908073244`
+- `assignment_fano`: `2.3503689517264683`
+- `completion_fano`: `0.9093828431688011`
+- `active_direct_fano`: `8.89626099092409`
+- `detection_boundary_corr`: `0.4457012723815791`
+- `detection_assignment_corr`: `-0.04766170217349186`
+- `detection_completion_corr`: `-0.12016849376952883`
+
+### proposed_feedback_only
+
+- `detections_total`: `2160`
+- `truth_points_total`: `37236`
+- `direct_det_assignments_total`: `413`
+- `direct_det_completions_total`: `365`
+- `boundary_messages_total`: `287`
+- `intervention_messages_total`: `244`
+- `boundary_messages_per_detection`: `0.13287037037037036`
+- `intervention_messages_per_detection`: `0.11296296296296296`
+- `assignment_detection_ratio`: `0.1912037037037037`
+- `completion_detection_ratio`: `0.16898148148148148`
+- `mean_assign_lag_s`: `27.958748543966877`
+- `mean_completion_lag_s`: `114.03917221051482`
+- `p90_assign_lag_s`: `50.0`
+- `p90_completion_lag_s`: `165.1177499475907`
+- `assignment_detection_l1_mean`: `0.5242920042920043`
+- `completion_detection_l1_mean`: `0.5960098336072995`
+- `active_detection_l1_mean`: `0.5785099428740806`
+- `detections_p95_per_bin`: `15.0`
+- `boundary_messages_p95_per_bin`: `4.0`
+- `intervention_messages_p95_per_bin`: `4.0`
+- `assignments_p95_per_bin`: `4.0`
+- `completions_p95_per_bin`: `2.0`
+- `active_direct_p95_per_bin`: `42.0`
+- `detection_fano`: `4.319444444444445`
+- `boundary_message_fano`: `3.775678582182647`
+- `assignment_fano`: `2.333757809464024`
+- `completion_fano`: `0.9206832403179436`
+- `active_direct_fano`: `9.546774436102128`
+- `detection_boundary_corr`: `0.4309699045791848`
+- `detection_assignment_corr`: `-0.08425665451573744`
+- `detection_completion_corr`: `-0.04781565276736952`
+
+## Reactive Cluster Summary
+
+### prediction_only
+
+- `reactive_clusters_total`: `433`
+- `assignments_per_cluster_mean`: `1.0`
+- `assignments_per_cluster_p90`: `1.0`
+- `max_assignments_per_cluster`: `1`
+- `completion_per_cluster_mean`: `0.8752886836027713`
+- `completion_per_cluster_p90`: `1.0`
+- `max_completions_per_cluster`: `1`
+- `clusters_with_multi_assign_fraction`: `0.0`
+- `clusters_with_multi_completion_fraction`: `0.0`
+- `redundant_assignment_fraction`: `0.0`
+- `redundant_completion_fraction`: `0.0`
+- `mean_cluster_completion_to_assignment_ratio`: `0.8752886836027713`
+
+### proposed_feedback_only
+
+- `reactive_clusters_total`: `412`
+- `assignments_per_cluster_mean`: `1.0024271844660195`
+- `assignments_per_cluster_p90`: `1.0`
+- `max_assignments_per_cluster`: `2`
+- `completion_per_cluster_mean`: `0.8859223300970874`
+- `completion_per_cluster_p90`: `1.0`
+- `max_completions_per_cluster`: `1`
+- `clusters_with_multi_assign_fraction`: `0.0024271844660194173`
+- `clusters_with_multi_completion_fraction`: `0.0`
+- `redundant_assignment_fraction`: `0.002421307506053269`
+- `redundant_completion_fraction`: `0.0`
+- `mean_cluster_completion_to_assignment_ratio`: `0.8859223300970874`
+
+## Worst Assignment-Gap Zones
+
+- zone `5`: `{'zone_idx': 5, 'delta_assignment_detection_gap_mean_prop_minus_pred': -0.01365646353097473, 'detection_share_mean_pred': 0.1360906587026, 'detection_share_mean_prop': 0.16702131901023862, 'assignment_share_mean_pred': 0.06727234753550543, 'assignment_share_mean_prop': 0.0845465443121693}`
+- zone `1`: `{'zone_idx': 1, 'delta_assignment_detection_gap_mean_prop_minus_pred': -0.004050127668728851, 'detection_share_mean_pred': 0.15614882194864427, 'detection_share_mean_prop': 0.1473759596759609, 'assignment_share_mean_pred': 0.0877580935628429, 'assignment_share_mean_prop': 0.0749351036214307}`
+- zone `0`: `{'zone_idx': 0, 'delta_assignment_detection_gap_mean_prop_minus_pred': -0.0008162606546842643, 'detection_share_mean_pred': 0.1188772323429525, 'detection_share_mean_prop': 0.11853090836352523, 'assignment_share_mean_pred': 0.062358578183046263, 'assignment_share_mean_prop': 0.06119599354893472}`
+
+## Worst Active-Gap Zones
+
+- zone `1`: `{'zone_idx': 1, 'delta_active_detection_gap_mean_prop_minus_pred': -0.024930988648668186, 'detection_share_mean_pred': 0.15614882194864427, 'detection_share_mean_prop': 0.1473759596759609, 'active_share_mean_pred': 0.20441405731871937, 'active_share_mean_prop': 0.1707102063973678}`
+- zone `5`: `{'zone_idx': 5, 'delta_active_detection_gap_mean_prop_minus_pred': -0.012132315851735614, 'detection_share_mean_pred': 0.1360906587026, 'detection_share_mean_prop': 0.16702131901023862, 'active_share_mean_pred': 0.12731176940430802, 'active_share_mean_prop': 0.146110113860211}`
+- zone `0`: `{'zone_idx': 0, 'delta_active_detection_gap_mean_prop_minus_pred': -0.0033246475931634784, 'detection_share_mean_pred': 0.1188772323429525, 'detection_share_mean_prop': 0.11853090836352523, 'active_share_mean_pred': 0.10873827329777044, 'active_share_mean_prop': 0.1050673017251797}`
+
+## Final Production Metrics
+
+### prediction_only
+
+- `value_weighted_exposure`: `17330.114888277687`
+- `mean_response_time_s`: `109.15910261960754`
+- `response_samples`: `436`
+- `travel_distance_by_robot`: `{'r1': 11451.877088463796, 'r2': 17736.453455927145, 'r3': 14183.86706265012, 'r4': 17804.517107963864, 'r5': 17958.471438757784, 'r6': 14773.835950066514}`
+- `travel_distance_by_type`: `{'UGV': 93909.02210382922, 'UAV': 0.0}`
+- `energy_by_robot`: `{'r1': 11451.877088463796, 'r2': 17736.453455927145, 'r3': 14183.86706265012, 'r4': 17804.517107963864, 'r5': 17958.471438757784, 'r6': 14773.835950066514}`
+- `energy_by_type`: `{'UGV': 93909.02210382922, 'UAV': 0.0}`
+- `completed_tasks_by_type`: `{'deterring': 379, 'patrolling': 429}`
+- `completed_tasks_total`: `808`
+- `tasks_per_unit_distance`: `0.008604072131713244`
+- `exposure_per_completed_task`: `21.44816199044268`
+- `score_per_completed_task`: `-0.03802022505756434`
+- `boundary_message_count`: `332`
+- `boundary_bytes_sent`: `21248`
+- `boundary_message_count_by_type`: `{'detection': 332, 'intervention': 0}`
+- `boundary_bytes_by_type`: `{'detection': 21248, 'intervention': 0}`
+- `intervention_msg_dropped_debounce`: `0`
+- `intervention_msg_dropped_low_weight`: `0`
+- `fleet_task_assigned_fraction`: `0.5`
+- `fleet_moving_fraction`: `0.16666666666666666`
+- `fleet_idle_fraction`: `0.5`
+- `fleet_idle_no_task_fraction`: `0.5`
+- `fleet_idle_with_task_fraction`: `0.0`
+- `fleet_task_engagement_fraction_so_far`: `0.686102113219188`
+- `fleet_moving_fraction_so_far`: `0.5373283973469084`
+- `fleet_idle_no_task_fraction_so_far`: `0.31096714484035126`
+- `robot_task_utilization_by_robot`: `{'r1': 0.5330865340120314, 'r2': 0.7681628875520592, 'r3': 0.6372049976862564, 'r4': 0.7658491439148543, 'r5': 0.7672373900971773, 'r6': 0.6450717260527533}`
+- `robot_idle_fraction_by_robot`: `{'r1': 0.4946783896344285, 'r2': 0.26469227209625174, 'r3': 0.3933364183248496, 'r4': 0.2637667746413697, 'r5': 0.25728829245719576, 'r6': 0.37251272559000465}`
+- `robot_moving_with_task_fraction_by_robot`: `{'r1': 0.39148542341508563, 'r2': 0.6075890791300324, 'r3': 0.4844979176307265, 'r4': 0.6163813049514114, 'r5': 0.6131420638593243, 'r6': 0.4942156409069875}`
+- `robot_longest_idle_s_by_robot`: `{'r1': 685.0, 'r2': 290.0, 'r3': 430.0, 'r4': 485.0, 'r5': 515.0, 'r6': 305.0}`
+- `robot_tail_idle_s_by_robot`: `{'r1': 0.0, 'r2': 105.0, 'r3': 0.0, 'r4': 0.0, 'r5': 145.0, 'r6': 255.0}`
+- `robot_task_utilization_mean`: `0.6861021132191887`
+- `robot_idle_fraction_mean`: `0.3410458121240167`
+- `robot_moving_with_task_fraction_mean`: `0.5345519049822612`
+- `robot_longest_idle_s_max`: `685.0`
+- `robot_tail_idle_s_max`: `255.0`
+- `robots_zero_distance_count`: `0`
+- `stale_goal_clears`: `24`
+- `direct_detection_task_refresh_active`: `39`
+- `direct_detection_task_cluster_groups`: `23`
+- `direct_detection_task_cluster_merged`: `25`
+- `direct_detection_task_response_matches`: `436`
+- `model_deterring_gate_policy`: `heuristic`
+- `model_deterring_accepted`: `0`
+- `model_deterring_rejected_budget`: `0`
+- `model_deterring_generated`: `0`
+- `model_deterring_candidates_total`: `0`
+- `model_deterring_rejected_cooldown`: `0`
+- `model_deterring_rejected_field`: `0`
+- `model_deterring_pass_field`: `0`
+- `model_deterring_rejected_predicted_deltaJ`: `0`
+- `model_deterring_pass_predicted_deltaJ`: `0`
+- `model_deterring_rejected_risk`: `0`
+- `model_deterring_pass_risk`: `0`
+- `model_deterring_rejected_support`: `0`
+- `model_deterring_rejected_persistence`: `0`
+- `model_deterring_rejected_repeat_no_new_support`: `0`
+- `model_deterring_rejected_eta`: `0`
+- `model_deterring_rejected_busy`: `0`
+- `model_deterring_rejected_margin`: `0`
+- `model_deterring_pass_support`: `0`
+- `model_deterring_pass_sprt`: `0`
+- `model_deterring_rejected_sprt_pending`: `0`
+- `model_deterring_rejected_sprt_negative`: `0`
+- `model_deterring_rejected_sprt_margin`: `0`
+- `model_deterring_pass_chance`: `0`
+- `model_deterring_rejected_chance`: `0`
+- `model_deterring_pass_utility_ratio`: `0`
+- `model_deterring_rejected_utility_ratio`: `0`
+- `model_deterring_rejected_selection_weight`: `0`
+- `model_deterring_pass_capacity`: `0`
+- `model_deterring_rejected_capacity`: `0`
+- `model_deterring_llr_mean`: `nan`
+- `model_deterring_llr_max`: `nan`
+- `model_deterring_llr_p50`: `nan`
+- `model_deterring_llr_p75`: `nan`
+- `model_deterring_llr_p90`: `nan`
+- `model_deterring_p_event_mean`: `nan`
+- `model_deterring_deltaJ_per_cost_mean`: `nan`
+- `model_deterring_cluster_key_total`: `0`
+- `model_deterring_cluster_key_reused`: `0`
+- `model_deterring_cluster_key_churn`: `0`
+- `model_deterring_cluster_key_new`: `0`
+- `model_deterring_not_selected`: `0`
+- `model_deterring_rejected_budget_count_mode`: `0`
+- `model_deterring_rejected_budget_utility_mode`: `0`
+- `model_deterring_budget_mode`: `count_per_hour`
+- `preventive_service_rate_per_robot_mean`: `52.97000456127602`
+- `preventive_direct_arrival_rate_per_robot_mean`: `19.83996316758747`
+- `preventive_capacity_remaining_per_robot_mean`: `24.127185020107632`
+- `planner_rejected_unassigned`: `0`
+- `planner_rejected_task_cap`: `17`
+- `planner_rejected_patrol_cap`: `0`
+- `planner_rejected_patrol_locked_model_det`: `0`
+- `planner_rejected_model_det_cap`: `0`
+- `planner_rejected_model_det_cycle_cap`: `0`
+- `planner_rejected_model_det_busy_primary`: `0`
+- `planner_rejected_model_det_busy_fallback_quality`: `0`
+- `planner_rejected_model_det_direct_conflict`: `0`
+- `planner_accepted_model_det_idle_primary`: `0`
+- `planner_accepted_model_det_busy_primary`: `0`
+- `planner_replaced_patrol`: `0`
+- `truth_candidate_events`: `8091`
+- `truth_accepted_events`: `7979`
+- `truth_suppressed_events`: `112`
+- `truth_suppression_rate`: `0.013842541095043875`
+- `truth_suppression_effect_mean`: `0.01619706023815495`
+- `truth_suppression_effect_sum`: `131.0504143869117`
+- `truth_suppression_effect_by_mode`: `{'direct_detection': 131.0504143869117}`
+- `truth_suppression_effect_by_source`: `{'direct_detection': 131.0504143869117, 'model_scored': 0.0}`
+- `deterring_actions_completed_total`: `379`
+- `deterring_actions_completed_direct_detection`: `379`
+- `deterring_actions_completed_model_scored`: `0`
+- `deterring_action_precision`: `0.5725593667546174`
+- `deterring_action_precision_direct_detection`: `0.5725593667546174`
+- `deterring_action_precision_model_scored`: `nan`
+- `suppression_per_deterring_action`: `0.3457794574852552`
+- `suppression_per_direct_deterring_action`: `0.3457794574852552`
+- `suppression_per_model_deterring_action`: `nan`
+- `model_vs_direct_suppression_yield_ratio`: `nan`
+- `forecast_recall_at_k`: `nan`
+- `forecast_precision_at_k`: `0.0`
+- `forecast_hotspot_hit_rate`: `0.0`
+- `forecast_lead_time_s`: `nan`
+- `forecast_samples`: `361`
+
+### proposed_feedback_only
+
+- `value_weighted_exposure`: `17154.96639606875`
+- `mean_response_time_s`: `110.98030211664147`
+- `response_samples`: `403`
+- `travel_distance_by_robot`: `{'r1': 11107.949011980443, 'r2': 16558.34905332513, 'r3': 14010.323974178462, 'r4': 17252.86542911913, 'r5': 16628.360138645614, 'r6': 14873.391818879603}`
+- `travel_distance_by_type`: `{'UGV': 90431.23942612839, 'UAV': 0.0}`
+- `energy_by_robot`: `{'r1': 11107.949011980443, 'r2': 16558.34905332513, 'r3': 14010.323974178462, 'r4': 17252.86542911913, 'r5': 16628.360138645614, 'r6': 14873.391818879603}`
+- `energy_by_type`: `{'UGV': 90431.23942612839, 'UAV': 0.0}`
+- `completed_tasks_by_type`: `{'deterring': 365, 'patrolling': 449}`
+- `completed_tasks_total`: `814`
+- `tasks_per_unit_distance`: `0.00900131420475489`
+- `exposure_per_completed_task`: `21.074897292467753`
+- `score_per_completed_task`: `0.0`
+- `boundary_message_count`: `534`
+- `boundary_bytes_sent`: `36128`
+- `boundary_message_count_by_type`: `{'detection': 290, 'intervention': 244}`
+- `boundary_bytes_by_type`: `{'detection': 18560, 'intervention': 17568}`
+- `intervention_msg_dropped_debounce`: `6`
+- `intervention_msg_dropped_low_weight`: `0`
+- `fleet_task_assigned_fraction`: `0.8333333333333334`
+- `fleet_moving_fraction`: `0.8333333333333334`
+- `fleet_idle_fraction`: `0.16666666666666666`
+- `fleet_idle_no_task_fraction`: `0.16666666666666666`
+- `fleet_idle_with_task_fraction`: `0.0`
+- `fleet_task_engagement_fraction_so_far`: `0.662270553755976`
+- `fleet_moving_fraction_so_far`: `0.5184328243097327`
+- `fleet_idle_no_task_fraction_so_far`: `0.33680394878914066`
+- `robot_task_utilization_by_robot`: `{'r1': 0.5145765849143915, 'r2': 0.7209625173530773, 'r3': 0.6330402591392874, 'r4': 0.7366959740860712, 'r5': 0.7038408144377603, 'r6': 0.6645071726052754}`
+- `robot_idle_fraction_by_robot`: `{'r1': 0.5127255900046275, 'r2': 0.3086534012031467, 'r3': 0.3961129106894956, 'r4': 0.2901434521055067, 'r5': 0.32253586302637666, 'r6': 0.36140675613142065}`
+- `robot_moving_with_task_fraction_by_robot`: `{'r1': 0.3799167052290606, 'r2': 0.5691809347524295, 'r3': 0.47987043035631655, 'r4': 0.6006478482184174, 'r5': 0.5738084220268395, 'r6': 0.5016196205460435}`
+- `robot_longest_idle_s_by_robot`: `{'r1': 770.0, 'r2': 355.0, 'r3': 595.0, 'r4': 475.0, 'r5': 570.0, 'r6': 665.0}`
+- `robot_tail_idle_s_by_robot`: `{'r1': 0.0, 'r2': 0.0, 'r3': 0.0, 'r4': 145.0, 'r5': 0.0, 'r6': 0.0}`
+- `robot_task_utilization_mean`: `0.6622705537559772`
+- `robot_idle_fraction_mean`: `0.3652629955267623`
+- `robot_moving_with_task_fraction_mean`: `0.5175073268548512`
+- `robot_longest_idle_s_max`: `770.0`
+- `robot_tail_idle_s_max`: `145.0`
+- `robots_zero_distance_count`: `0`
+- `stale_goal_clears`: `18`
+- `direct_detection_task_refresh_active`: `19`
+- `direct_detection_task_cluster_groups`: `21`
+- `direct_detection_task_cluster_merged`: `22`
+- `direct_detection_task_response_matches`: `403`
+- `model_deterring_gate_policy`: `heuristic`
+- `model_deterring_accepted`: `0`
+- `model_deterring_rejected_budget`: `0`
+- `model_deterring_generated`: `0`
+- `model_deterring_candidates_total`: `0`
+- `model_deterring_rejected_cooldown`: `0`
+- `model_deterring_rejected_field`: `0`
+- `model_deterring_pass_field`: `0`
+- `model_deterring_rejected_predicted_deltaJ`: `0`
+- `model_deterring_pass_predicted_deltaJ`: `0`
+- `model_deterring_rejected_risk`: `0`
+- `model_deterring_pass_risk`: `0`
+- `model_deterring_rejected_support`: `0`
+- `model_deterring_rejected_persistence`: `0`
+- `model_deterring_rejected_repeat_no_new_support`: `0`
+- `model_deterring_rejected_eta`: `0`
+- `model_deterring_rejected_busy`: `0`
+- `model_deterring_rejected_margin`: `0`
+- `model_deterring_pass_support`: `0`
+- `model_deterring_pass_sprt`: `0`
+- `model_deterring_rejected_sprt_pending`: `0`
+- `model_deterring_rejected_sprt_negative`: `0`
+- `model_deterring_rejected_sprt_margin`: `0`
+- `model_deterring_pass_chance`: `0`
+- `model_deterring_rejected_chance`: `0`
+- `model_deterring_pass_utility_ratio`: `0`
+- `model_deterring_rejected_utility_ratio`: `0`
+- `model_deterring_rejected_selection_weight`: `0`
+- `model_deterring_pass_capacity`: `0`
+- `model_deterring_rejected_capacity`: `0`
+- `model_deterring_llr_mean`: `nan`
+- `model_deterring_llr_max`: `nan`
+- `model_deterring_llr_p50`: `nan`
+- `model_deterring_llr_p75`: `nan`
+- `model_deterring_llr_p90`: `nan`
+- `model_deterring_p_event_mean`: `nan`
+- `model_deterring_deltaJ_per_cost_mean`: `nan`
+- `model_deterring_cluster_key_total`: `0`
+- `model_deterring_cluster_key_reused`: `0`
+- `model_deterring_cluster_key_churn`: `0`
+- `model_deterring_cluster_key_new`: `0`
+- `model_deterring_not_selected`: `0`
+- `model_deterring_rejected_budget_count_mode`: `0`
+- `model_deterring_rejected_budget_utility_mode`: `0`
+- `model_deterring_budget_mode`: `count_per_hour`
+- `preventive_service_rate_per_robot_mean`: `53.575212322343084`
+- `preventive_direct_arrival_rate_per_robot_mean`: `19.356537753222835`
+- `preventive_capacity_remaining_per_robot_mean`: `25.125037031379303`
+- `planner_rejected_unassigned`: `0`
+- `planner_rejected_task_cap`: `10`
+- `planner_rejected_patrol_cap`: `0`
+- `planner_rejected_patrol_locked_model_det`: `0`
+- `planner_rejected_model_det_cap`: `0`
+- `planner_rejected_model_det_cycle_cap`: `0`
+- `planner_rejected_model_det_busy_primary`: `0`
+- `planner_rejected_model_det_busy_fallback_quality`: `0`
+- `planner_rejected_model_det_direct_conflict`: `0`
+- `planner_accepted_model_det_idle_primary`: `0`
+- `planner_accepted_model_det_busy_primary`: `0`
+- `planner_replaced_patrol`: `0`
+- `truth_candidate_events`: `8012`
+- `truth_accepted_events`: `7905`
+- `truth_suppressed_events`: `107`
+- `truth_suppression_rate`: `0.013354967548676985`
+- `truth_suppression_effect_mean`: `0.015165846267577988`
+- `truth_suppression_effect_sum`: `121.50876029583483`
+- `truth_suppression_effect_by_mode`: `{'direct_detection': 121.50876029583483}`
+- `truth_suppression_effect_by_source`: `{'direct_detection': 121.50876029583483, 'model_scored': 0.0}`
+- `deterring_actions_completed_total`: `365`
+- `deterring_actions_completed_direct_detection`: `365`
+- `deterring_actions_completed_model_scored`: `0`
+- `deterring_action_precision`: `0.5972602739726027`
+- `deterring_action_precision_direct_detection`: `0.5972602739726027`
+- `deterring_action_precision_model_scored`: `nan`
+- `suppression_per_deterring_action`: `0.3329007131392735`
+- `suppression_per_direct_deterring_action`: `0.3329007131392735`
+- `suppression_per_model_deterring_action`: `nan`
+- `model_vs_direct_suppression_yield_ratio`: `nan`
+- `forecast_recall_at_k`: `nan`
+- `forecast_precision_at_k`: `0.0`
+- `forecast_hotspot_hit_rate`: `0.0`
+- `forecast_lead_time_s`: `nan`
+- `forecast_samples`: `361`
+
+## Conclusions
+
+- Feedback worsens the spatial match between direct-detection assignments and detections.
+- Feedback worsens the spatial match between active direct-detection workload and detections.
+- Feedback increases clustered redundant reactive assignments.

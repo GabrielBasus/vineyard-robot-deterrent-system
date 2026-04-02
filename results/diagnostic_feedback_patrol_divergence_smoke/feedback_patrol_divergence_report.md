@@ -1,0 +1,294 @@
+# Feedback Patrol Divergence Diagnostic
+
+## Parameters
+
+- `T_end`: `1800.0`
+- `dt`: `5.0`
+- `seed`: `2026`
+- `W`: `500.0`
+- `H`: `500.0`
+- `NX`: `80`
+- `NY`: `64`
+- `Nrobots`: `6`
+- `uav_fraction`: `0.0`
+- `warmup_s`: `1800.0`
+- `task_replan_period_s`: `60.0`
+- `patrol_hotspot_filter_mode`: `percentile`
+- `patrol_hotspot_score_percentile`: `97.0`
+- `alpha_inhib`: `0.45`
+- `omega_inhib`: `600.0`
+- `telemetry_clear_on_start`: `False`
+- `telemetry_prompt_save`: `False`
+- `hotspot_top_k`: `5`
+- `match_radius_m`: `25.0`
+- `support_radius_m`: `25.0`
+
+## Final Metrics
+
+### prediction_only
+
+- `value_weighted_exposure`: `2951.4959472238206`
+- `mean_response_time_s`: `111.04672817096098`
+- `response_samples`: `66`
+- `travel_distance_by_robot`: `{'r1': 2446.326828260332, 'r2': 2204.1318973389834, 'r3': 2258.287551866396, 'r4': 3264.913150435171, 'r5': 2566.5803260236253, 'r6': 2749.98438198998}`
+- `travel_distance_by_type`: `{'UGV': 15490.224135914486, 'UAV': 0.0}`
+- `energy_by_robot`: `{'r1': 2446.326828260332, 'r2': 2204.1318973389834, 'r3': 2258.287551866396, 'r4': 3264.913150435171, 'r5': 2566.5803260236253, 'r6': 2749.98438198998}`
+- `energy_by_type`: `{'UGV': 15490.224135914486, 'UAV': 0.0}`
+- `completed_tasks_by_type`: `{'deterring': 66, 'patrolling': 72}`
+- `completed_tasks_total`: `138`
+- `tasks_per_unit_distance`: `0.008908844622851094`
+- `exposure_per_completed_task`: `21.387651791476962`
+- `score_per_completed_task`: `0.0`
+- `boundary_message_count`: `71`
+- `boundary_bytes_sent`: `4544`
+- `boundary_message_count_by_type`: `{'detection': 71, 'intervention': 0}`
+- `boundary_bytes_by_type`: `{'detection': 4544, 'intervention': 0}`
+- `intervention_msg_dropped_debounce`: `0`
+- `intervention_msg_dropped_low_weight`: `0`
+- `fleet_task_assigned_fraction`: `0.6666666666666666`
+- `fleet_moving_fraction`: `0.3333333333333333`
+- `fleet_idle_fraction`: `0.3333333333333333`
+- `fleet_idle_no_task_fraction`: `0.3333333333333333`
+- `fleet_idle_with_task_fraction`: `0.0`
+- `fleet_task_engagement_fraction_so_far`: `0.6874422899353644`
+- `fleet_moving_fraction_so_far`: `0.5304709141274236`
+- `fleet_idle_no_task_fraction_so_far`: `0.31255771006463573`
+- `robot_task_utilization_by_robot`: `{'r1': 0.703601108033241, 'r2': 0.5706371191135734, 'r3': 0.590027700831025, 'r4': 0.8587257617728532, 'r5': 0.6537396121883656, 'r6': 0.7479224376731302}`
+- `robot_idle_fraction_by_robot`: `{'r1': 0.3379501385041551, 'r2': 0.4487534626038781, 'r3': 0.43213296398891965, 'r4': 0.1772853185595568, 'r5': 0.3684210526315789, 'r6': 0.29085872576177285}`
+- `robot_moving_with_task_fraction_by_robot`: `{'r1': 0.49584487534626037, 'r2': 0.45429362880886426, 'r3': 0.46814404432132967, 'r4': 0.6786703601108033, 'r5': 0.5318559556786704, 'r6': 0.554016620498615}`
+- `robot_longest_idle_s_by_robot`: `{'r1': 265.0, 'r2': 485.0, 'r3': 430.0, 'r4': 165.0, 'r5': 340.0, 'r6': 225.0}`
+- `robot_tail_idle_s_by_robot`: `{'r1': 0.0, 'r2': 0.0, 'r3': 0.0, 'r4': 0.0, 'r5': 340.0, 'r6': 15.0}`
+- `robot_task_utilization_mean`: `0.6874422899353648`
+- `robot_idle_fraction_mean`: `0.3425669436749769`
+- `robot_moving_with_task_fraction_mean`: `0.5304709141274239`
+- `robot_longest_idle_s_max`: `485.0`
+- `robot_tail_idle_s_max`: `340.0`
+- `robots_zero_distance_count`: `0`
+- `stale_goal_clears`: `2`
+- `model_deterring_gate_policy`: `heuristic`
+- `model_deterring_accepted`: `0`
+- `model_deterring_rejected_budget`: `0`
+- `model_deterring_generated`: `0`
+- `model_deterring_candidates_total`: `0`
+- `model_deterring_rejected_cooldown`: `0`
+- `model_deterring_rejected_field`: `0`
+- `model_deterring_pass_field`: `0`
+- `model_deterring_rejected_predicted_deltaJ`: `0`
+- `model_deterring_pass_predicted_deltaJ`: `0`
+- `model_deterring_rejected_risk`: `0`
+- `model_deterring_pass_risk`: `0`
+- `model_deterring_rejected_support`: `0`
+- `model_deterring_rejected_persistence`: `0`
+- `model_deterring_rejected_repeat_no_new_support`: `0`
+- `model_deterring_rejected_eta`: `0`
+- `model_deterring_rejected_busy`: `0`
+- `model_deterring_rejected_margin`: `0`
+- `model_deterring_pass_support`: `0`
+- `model_deterring_pass_sprt`: `0`
+- `model_deterring_rejected_sprt_pending`: `0`
+- `model_deterring_rejected_sprt_negative`: `0`
+- `model_deterring_rejected_sprt_margin`: `0`
+- `model_deterring_pass_chance`: `0`
+- `model_deterring_rejected_chance`: `0`
+- `model_deterring_pass_utility_ratio`: `0`
+- `model_deterring_rejected_utility_ratio`: `0`
+- `model_deterring_rejected_selection_weight`: `0`
+- `model_deterring_pass_capacity`: `0`
+- `model_deterring_rejected_capacity`: `0`
+- `model_deterring_llr_mean`: `nan`
+- `model_deterring_llr_max`: `nan`
+- `model_deterring_llr_p50`: `nan`
+- `model_deterring_llr_p75`: `nan`
+- `model_deterring_llr_p90`: `nan`
+- `model_deterring_p_event_mean`: `nan`
+- `model_deterring_deltaJ_per_cost_mean`: `nan`
+- `model_deterring_cluster_key_total`: `0`
+- `model_deterring_cluster_key_reused`: `0`
+- `model_deterring_cluster_key_churn`: `0`
+- `model_deterring_cluster_key_new`: `0`
+- `model_deterring_not_selected`: `0`
+- `model_deterring_rejected_budget_count_mode`: `0`
+- `model_deterring_rejected_budget_utility_mode`: `0`
+- `model_deterring_budget_mode`: `count_per_hour`
+- `preventive_service_rate_per_robot_mean`: `63.19292185034619`
+- `preventive_direct_arrival_rate_per_robot_mean`: `5.91505376344086`
+- `preventive_capacity_remaining_per_robot_mean`: `41.62533691324046`
+- `planner_rejected_unassigned`: `0`
+- `planner_rejected_task_cap`: `5`
+- `planner_rejected_patrol_cap`: `1`
+- `planner_rejected_patrol_locked_model_det`: `0`
+- `planner_rejected_model_det_cap`: `0`
+- `planner_rejected_model_det_cycle_cap`: `0`
+- `planner_rejected_model_det_busy_primary`: `0`
+- `planner_rejected_model_det_busy_fallback_quality`: `0`
+- `planner_rejected_model_det_direct_conflict`: `0`
+- `planner_accepted_model_det_idle_primary`: `0`
+- `planner_accepted_model_det_busy_primary`: `0`
+- `planner_replaced_patrol`: `0`
+- `truth_candidate_events`: `1357`
+- `truth_accepted_events`: `1347`
+- `truth_suppressed_events`: `10`
+- `truth_suppression_rate`: `0.007369196757553427`
+- `truth_suppression_effect_mean`: `0.011672097714258105`
+- `truth_suppression_effect_sum`: `15.839036598248248`
+- `truth_suppression_effect_by_mode`: `{'direct_detection': 15.839036598248248}`
+- `truth_suppression_effect_by_source`: `{'direct_detection': 15.839036598248248, 'model_scored': 0.0}`
+- `deterring_actions_completed_total`: `66`
+- `deterring_actions_completed_direct_detection`: `66`
+- `deterring_actions_completed_model_scored`: `0`
+- `deterring_action_precision`: `0.5151515151515151`
+- `deterring_action_precision_direct_detection`: `0.5151515151515151`
+- `deterring_action_precision_model_scored`: `nan`
+- `suppression_per_deterring_action`: `0.23998540300376134`
+- `suppression_per_direct_deterring_action`: `0.23998540300376134`
+- `suppression_per_model_deterring_action`: `nan`
+- `model_vs_direct_suppression_yield_ratio`: `nan`
+- `forecast_recall_at_k`: `nan`
+- `forecast_precision_at_k`: `0.0`
+- `forecast_hotspot_hit_rate`: `0.0`
+- `forecast_lead_time_s`: `nan`
+- `forecast_samples`: `61`
+
+### proposed_feedback_only
+
+- `value_weighted_exposure`: `2951.4959472238206`
+- `mean_response_time_s`: `111.04672817096098`
+- `response_samples`: `66`
+- `travel_distance_by_robot`: `{'r1': 2446.326828260332, 'r2': 2204.1318973389834, 'r3': 2258.287551866396, 'r4': 3264.913150435171, 'r5': 2566.5803260236253, 'r6': 2749.98438198998}`
+- `travel_distance_by_type`: `{'UGV': 15490.224135914486, 'UAV': 0.0}`
+- `energy_by_robot`: `{'r1': 2446.326828260332, 'r2': 2204.1318973389834, 'r3': 2258.287551866396, 'r4': 3264.913150435171, 'r5': 2566.5803260236253, 'r6': 2749.98438198998}`
+- `energy_by_type`: `{'UGV': 15490.224135914486, 'UAV': 0.0}`
+- `completed_tasks_by_type`: `{'deterring': 66, 'patrolling': 72}`
+- `completed_tasks_total`: `138`
+- `tasks_per_unit_distance`: `0.008908844622851094`
+- `exposure_per_completed_task`: `21.387651791476962`
+- `score_per_completed_task`: `0.0`
+- `boundary_message_count`: `126`
+- `boundary_bytes_sent`: `8504`
+- `boundary_message_count_by_type`: `{'detection': 71, 'intervention': 55}`
+- `boundary_bytes_by_type`: `{'detection': 4544, 'intervention': 3960}`
+- `intervention_msg_dropped_debounce`: `0`
+- `intervention_msg_dropped_low_weight`: `0`
+- `fleet_task_assigned_fraction`: `0.6666666666666666`
+- `fleet_moving_fraction`: `0.3333333333333333`
+- `fleet_idle_fraction`: `0.3333333333333333`
+- `fleet_idle_no_task_fraction`: `0.3333333333333333`
+- `fleet_idle_with_task_fraction`: `0.0`
+- `fleet_task_engagement_fraction_so_far`: `0.6874422899353644`
+- `fleet_moving_fraction_so_far`: `0.5304709141274236`
+- `fleet_idle_no_task_fraction_so_far`: `0.31255771006463573`
+- `robot_task_utilization_by_robot`: `{'r1': 0.703601108033241, 'r2': 0.5706371191135734, 'r3': 0.590027700831025, 'r4': 0.8587257617728532, 'r5': 0.6537396121883656, 'r6': 0.7479224376731302}`
+- `robot_idle_fraction_by_robot`: `{'r1': 0.3379501385041551, 'r2': 0.4487534626038781, 'r3': 0.43213296398891965, 'r4': 0.1772853185595568, 'r5': 0.3684210526315789, 'r6': 0.29085872576177285}`
+- `robot_moving_with_task_fraction_by_robot`: `{'r1': 0.49584487534626037, 'r2': 0.45429362880886426, 'r3': 0.46814404432132967, 'r4': 0.6786703601108033, 'r5': 0.5318559556786704, 'r6': 0.554016620498615}`
+- `robot_longest_idle_s_by_robot`: `{'r1': 265.0, 'r2': 485.0, 'r3': 430.0, 'r4': 165.0, 'r5': 340.0, 'r6': 225.0}`
+- `robot_tail_idle_s_by_robot`: `{'r1': 0.0, 'r2': 0.0, 'r3': 0.0, 'r4': 0.0, 'r5': 340.0, 'r6': 15.0}`
+- `robot_task_utilization_mean`: `0.6874422899353648`
+- `robot_idle_fraction_mean`: `0.3425669436749769`
+- `robot_moving_with_task_fraction_mean`: `0.5304709141274239`
+- `robot_longest_idle_s_max`: `485.0`
+- `robot_tail_idle_s_max`: `340.0`
+- `robots_zero_distance_count`: `0`
+- `stale_goal_clears`: `2`
+- `model_deterring_gate_policy`: `heuristic`
+- `model_deterring_accepted`: `0`
+- `model_deterring_rejected_budget`: `0`
+- `model_deterring_generated`: `0`
+- `model_deterring_candidates_total`: `0`
+- `model_deterring_rejected_cooldown`: `0`
+- `model_deterring_rejected_field`: `0`
+- `model_deterring_pass_field`: `0`
+- `model_deterring_rejected_predicted_deltaJ`: `0`
+- `model_deterring_pass_predicted_deltaJ`: `0`
+- `model_deterring_rejected_risk`: `0`
+- `model_deterring_pass_risk`: `0`
+- `model_deterring_rejected_support`: `0`
+- `model_deterring_rejected_persistence`: `0`
+- `model_deterring_rejected_repeat_no_new_support`: `0`
+- `model_deterring_rejected_eta`: `0`
+- `model_deterring_rejected_busy`: `0`
+- `model_deterring_rejected_margin`: `0`
+- `model_deterring_pass_support`: `0`
+- `model_deterring_pass_sprt`: `0`
+- `model_deterring_rejected_sprt_pending`: `0`
+- `model_deterring_rejected_sprt_negative`: `0`
+- `model_deterring_rejected_sprt_margin`: `0`
+- `model_deterring_pass_chance`: `0`
+- `model_deterring_rejected_chance`: `0`
+- `model_deterring_pass_utility_ratio`: `0`
+- `model_deterring_rejected_utility_ratio`: `0`
+- `model_deterring_rejected_selection_weight`: `0`
+- `model_deterring_pass_capacity`: `0`
+- `model_deterring_rejected_capacity`: `0`
+- `model_deterring_llr_mean`: `nan`
+- `model_deterring_llr_max`: `nan`
+- `model_deterring_llr_p50`: `nan`
+- `model_deterring_llr_p75`: `nan`
+- `model_deterring_llr_p90`: `nan`
+- `model_deterring_p_event_mean`: `nan`
+- `model_deterring_deltaJ_per_cost_mean`: `nan`
+- `model_deterring_cluster_key_total`: `0`
+- `model_deterring_cluster_key_reused`: `0`
+- `model_deterring_cluster_key_churn`: `0`
+- `model_deterring_cluster_key_new`: `0`
+- `model_deterring_not_selected`: `0`
+- `model_deterring_rejected_budget_count_mode`: `0`
+- `model_deterring_rejected_budget_utility_mode`: `0`
+- `model_deterring_budget_mode`: `count_per_hour`
+- `preventive_service_rate_per_robot_mean`: `63.19292185034619`
+- `preventive_direct_arrival_rate_per_robot_mean`: `5.91505376344086`
+- `preventive_capacity_remaining_per_robot_mean`: `41.62533691324046`
+- `planner_rejected_unassigned`: `0`
+- `planner_rejected_task_cap`: `5`
+- `planner_rejected_patrol_cap`: `1`
+- `planner_rejected_patrol_locked_model_det`: `0`
+- `planner_rejected_model_det_cap`: `0`
+- `planner_rejected_model_det_cycle_cap`: `0`
+- `planner_rejected_model_det_busy_primary`: `0`
+- `planner_rejected_model_det_busy_fallback_quality`: `0`
+- `planner_rejected_model_det_direct_conflict`: `0`
+- `planner_accepted_model_det_idle_primary`: `0`
+- `planner_accepted_model_det_busy_primary`: `0`
+- `planner_replaced_patrol`: `0`
+- `truth_candidate_events`: `1357`
+- `truth_accepted_events`: `1347`
+- `truth_suppressed_events`: `10`
+- `truth_suppression_rate`: `0.007369196757553427`
+- `truth_suppression_effect_mean`: `0.011672097714258105`
+- `truth_suppression_effect_sum`: `15.839036598248248`
+- `truth_suppression_effect_by_mode`: `{'direct_detection': 15.839036598248248}`
+- `truth_suppression_effect_by_source`: `{'direct_detection': 15.839036598248248, 'model_scored': 0.0}`
+- `deterring_actions_completed_total`: `66`
+- `deterring_actions_completed_direct_detection`: `66`
+- `deterring_actions_completed_model_scored`: `0`
+- `deterring_action_precision`: `0.5151515151515151`
+- `deterring_action_precision_direct_detection`: `0.5151515151515151`
+- `deterring_action_precision_model_scored`: `nan`
+- `suppression_per_deterring_action`: `0.23998540300376134`
+- `suppression_per_direct_deterring_action`: `0.23998540300376134`
+- `suppression_per_model_deterring_action`: `nan`
+- `model_vs_direct_suppression_yield_ratio`: `nan`
+- `forecast_recall_at_k`: `nan`
+- `forecast_precision_at_k`: `0.0`
+- `forecast_hotspot_hit_rate`: `0.0`
+- `forecast_lead_time_s`: `nan`
+- `forecast_samples`: `61`
+
+## Aggregate Comparisons
+
+- `exposure_improve_pct`: `0.0`
+- `response_improve_pct`: `0.0`
+- `hotspot_overlap_mean`: `0.25161290322580643`
+- `patrol_candidate_overlap_mean`: `1.0`
+- `active_patrol_overlap_mean`: `0.967741935483871`
+- `prediction_hotspot_truth_hit_rate_mean`: `0.1870967741935484`
+- `proposed_hotspot_truth_hit_rate_mean`: `0.11612903225806454`
+- `prediction_active_patrol_truth_hit_rate_mean`: `0.1138888888888889`
+- `proposed_active_patrol_truth_hit_rate_mean`: `0.1138888888888889`
+- `prediction_hotspot_detection_hit_rate_mean`: `0.12903225806451613`
+- `proposed_hotspot_detection_hit_rate_mean`: `0.03870967741935484`
+- `prediction_inhib_sum_total_mean`: `0.0`
+- `proposed_inhib_sum_total_mean`: `10.112102585577555`
+
+## Conclusions
+
+- Proposed feedback hotspots align with recent truth less often than prediction_only hotspots.

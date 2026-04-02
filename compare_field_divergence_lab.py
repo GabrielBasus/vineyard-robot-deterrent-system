@@ -14,6 +14,7 @@ import pandas as pd
 
 import DeterrentSystem_assignment_lab as ds
 from config_loader import add_config_argument, parse_args_with_config, write_resolved_config_manifest
+from thesis_experiment_workflow import render_execution_order_lines, render_stage_readme_lines, stage_manifest
 
 
 Point2 = Tuple[float, float]
@@ -52,6 +53,73 @@ FIELD_DIVERGENCE_CONFIG_ALIASES = {
     "model.model_beta_scale": "model_beta_scale",
 }
 
+# These thresholds turn the existing lab narrative into explicit acceptance guards.
+FIELD_DIVERGENCE_ACCEPTANCE_THRESHOLDS = {
+    "min_suppressed_area_fraction_mean": 0.10,
+    "max_local_hotspots_score_filtered_overlap_mean": 0.80,
+    "max_local_hotspots_spaced_overlap_mean": 0.80,
+    "max_raw_patrol_candidate_overlap_mean": 0.80,
+    "max_selected_patrol_overlap_mean": 0.80,
+    "max_patrol_overlap_mean": 0.80,
+}
+
+FIELD_DIVERGENCE_ACCEPTANCE_SPECS = (
+    {
+        "failure_mode": "no_meaningful_field_divergence",
+        "metric": "suppressed_area_fraction_mean",
+        "threshold_key": "min_suppressed_area_fraction_mean",
+        "relation": ">=",
+        "requires_field_divergence": False,
+        "pass_note": "Mean suppressed-area fraction clears the minimum field-divergence floor.",
+        "fail_note": "Mean suppressed-area fraction stays below the minimum field-divergence floor.",
+    },
+    {
+        "failure_mode": "filter_collapse",
+        "metric": "local_hotspots_score_filtered_overlap_mean",
+        "threshold_key": "max_local_hotspots_score_filtered_overlap_mean",
+        "relation": "<=",
+        "requires_field_divergence": True,
+        "pass_note": "Filtered local hotspots still differ enough across baselines.",
+        "fail_note": "Score filtering leaves the filtered local hotspots too similar across baselines.",
+    },
+    {
+        "failure_mode": "spacing_collapse",
+        "metric": "local_hotspots_spaced_overlap_mean",
+        "threshold_key": "max_local_hotspots_spaced_overlap_mean",
+        "relation": "<=",
+        "requires_field_divergence": True,
+        "pass_note": "Spacing/thinning keeps the filtered hotspot difference visible.",
+        "fail_note": "Spacing/thinning leaves the spaced hotspots too similar across baselines.",
+    },
+    {
+        "failure_mode": "raw_patrol_candidate_collapse",
+        "metric": "raw_patrol_candidate_overlap_mean",
+        "threshold_key": "max_raw_patrol_candidate_overlap_mean",
+        "relation": "<=",
+        "requires_field_divergence": True,
+        "pass_note": "Raw patrol candidates remain distinct when the field differs.",
+        "fail_note": "Raw patrol candidates collapse back to near-identical sets.",
+    },
+    {
+        "failure_mode": "selected_patrol_collapse",
+        "metric": "selected_patrol_overlap_mean",
+        "threshold_key": "max_selected_patrol_overlap_mean",
+        "relation": "<=",
+        "requires_field_divergence": True,
+        "pass_note": "Selected patrol tasks still reflect the upstream field difference.",
+        "fail_note": "Assignment/selection leaves the selected patrol tasks too similar.",
+    },
+    {
+        "failure_mode": "active_patrol_collapse",
+        "metric": "patrol_overlap_mean",
+        "threshold_key": "max_patrol_overlap_mean",
+        "relation": "<=",
+        "requires_field_divergence": True,
+        "pass_note": "The active patrol queue still differs across baselines.",
+        "fail_note": "The active patrol queue collapses back to near-identical patrols.",
+    },
+)
+
 
 def _safe_mean(values: Sequence[float]) -> float:
     arr = np.array([float(v) for v in values if np.isfinite(v)], dtype=float)
@@ -61,6 +129,107 @@ def _safe_mean(values: Sequence[float]) -> float:
 def _safe_max(values: Sequence[float]) -> float:
     arr = np.array([float(v) for v in values if np.isfinite(v)], dtype=float)
     return float(np.max(arr)) if arr.size else float("nan")
+
+
+def _safe_float(value: object) -> float:
+    try:
+        out = float(value)
+    except Exception:
+        return float("nan")
+    return out if np.isfinite(out) else float("nan")
+
+
+def _format_metric_value(value: float) -> str:
+    if not np.isfinite(value):
+        return "nan"
+    return f"{value:.4f}" if abs(value) >= 1e-3 else f"{value:.3e}"
+
+
+def _metric_passes(value: float, threshold: float, relation: str) -> bool:
+    if not np.isfinite(value):
+        return False
+    if relation == ">=":
+        return bool(value >= threshold)
+    if relation == "<=":
+        return bool(value <= threshold)
+    raise ValueError(f"Unsupported relation: {relation}")
+
+
+def _evaluate_acceptance_checks(
+    summary_metrics: dict,
+    failure_modes: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    spec_by_name = {spec["failure_mode"]: spec for spec in FIELD_DIVERGENCE_ACCEPTANCE_SPECS}
+    ordered_specs = [
+        spec_by_name[name]
+        for name in (failure_modes or [spec["failure_mode"] for spec in FIELD_DIVERGENCE_ACCEPTANCE_SPECS])
+        if name in spec_by_name
+    ]
+    thresholds = FIELD_DIVERGENCE_ACCEPTANCE_THRESHOLDS
+    field_spec = spec_by_name["no_meaningful_field_divergence"]
+    field_value = _safe_float(summary_metrics.get(field_spec["metric"], float("nan")))
+    field_threshold = float(thresholds[field_spec["threshold_key"]])
+    field_divergence_present = _metric_passes(field_value, field_threshold, field_spec["relation"])
+
+    rows = []
+    for spec in ordered_specs:
+        metric = str(spec["metric"])
+        value = _safe_float(summary_metrics.get(metric, float("nan")))
+        threshold = float(thresholds[spec["threshold_key"]])
+        relation = str(spec["relation"])
+        if spec.get("requires_field_divergence", False) and not field_divergence_present:
+            status = "WARN"
+            triggered = 0
+            note = "Upstream field divergence is below the acceptance floor, so this downstream collapse check is inconclusive."
+        else:
+            passed = _metric_passes(value, threshold, relation)
+            status = "PASS" if passed else "FAIL"
+            triggered = 0 if passed else 1
+            note = str(spec["pass_note"] if passed else spec["fail_note"])
+        rows.append(
+            {
+                "failure_mode": str(spec["failure_mode"]),
+                "status": status,
+                "triggered": int(triggered),
+                "metric": metric,
+                "value": value,
+                "threshold": threshold,
+                "relation": relation,
+                "note": note,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _explain_likely_bottleneck(summary_metrics: dict) -> str:
+    acceptance_df = _evaluate_acceptance_checks(summary_metrics)
+    failures = acceptance_df.loc[acceptance_df["status"] == "FAIL", "failure_mode"].tolist()
+    if failures:
+        explain_map = {
+            "no_meaningful_field_divergence": "The proposed field is not separating enough from prediction-only before the local patrol pipeline.",
+            "filter_collapse": "Local score filtering is the first stage that makes the two hotspot sets look too similar.",
+            "spacing_collapse": "Spacing/thinning is the first stage that removes the hotspot difference.",
+            "raw_patrol_candidate_collapse": "Raw patrol candidate generation is re-merging the spaced hotspot sets.",
+            "selected_patrol_collapse": "Assignment/selection is re-merging patrol options that were distinct upstream.",
+            "active_patrol_collapse": "Queue persistence/admission is re-merging patrols after selection.",
+        }
+        return explain_map.get(str(failures[0]), "A downstream planner stage is collapsing the field difference.")
+    if any(str(status) == "WARN" for status in acceptance_df["status"].tolist()):
+        return "Field divergence is borderline, so downstream collapse checks are not yet decisive."
+    return "No dominant collapse is visible: the field difference survives through the active patrol queue."
+
+
+def _acceptance_markdown_lines(acceptance_df: pd.DataFrame) -> List[str]:
+    lines = [
+        "## Acceptance Summary",
+        "| Failure mode | Status | Evidence | Acceptance test | Note |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for row in acceptance_df.to_dict("records"):
+        evidence = f"`{row['metric']}`={_format_metric_value(_safe_float(row['value']))}"
+        test = f"`{row['metric']}` {row['relation']} {_format_metric_value(_safe_float(row['threshold']))}"
+        lines.append(f"| `{row['failure_mode']}` | {row['status']} | {evidence} | {test} | {row['note']} |")
+    return lines
 
 
 def _score_quantile(rows: Iterable[dict], pct: float) -> float:
@@ -754,12 +923,16 @@ def main() -> None:
 
     per_time_df = pd.DataFrame(per_time_rows)
     summary_df = _summary_row(per_time_df, final_metrics_by_baseline)
+    acceptance_df = _evaluate_acceptance_checks(summary_df.iloc[0].to_dict())
+    bottleneck_hint = _explain_likely_bottleneck(summary_df.iloc[0].to_dict())
 
     per_time_path = outdir / "field_divergence_per_time_lab.csv"
     summary_path = outdir / "field_divergence_summary_lab.csv"
+    acceptance_path = outdir / "field_divergence_acceptance_lab.csv"
     config_manifest_path = outdir / "field_divergence_resolved_config.json"
     per_time_df.to_csv(per_time_path, index=False)
     summary_df.to_csv(summary_path, index=False)
+    acceptance_df.to_csv(acceptance_path, index=False)
     write_resolved_config_manifest(
         config_manifest_path,
         script="compare_field_divergence_lab.py",
@@ -768,6 +941,7 @@ def main() -> None:
         extra={
             "sim_kwargs": json.loads(json.dumps(sim_kwargs, default=str)),
             "baselines": ["prediction_only", "proposed"],
+            "workflow_stage": stage_manifest("field_divergence_lab"),
         },
     )
 
@@ -782,27 +956,41 @@ def main() -> None:
             [
                 "# Field Divergence Lab",
                 "",
+                *render_stage_readme_lines("field_divergence_lab"),
+                "",
+                "## Key Outputs",
                 f"- Per-time CSV: `{per_time_path.name}`",
                 f"- Summary CSV: `{summary_path.name}`",
+                f"- Acceptance CSV: `{acceptance_path.name}`",
                 f"- Resolved config: `{config_manifest_path.name}`",
-                "- Metrics:",
-                "  - `lambda_l1_mean`: mean absolute difference between merged `lam` fields.",
-                "  - `lambda_l2_mean`: RMS difference between merged `lam` fields.",
-                "  - `suppressed_area_fraction`: fraction of cells where proposed `lam` is lower than prediction-only.",
-                "  - `hotspot_overlap_at_k`: matched hotspot overlap fraction at top-k.",
-                "  - `local_hotspot_filter_threshold_mean_*`: average local hotspot score threshold applied across robots.",
-                "  - `local_hotspots_raw_score_p50/p90/max_*`: score distribution diagnostics for local raw hotspots.",
-                "  - `local_hotspots_raw_overlap`: overlap of zone-masked local hotspots before score filtering.",
-                "  - `local_hotspots_score_filtered_overlap`: overlap after local hotspot score thresholding.",
-                "  - `local_hotspots_spaced_overlap`: overlap after spacing / thinning.",
-                "  - `raw_patrol_candidate_overlap`: overlap of raw patrol candidates before assignment/admission.",
-                "  - `selected_patrol_overlap`: overlap of patrol tasks selected by assignment before persistence/queueing.",
-                "  - `patrol_overlap`: matched overlap fraction of active patrol tasks.",
-                "  - `recent_deterrence_patrol_fraction_*`: fraction of patrol tasks near recently completed deterrence actions.",
-                "  - `local_lambda_drop_mean_*`: average local `lam` drop after newly completed deterrence actions.",
-                "  - `local_excess_drop_mean_*`: average local `(lam-mu)` drop after newly completed deterrence actions.",
                 "",
-                "Interpretation:",
+                "## Exported Metrics",
+                "- `lambda_l1_mean`: mean absolute difference between merged `lam` fields.",
+                "- `lambda_l2_mean`: RMS difference between merged `lam` fields.",
+                "- `suppressed_area_fraction`: fraction of cells where proposed `lam` is lower than prediction-only.",
+                "- `hotspot_overlap_at_k`: matched hotspot overlap fraction at top-k.",
+                "- `local_hotspot_filter_threshold_mean_*`: average local hotspot score threshold applied across robots.",
+                "- `local_hotspots_raw_score_p50/p90/max_*`: score distribution diagnostics for local raw hotspots.",
+                "- `local_hotspots_raw_overlap`: overlap of zone-masked local hotspots before score filtering.",
+                "- `local_hotspots_score_filtered_overlap`: overlap after local hotspot score thresholding.",
+                "- `local_hotspots_spaced_overlap`: overlap after spacing / thinning.",
+                "- `raw_patrol_candidate_overlap`: overlap of raw patrol candidates before assignment/admission.",
+                "- `selected_patrol_overlap`: overlap of patrol tasks selected by assignment before persistence/queueing.",
+                "- `patrol_overlap`: matched overlap fraction of active patrol tasks.",
+                "- `recent_deterrence_patrol_fraction_*`: fraction of patrol tasks near recently completed deterrence actions.",
+                "- `local_lambda_drop_mean_*`: average local `lam` drop after newly completed deterrence actions.",
+                "- `local_excess_drop_mean_*`: average local `(lam-mu)` drop after newly completed deterrence actions.",
+                "",
+                *(_acceptance_markdown_lines(acceptance_df)),
+                "",
+                "## Interpretation",
+                f"- Likely bottleneck: {bottleneck_hint}",
+                "",
+                "## Acceptance Logic",
+                "- `suppressed_area_fraction_mean >= 0.10` establishes that the proposed field differs enough to interpret downstream planner stages.",
+                "- Each downstream overlap mean should remain at or below `0.80`; higher overlap means that stage is collapsing a difference that should still be visible.",
+                "",
+                "## Additional Interpretation",
                 "- If field divergence metrics remain near zero, the IA-SESTPP is not changing the prediction enough to matter.",
                 "- If global hotspots diverge but local hotspot overlaps remain high, the zone-masked local planning view is washing out the global difference.",
                 "- If the local raw score p90 stays below the applied threshold, the score threshold is too strict for the local patrol generator.",
@@ -812,6 +1000,8 @@ def main() -> None:
                 "- If raw patrol candidates diverge but selected patrol tasks do not, assignment/selection is washing out the difference.",
                 "- If selected patrol tasks diverge but active patrol queue does not, persistence/queueing is washing out the difference.",
                 "- If proposed local suppression drops are larger than prediction-only, intervention feedback is affecting the predicted field.",
+                "",
+                *render_execution_order_lines(),
             ]
         ),
         encoding="utf-8",
@@ -820,6 +1010,7 @@ def main() -> None:
     print(f"[done] wrote outputs to: {outdir}")
     print(f"- {per_time_path}")
     print(f"- {summary_path}")
+    print(f"- {acceptance_path}")
     print(f"- {config_manifest_path}")
     for p in plot_paths:
         print(f"- {p}")

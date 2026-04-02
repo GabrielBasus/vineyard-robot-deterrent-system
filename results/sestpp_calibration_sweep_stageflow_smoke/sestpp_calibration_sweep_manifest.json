@@ -1,0 +1,44 @@
+{
+  "base_args": {
+    "runs": 1,
+    "seed_start": 2026,
+    "T_end": 600.0,
+    "warmup_s": 0.0,
+    "dt": 5.0,
+    "forecast_horizon_s": 60.0,
+    "eval_period_s": 30.0,
+    "outdir": "results/sestpp_calibration_sweep_stageflow_smoke",
+    "limit_settings": 1,
+    "intervention_prob": 0.45,
+    "intervention_cooldown_s": 40.0,
+    "intervention_delay_s": 10.0,
+    "intervention_shuffle": "none",
+    "shuffle_time_window_s": 300.0,
+    "beta_true": 0.3,
+    "model_alpha_inhib_values": "0.25,0.35,0.45",
+    "model_omega_inhib_values": "450,600,900",
+    "model_mu_base_values": "5e-5,1e-4,2e-4",
+    "model_bg_ema_values": "1e-7,1e-6"
+  },
+  "num_configs": 1,
+  "grid": [
+    {
+      "config_id": "C01",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    }
+  ],
+  "workflow_stage": {
+    "stage_key": "model_calibration",
+    "stage_title": "Model Calibration",
+    "stage_order": 1,
+    "stage_total": 6,
+    "runner": "run_sestpp_calibration_sweep.py",
+    "depends_on": [],
+    "optional": false,
+    "order_note": "Freeze the intervention-aware SESTPP settings that every downstream stage will reuse.",
+    "question": "Which intervention-aware SESTPP hyperparameters best calibrate the proposed field before any planner conclusions are made?"
+  }
+}

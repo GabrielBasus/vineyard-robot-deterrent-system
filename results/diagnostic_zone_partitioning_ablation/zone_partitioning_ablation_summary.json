@@ -1,0 +1,49 @@
+{
+  "parameters": {
+    "runs": 8,
+    "seed_start": 2026,
+    "mode_suite": "both",
+    "T_end": 10800.0,
+    "dt": 5.0,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "warmup_s": 1800.0,
+    "task_replan_period_s": 60.0,
+    "patrol_hotspot_filter_mode": "percentile",
+    "patrol_hotspot_score_percentile": 97.0,
+    "alpha_inhib": 0.45,
+    "omega_inhib": 600.0,
+    "partition_scale": 1500.0,
+    "partition_gamma": 1.0
+  },
+  "summary_by_mode": {
+    "prediction_only": {
+      "runs": 8,
+      "exposure_improve_pct_mean": 0.7984861633122591,
+      "exposure_improve_pct_std": 1.7005580040162367,
+      "response_improve_pct_mean": -2.3298114305535433,
+      "response_improve_pct_std": 3.239733428994701,
+      "comm_increase_pct_mean": 9.587622986765835,
+      "delta_zone_area_cv_mean": -0.0002930049408253928,
+      "delta_robot_util_std_mean": -0.04398157945012153,
+      "weighted_better_on_exposure_runs": 6,
+      "weighted_better_on_response_runs": 2
+    },
+    "proposed_feedback_only": {
+      "runs": 8,
+      "exposure_improve_pct_mean": 0.39960055880942635,
+      "exposure_improve_pct_std": 1.6081412347095754,
+      "response_improve_pct_mean": -1.656356591869048,
+      "response_improve_pct_std": 4.939544037988796,
+      "comm_increase_pct_mean": 12.495899489282719,
+      "delta_zone_area_cv_mean": -0.0002930049408253928,
+      "delta_robot_util_std_mean": 0.004028806719392772,
+      "weighted_better_on_exposure_runs": 4,
+      "weighted_better_on_response_runs": 3
+    }
+  },
+  "conclusions": [
+    "prediction_only: current weighted partitioning has mixed effect relative to neutral Voronoi.",
+    "proposed_feedback_only: current weighted partitioning has mixed effect relative to neutral Voronoi."
+  ]
+}

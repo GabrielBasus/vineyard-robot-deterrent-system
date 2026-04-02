@@ -4,9 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from thesis_experiment_workflow import render_execution_order_lines, render_stage_readme_lines
 
 
 METHODS = ["frozen_greedy", "hungarian", "auction", "cbba"]
@@ -65,6 +69,7 @@ def _plot_proposed_minus_prediction(runs_df: pd.DataFrame, outpath: Path) -> pd.
         rows.append(
             {
                 "assignment_method": method,
+                "n_pairs": int(len(pair)),
                 "exposure_improve_pct": float(np.nanmean(exposure_imp)),
                 "exposure_improve_ci95": _ci95(exposure_imp),
                 "response_improve_pct": float(np.nanmean(response_imp)),
@@ -194,20 +199,26 @@ def _write_summary_md(outdir: Path, pp_df: pd.DataFrame, manifest: dict) -> None
     lines = []
     lines.append("# Assignment Method Comparison Lab - Plot Summary")
     lines.append("")
+    lines.extend(render_stage_readme_lines("assignment_method_comparison"))
+    lines.append("")
+    lines.append("## Scope")
     winner = manifest.get("winner_selection", {}).get("winner", {}).get("winner")
+    methods = manifest.get("methods", METHODS)
+    if not isinstance(methods, list):
+        methods = METHODS
     lines.append(f"- Selected winner (from manifest rule): `{winner}`")
     lines.append(f"- Baselines: {', '.join(BASELINES)}")
-    lines.append(f"- Methods: {', '.join(METHODS)}")
+    lines.append(f"- Methods: {', '.join(str(m) for m in methods)}")
     lines.append("")
 
     if not pp_df.empty:
         lines.append("## Proposed minus Prediction-only (mean %) by method")
         lines.append("")
-        lines.append("| method | exposure improve % | response improve % | comm increase % |")
-        lines.append("|---|---:|---:|---:|")
+        lines.append("| method | n pairs | exposure improve % +/- CI95 | response improve % +/- CI95 | comm increase % +/- CI95 |")
+        lines.append("|---|---:|---:|---:|---:|")
         for _, r in pp_df.iterrows():
             lines.append(
-                f"| {r['assignment_method']} | {r['exposure_improve_pct']:.3f} | {r['response_improve_pct']:.3f} | {r['comm_increase_pct']:.3f} |"
+                f"| {r['assignment_method']} | {int(r['n_pairs'])} | {r['exposure_improve_pct']:.3f} +/- {r['exposure_improve_ci95']:.3f} | {r['response_improve_pct']:.3f} +/- {r['response_improve_ci95']:.3f} | {r['comm_increase_pct']:.3f} +/- {r['comm_increase_ci95']:.3f} |"
             )
         lines.append("")
 
@@ -221,6 +232,8 @@ def _write_summary_md(outdir: Path, pp_df: pd.DataFrame, manifest: dict) -> None
     lines.append("- `rank_heatmap_reactive.png`")
     lines.append("- `rank_heatmap_prediction_only.png`")
     lines.append("- `rank_heatmap_proposed.png`")
+    lines.append("")
+    lines.extend(render_execution_order_lines())
 
     (outdir / "assignment_method_plots_summary_lab.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

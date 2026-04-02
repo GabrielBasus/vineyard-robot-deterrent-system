@@ -43,6 +43,8 @@ from system_stage_helpers import (
     run_telemetry_stage,
     run_truth_generation_stage,
 )
+from planner_profiles import canonicalize_planner_profile_name, get_planner_profile_values
+from calibration_config import load_frozen_sestpp_calibration
 
 class EventBus:
     def __init__(self, robots: Dict[str, Robot], bytes_per_boundary_msg: int = 64, bytes_per_intervention_msg: int = 72):
@@ -96,7 +98,14 @@ class EventBus:
                     else:
                         qx = int(round(x))
                         qy = int(round(y))
-                    k = (str(source_id), str(rid), qx, qy)
+                    k = (
+                        str(source_id),
+                        str(rid),
+                        qx,
+                        qy,
+                        None if ev.get('mode') is None else str(ev.get('mode')),
+                        ev.get('action_id'),
+                    )
                     t_last = float(self._last_intervention_key_t.get(k, -1e18))
                     if (t - t_last) < min_interval_s:
                         self.intervention_msg_dropped_debounce += 1
@@ -106,8 +115,263 @@ class EventBus:
                 self.intervention_bytes += self.bytes_per_intervention_msg
                 self.robots[rid].ingest_intervention_event(
                     x=ev['x'], y=ev['y'], t=ev['t'],
-                    weight=w, sigma=ev.get('sigma'), omega_inhib=ev.get('omega_inhib')
+                    weight=w,
+                    sigma=ev.get('sigma'),
+                    omega_inhib=ev.get('omega_inhib'),
+                    mode=ev.get('mode'),
+                    beta=ev.get('beta'),
+                    action_id=ev.get('action_id'),
                 )
+
+def _is_model_deterring_candidate(task_row: dict) -> bool:
+    return (
+        str(task_row.get("type", "")).strip().lower() == "deterring"
+        and task_row.get("mode") not in (None, "", "none")
+    )
+
+
+def _is_direct_detection_task_row(task_row: dict) -> bool:
+    return (
+        str(task_row.get("type", "")).strip().lower() == "deterring"
+        and task_row.get("mode") in (None, "", "none")
+    )
+
+
+def _finite_task_metric(task_row: dict, key: str, default: float = 0.0) -> float:
+    try:
+        value = float(task_row.get(key, default))
+    except Exception:
+        value = float(default)
+    if not math.isfinite(value):
+        return float(default)
+    return float(value)
+
+
+def _dispatch_task_value(task_row: dict) -> float:
+    """Task-level value used for admission ordering across patrol and preventive tasks."""
+    utility = _finite_task_metric(task_row, "utility", float("nan"))
+    if math.isfinite(utility):
+        return float(utility)
+    score = _finite_task_metric(task_row, "score", float("nan"))
+    if math.isfinite(score):
+        return float(score)
+    if _is_model_deterring_candidate(task_row):
+        return _finite_task_metric(task_row, "predicted_deltaJ", 0.0)
+    return 0.0
+
+
+def _dispatch_priority_components(task_row: dict) -> dict:
+    """Shared task ordering components for thesis-facing dispatch reporting.
+
+    Direct-detection deterring tasks are handled in a separate absolute-priority
+    tier. Within the regular competition tier, both patrol and model-scored
+    preventive tasks use the same lexicographic ordering:
+
+    1. task-level utility/score
+    2. predicted_deltaJ
+    3. deltaJ_per_cost
+    4. lower ETA
+
+    Additional existing safety and feasibility protections are still enforced in
+    the dispatch admission loop after ordering.
+    """
+    eta_s = _finite_task_metric(task_row, "eta_s", float("inf"))
+    if eta_s < 0.0:
+        eta_s = 0.0
+    return {
+        "utility": float(_dispatch_task_value(task_row)),
+        "predicted_deltaJ": float(_finite_task_metric(task_row, "predicted_deltaJ", 0.0)),
+        "deltaJ_per_cost": float(_finite_task_metric(task_row, "deltaJ_per_cost", 0.0)),
+        "eta_s": float(eta_s),
+        "p_event": float(_finite_task_metric(task_row, "p_event", 0.0)),
+        "selection_weight": float(_finite_task_metric(task_row, "selection_weight", 1.0)),
+        "support": int(max(0, int(task_row.get("support", 0)))),
+        "time": float(_finite_task_metric(task_row, "time", 0.0)),
+    }
+
+
+def _dispatch_priority_sort_key(task_row: dict) -> tuple:
+    comp = _dispatch_priority_components(task_row)
+    return (
+        comp["utility"],
+        comp["predicted_deltaJ"],
+        comp["deltaJ_per_cost"],
+        -comp["eta_s"],
+        comp["p_event"],
+        comp["selection_weight"],
+        comp["support"],
+        -comp["time"],
+    )
+
+
+def _dispatch_ordering_bucket(task_row: dict) -> str:
+    if _is_direct_detection_task_row(task_row):
+        return "direct_detection"
+    return "regular_competition"
+
+
+def _ordered_dispatch_candidates(candidate_tasks: list[dict]) -> list[dict]:
+    direct_candidates = [dict(task) for task in candidate_tasks if _is_direct_detection_task_row(task)]
+    regular_candidates = [dict(task) for task in candidate_tasks if not _is_direct_detection_task_row(task)]
+    regular_candidates.sort(key=_dispatch_priority_sort_key, reverse=True)
+    return direct_candidates + regular_candidates
+
+
+def _build_dispatch_order_preview(candidate_tasks: list[dict], preview_limit: int = 25) -> list[dict]:
+    ordered = _ordered_dispatch_candidates(candidate_tasks)
+    preview = []
+    for rank, task_row in enumerate(ordered[: max(int(preview_limit), 0)], start=1):
+        comp = _dispatch_priority_components(task_row)
+        preview.append(
+            {
+                "rank": int(rank),
+                "ordering_bucket": _dispatch_ordering_bucket(task_row),
+                "type": task_row.get("type"),
+                "origin": task_row.get("origin"),
+                "mode": task_row.get("mode"),
+                "score": float(_finite_task_metric(task_row, "score", 0.0)),
+                "utility": float(comp["utility"]),
+                "predicted_deltaJ": float(comp["predicted_deltaJ"]),
+                "deltaJ_per_cost": float(comp["deltaJ_per_cost"]),
+                "eta_s": float(comp["eta_s"]),
+                "p_event": float(comp["p_event"]),
+                "selection_weight": float(comp["selection_weight"]),
+                "support": int(comp["support"]),
+            }
+        )
+    return preview
+
+
+def _select_patrol_replacement_task(active_tasks: list[dict], assigned_primary: str, incoming_task: dict) -> dict | None:
+    patrol_active = [
+        tr for tr in active_tasks
+        if (
+            tr.get("assigned_primary") == assigned_primary
+            and str(tr.get("state", "")).strip().lower() == "active"
+            and str(tr.get("type", "")).strip().lower() == "patrolling"
+        )
+    ]
+    if not patrol_active:
+        return None
+    worst_patrol = min(patrol_active, key=_dispatch_priority_sort_key)
+    if _dispatch_priority_sort_key(incoming_task) <= _dispatch_priority_sort_key(worst_patrol):
+        return None
+    return worst_patrol
+
+
+def _resolve_preventive_policy_settings(
+    *,
+    simulation_mode: str,
+    preventive_policy: str | None,
+    planner_profile: str,
+    planner_profile_values: dict | None,
+    enable_model_scored_deterring: bool,
+    enable_predicted_deltaJ_gate: bool,
+    model_deterring_gate_policy: str,
+) -> dict:
+    profile_values = dict(planner_profile_values or {})
+    explicit_policy = str(preventive_policy).strip().lower() if preventive_policy not in (None, "") else ""
+    profile_policy = str(profile_values.get("preventive_policy", "")).strip().lower()
+
+    if explicit_policy:
+        selected_policy = explicit_policy
+        source = "argument"
+    elif str(simulation_mode).strip().lower() == "proposed" and profile_policy:
+        selected_policy = profile_policy
+        source = f"profile:{planner_profile}" if planner_profile else "profile"
+    else:
+        selected_policy = (
+            "off"
+            if not bool(enable_model_scored_deterring)
+            else str(model_deterring_gate_policy).strip().lower()
+        )
+        source = "legacy"
+
+    if selected_policy not in {"off", "heuristic", "sprt_capacity"}:
+        raise ValueError(
+            "preventive_policy must be one of ['off', 'heuristic', 'sprt_capacity'], "
+            f"got: {selected_policy!r}"
+        )
+
+    # Legacy compatibility: keep accepting the selective policy token in configs/CLI,
+    # but route execution back through the older heuristic preventive gate.
+    if selected_policy == "sprt_capacity":
+        selected_policy = "heuristic"
+
+    resolved = {
+        "preventive_policy": str(selected_policy),
+        "preventive_policy_source": str(source),
+        "enable_model_scored_deterring": bool(enable_model_scored_deterring),
+        "enable_predicted_deltaJ_gate": False,
+        "model_deterring_gate_policy": "heuristic",
+        "selective_preventive_enabled": False,
+    }
+    if selected_policy == "off":
+        resolved["enable_model_scored_deterring"] = False
+        resolved["enable_predicted_deltaJ_gate"] = False
+    elif selected_policy == "heuristic":
+        resolved["enable_model_scored_deterring"] = True
+        resolved["model_deterring_gate_policy"] = "heuristic"
+    return resolved
+
+
+def _resolve_calibration_runtime_overrides(
+    *,
+    simulation_mode: str,
+    use_frozen_calibration: bool,
+    calibration_ranking_path: str | None,
+    calibration_manifest_path: str | None,
+    calibration_config_id: str | None,
+    planner_profile: str,
+    planner_profile_values: dict | None,
+    alpha_inhib: float,
+    omega_inhib: float,
+    mu_base: float,
+    bg_ema: float,
+) -> dict:
+    profile_values = dict(planner_profile_values or {})
+    profile_requested = bool(profile_values.get("use_frozen_calibration", False)) and (
+        str(simulation_mode).strip().lower() == "proposed"
+    )
+    requested = bool(use_frozen_calibration) or profile_requested
+    resolved_ranking = calibration_ranking_path or profile_values.get("calibration_ranking_path")
+    resolved_manifest = calibration_manifest_path or profile_values.get("calibration_manifest_path")
+    resolved_config_id = calibration_config_id or profile_values.get("calibration_config_id")
+    source = "disabled"
+    selected_config = None
+
+    if requested:
+        selected_config = load_frozen_sestpp_calibration(
+            ranking_path=resolved_ranking,
+            manifest_path=resolved_manifest,
+            config_id=resolved_config_id,
+        )
+        alpha_inhib = float(selected_config.model_alpha_inhib)
+        omega_inhib = float(selected_config.model_omega_inhib)
+        mu_base = float(selected_config.model_mu_base)
+        bg_ema = float(selected_config.model_bg_ema)
+        source = "argument" if bool(use_frozen_calibration) else (
+            f"profile:{planner_profile}" if planner_profile else "profile"
+        )
+
+    return {
+        "use_frozen_calibration": bool(requested),
+        "selected_calibration_config_id": (
+            str(selected_config.config_id) if selected_config is not None else ""
+        ),
+        "selected_calibration_source": str(source),
+        "selected_calibration_summary_metrics": (
+            dict(selected_config.summary_metrics) if selected_config is not None else {}
+        ),
+        "calibration_ranking_path": (None if resolved_ranking in (None, "") else str(resolved_ranking)),
+        "calibration_manifest_path": (None if resolved_manifest in (None, "") else str(resolved_manifest)),
+        "calibration_config_id": (None if resolved_config_id in (None, "") else str(resolved_config_id)),
+        "alpha_inhib": float(alpha_inhib),
+        "omega_inhib": float(omega_inhib),
+        "mu_base": float(mu_base),
+        "bg_ema": float(bg_ema),
+    }
+
 
 def make_robot_profiles(robots_def, rng, uav_fraction=0.4):
     """
@@ -249,7 +513,7 @@ def run_simulation_frames_persistent(
     detect_rate_per_robot=0.01, detect_sigma_m=10.0,
 
     bird_stay_mean_s=20.0,       # how long a bird lingers near a robot (exp. mean)
-    bird_detection_prob=0.10,    # per-step chance to emit a detection while present
+    bird_detection_prob=0.10,    # truth-event observation probability within range; per-step while present in fallback mode
     per_robot_cooldown_s=10.0,   # minimum time between detections for each robot
     max_detections_per_step=2,   # safety cap per step per robot
     
@@ -278,6 +542,12 @@ def run_simulation_frames_persistent(
     # Optional assignment term to prioritize high-value tasks (off by default).
     enable_assignment_task_value_term=False,
     assigner_w_task_value=0.0,
+    planner_profile="",
+    preventive_policy=None,
+    use_frozen_calibration=False,
+    calibration_ranking_path=None,
+    calibration_manifest_path=None,
+    calibration_config_id=None,
     # Model-scored deterrence gating/budget (realism controls)
     model_deterring_window_s=0.0,
     model_deterring_risk_threshold=0.35,
@@ -453,6 +723,235 @@ def run_simulation_frames_persistent(
         include_fallback_patrol = mode_defaults[mode_key]["include_fallback_patrol"]
     if enable_model_scored_deterring is None:
         enable_model_scored_deterring = mode_defaults[mode_key]["enable_model_scored_deterring"]
+
+    # Explicit opt-in winner profile from lab finals (kept off by default).
+    if bool(enable_winner_profile):
+        enable_assignment_task_value_term = True
+        assigner_w_task_value = 0.3
+        model_deterring_window_s = 120.0
+        model_deterring_risk_threshold = 0.4
+        model_deterring_min_persistence_replans = 3
+        model_deterring_max_eta_s = 90.0
+        model_deterring_score_margin = 0.2
+        model_deterring_budget_per_robot_per_hr = 3
+        model_deterring_budget_mode = "count_per_hour"
+        model_deterring_budget_utility_per_robot_per_hr = 6.0
+    planner_profile = canonicalize_planner_profile_name(planner_profile)
+    planner_profile_values = {}
+    if planner_profile:
+        planner_profile_values = get_planner_profile_values(planner_profile)
+        enable_assignment_task_value_term = bool(
+            planner_profile_values.get("enable_assignment_task_value_term", enable_assignment_task_value_term)
+        )
+        assigner_w_task_value = float(planner_profile_values.get("assigner_w_task_value", assigner_w_task_value))
+        model_deterring_window_s = float(
+            planner_profile_values.get("model_deterring_window_s", model_deterring_window_s)
+        )
+        model_deterring_min_persistence_replans = int(
+            planner_profile_values.get(
+                "model_deterring_min_persistence_replans",
+                model_deterring_min_persistence_replans,
+            )
+        )
+        model_deterring_max_eta_s = float(
+            planner_profile_values.get("model_deterring_max_eta_s", model_deterring_max_eta_s)
+        )
+        model_deterring_score_margin = float(
+            planner_profile_values.get("model_deterring_score_margin", model_deterring_score_margin)
+        )
+        model_deterring_budget_per_robot_per_hr = int(
+            planner_profile_values.get(
+                "model_deterring_budget_per_robot_per_hr",
+                model_deterring_budget_per_robot_per_hr,
+            )
+        )
+        model_deterring_budget_mode = str(
+            planner_profile_values.get("model_deterring_budget_mode", model_deterring_budget_mode)
+        )
+        model_deterring_budget_utility_per_robot_per_hr = float(
+            planner_profile_values.get(
+                "model_deterring_budget_utility_per_robot_per_hr",
+                model_deterring_budget_utility_per_robot_per_hr,
+            )
+        )
+        enable_predicted_deltaJ_gate = bool(
+            planner_profile_values.get("enable_predicted_deltaJ_gate", enable_predicted_deltaJ_gate)
+        )
+        min_predicted_deltaJ_for_model_deterring = float(
+            planner_profile_values.get(
+                "min_predicted_deltaJ_for_model_deterring",
+                min_predicted_deltaJ_for_model_deterring,
+            )
+        )
+        model_deterring_gate_policy = str(
+            planner_profile_values.get("model_deterring_gate_policy", model_deterring_gate_policy)
+        )
+        model_deterring_sprt_alpha = float(
+            planner_profile_values.get("model_deterring_sprt_alpha", model_deterring_sprt_alpha)
+        )
+        model_deterring_sprt_beta = float(
+            planner_profile_values.get("model_deterring_sprt_beta", model_deterring_sprt_beta)
+        )
+        model_deterring_sprt_patch_radius_m = planner_profile_values.get(
+            "model_deterring_sprt_patch_radius_m",
+            model_deterring_sprt_patch_radius_m,
+        )
+        model_deterring_min_sprt_margin = float(
+            planner_profile_values.get("model_deterring_min_sprt_margin", model_deterring_min_sprt_margin)
+        )
+        model_deterring_chance_threshold = float(
+            planner_profile_values.get("model_deterring_chance_threshold", model_deterring_chance_threshold)
+        )
+        model_deterring_min_deltaJ_per_cost = float(
+            planner_profile_values.get(
+                "model_deterring_min_deltaJ_per_cost",
+                model_deterring_min_deltaJ_per_cost,
+            )
+        )
+        model_deterring_min_selection_weight = float(
+            planner_profile_values.get(
+                "model_deterring_min_selection_weight",
+                model_deterring_min_selection_weight,
+            )
+        )
+        model_deterring_capacity_rho_max = float(
+            planner_profile_values.get("model_deterring_capacity_rho_max", model_deterring_capacity_rho_max)
+        )
+        model_deterring_capacity_history_window_s = float(
+            planner_profile_values.get(
+                "model_deterring_capacity_history_window_s",
+                model_deterring_capacity_history_window_s,
+            )
+        )
+        model_deterring_capacity_min_completed_tasks = int(
+            planner_profile_values.get(
+                "model_deterring_capacity_min_completed_tasks",
+                model_deterring_capacity_min_completed_tasks,
+            )
+        )
+        model_deterring_capacity_fallback_budget_per_hr = planner_profile_values.get(
+            "model_deterring_capacity_fallback_budget_per_hr",
+            model_deterring_capacity_fallback_budget_per_hr,
+        )
+        model_deterring_global_admission_cap_per_cycle = int(
+            planner_profile_values.get(
+                "model_deterring_global_admission_cap_per_cycle",
+                model_deterring_global_admission_cap_per_cycle,
+            )
+        )
+        model_deterring_require_idle_robot_for_admission = bool(
+            planner_profile_values.get(
+                "model_deterring_require_idle_robot_for_admission",
+                model_deterring_require_idle_robot_for_admission,
+            )
+        )
+        model_deterring_prefer_idle_robots_for_assignment = bool(
+            planner_profile_values.get(
+                "model_deterring_prefer_idle_robots_for_assignment",
+                model_deterring_prefer_idle_robots_for_assignment,
+            )
+        )
+        model_deterring_busy_fallback_p_event_min = float(
+            planner_profile_values.get(
+                "model_deterring_busy_fallback_p_event_min",
+                model_deterring_busy_fallback_p_event_min,
+            )
+        )
+        model_deterring_busy_fallback_deltaJ_per_cost_min = float(
+            planner_profile_values.get(
+                "model_deterring_busy_fallback_deltaJ_per_cost_min",
+                model_deterring_busy_fallback_deltaJ_per_cost_min,
+            )
+        )
+        model_deterring_busy_fallback_eta_s_max = float(
+            planner_profile_values.get(
+                "model_deterring_busy_fallback_eta_s_max",
+                model_deterring_busy_fallback_eta_s_max,
+            )
+        )
+        protect_direct_detection_from_model_deterring = bool(
+            planner_profile_values.get(
+                "protect_direct_detection_from_model_deterring",
+                protect_direct_detection_from_model_deterring,
+            )
+        )
+        model_deterring_direct_conflict_radius_m = float(
+            planner_profile_values.get(
+                "model_deterring_direct_conflict_radius_m",
+                model_deterring_direct_conflict_radius_m,
+            )
+        )
+        model_deterring_direct_conflict_window_s = float(
+            planner_profile_values.get(
+                "model_deterring_direct_conflict_window_s",
+                model_deterring_direct_conflict_window_s,
+            )
+        )
+        protect_active_model_deterring_persistence = bool(
+            planner_profile_values.get(
+                "protect_active_model_deterring_persistence",
+                protect_active_model_deterring_persistence,
+            )
+        )
+        model_deterring_min_persistence_lifetime_s = float(
+            planner_profile_values.get(
+                "model_deterring_min_persistence_lifetime_s",
+                model_deterring_min_persistence_lifetime_s,
+            )
+        )
+        model_deterring_persistence_eta_multiplier = float(
+            planner_profile_values.get(
+                "model_deterring_persistence_eta_multiplier",
+                model_deterring_persistence_eta_multiplier,
+            )
+        )
+        model_deterring_persistence_buffer_s = float(
+            planner_profile_values.get(
+                "model_deterring_persistence_buffer_s",
+                model_deterring_persistence_buffer_s,
+            )
+        )
+        model_deterring_max_persistence_lifetime_s = float(
+            planner_profile_values.get(
+                "model_deterring_max_persistence_lifetime_s",
+                model_deterring_max_persistence_lifetime_s,
+            )
+        )
+        model_deterring_lock_near_goal_radius_m = float(
+            planner_profile_values.get(
+                "model_deterring_lock_near_goal_radius_m",
+                model_deterring_lock_near_goal_radius_m,
+            )
+        )
+        protect_active_model_deterring_goal_preemption = bool(
+            planner_profile_values.get(
+                "protect_active_model_deterring_goal_preemption",
+                protect_active_model_deterring_goal_preemption,
+            )
+        )
+        protect_locked_model_deterring_from_patrol_assignment = bool(
+            planner_profile_values.get(
+                "protect_locked_model_deterring_from_patrol_assignment",
+                protect_locked_model_deterring_from_patrol_assignment,
+            )
+        )
+
+    preventive_policy_settings = _resolve_preventive_policy_settings(
+        simulation_mode=mode_key,
+        preventive_policy=preventive_policy,
+        planner_profile=planner_profile,
+        planner_profile_values=planner_profile_values,
+        enable_model_scored_deterring=bool(enable_model_scored_deterring),
+        enable_predicted_deltaJ_gate=bool(enable_predicted_deltaJ_gate),
+        model_deterring_gate_policy=str(model_deterring_gate_policy),
+    )
+    preventive_policy = str(preventive_policy_settings["preventive_policy"])
+    preventive_policy_source = str(preventive_policy_settings["preventive_policy_source"])
+    selective_preventive_enabled = bool(preventive_policy_settings["selective_preventive_enabled"])
+    enable_model_scored_deterring = bool(preventive_policy_settings["enable_model_scored_deterring"])
+    enable_predicted_deltaJ_gate = bool(preventive_policy_settings["enable_predicted_deltaJ_gate"])
+    model_deterring_gate_policy = str(preventive_policy_settings["model_deterring_gate_policy"])
+
     if (
         bool(auto_enable_proposed_preventive_window)
         and mode_key == "proposed"
@@ -470,18 +969,35 @@ def run_simulation_frames_persistent(
             "model_deterring_window_s<=0, so preventive task generation is disabled."
         )
 
-    # Explicit opt-in winner profile from lab finals (kept off by default).
-    if bool(enable_winner_profile):
-        enable_assignment_task_value_term = True
-        assigner_w_task_value = 0.3
-        model_deterring_window_s = 120.0
-        model_deterring_risk_threshold = 0.4
-        model_deterring_min_persistence_replans = 3
-        model_deterring_max_eta_s = 90.0
-        model_deterring_score_margin = 0.2
-        model_deterring_budget_per_robot_per_hr = 3
-        model_deterring_budget_mode = "count_per_hour"
-        model_deterring_budget_utility_per_robot_per_hr = 6.0
+    calibration_resolution = _resolve_calibration_runtime_overrides(
+        simulation_mode=mode_key,
+        use_frozen_calibration=bool(use_frozen_calibration),
+        calibration_ranking_path=calibration_ranking_path,
+        calibration_manifest_path=calibration_manifest_path,
+        calibration_config_id=calibration_config_id,
+        planner_profile=planner_profile,
+        planner_profile_values=planner_profile_values,
+        alpha_inhib=float(alpha_inhib),
+        omega_inhib=float(omega_inhib),
+        mu_base=float(mu_base),
+        bg_ema=float(bg_ema),
+    )
+    use_frozen_calibration = bool(calibration_resolution["use_frozen_calibration"])
+    calibration_ranking_path = calibration_resolution.get("calibration_ranking_path")
+    calibration_manifest_path = calibration_resolution.get("calibration_manifest_path")
+    calibration_config_id = calibration_resolution.get("calibration_config_id")
+    selected_calibration_config_id = str(calibration_resolution["selected_calibration_config_id"])
+    selected_calibration_source = str(calibration_resolution["selected_calibration_source"])
+    selected_calibration_summary_metrics = dict(calibration_resolution["selected_calibration_summary_metrics"])
+    alpha_inhib = float(calibration_resolution["alpha_inhib"])
+    omega_inhib = float(calibration_resolution["omega_inhib"])
+    mu_base = float(calibration_resolution["mu_base"])
+    bg_ema = float(calibration_resolution["bg_ema"])
+    calibrated_model_alpha_inhib = float(alpha_inhib)
+    calibrated_model_omega_inhib = float(omega_inhib)
+    calibrated_model_mu_base = float(mu_base)
+    calibrated_model_bg_ema = float(bg_ema)
+
     model_deterring_gate_policy = str(model_deterring_gate_policy).strip().lower()
     if model_deterring_gate_policy not in {"heuristic", "sprt_capacity"}:
         raise ValueError(
@@ -653,9 +1169,14 @@ def run_simulation_frames_persistent(
     truth_candidate_events = 0
     truth_accepted_events = 0
     truth_suppressed_events = 0
+    truth_detection_opportunities = 0
+    truth_detections_observed = 0
+    truth_detections_missed_range = 0
+    truth_detections_missed_false_negative = 0
     suppression_effect_sum = 0.0
     suppression_effect_by_mode = {}
     suppression_effect_by_source = {"direct_detection": 0.0, "model_scored": 0.0}
+    truth_event_detection_prob = min(max(float(bird_detection_prob), 0.0), 1.0)
     w_cdf = None
     w_shape = None
     dx = W / max(NX - 1, 1)
@@ -733,6 +1254,8 @@ def run_simulation_frames_persistent(
 
     def _process_truth_event(x, y, t_now, enqueue_tasks=True, record_metrics=True):
         nonlocal value_weighted_exposure
+        nonlocal truth_detection_opportunities, truth_detections_observed
+        nonlocal truth_detections_missed_range, truth_detections_missed_false_negative
         truth_events.append((x, y, t_now))
         truth_event_times.append(float(t_now))
         recent_truth.append((x, y, t_now))
@@ -745,10 +1268,16 @@ def run_simulation_frames_persistent(
             if zone_rr and point_in_polygon(x, y, zone_rr):
                 owner = zid; break
         if owner is not None:
+            truth_detection_opportunities += 1
             # Only detect if within range of the owning robot
             ox, oy = pose[owner]
             if math.hypot(x - ox, y - oy) > detect_range_m:
+                truth_detections_missed_range += 1
                 return
+            if rng.random() > truth_event_detection_prob:
+                truth_detections_missed_false_negative += 1
+                return
+            truth_detections_observed += 1
             b = robots[owner].ingest_detection(x, y, t_now)
             bus.send_boundary_events(b, source_id=owner)
             if enqueue_tasks:
@@ -975,6 +1504,15 @@ def run_simulation_frames_persistent(
                 break
         return out
 
+    def _count_task_rows_by_origin(rows, task_type=None):
+        counts = {}
+        for row in rows:
+            if task_type is not None and str(row.get("type", "")).strip().lower() != str(task_type).strip().lower():
+                continue
+            origin = str(row.get("origin", "unknown")).strip().lower() or "unknown"
+            counts[origin] = int(counts.get(origin, 0) + 1)
+        return counts
+
     # --- Task system: persistent tasks (active + completed) ---
     taskgen  = TaskGenerator(merge_radius_m=max(8.0, 0.5*sigma))
     assigner = TaskAssigner(
@@ -995,6 +1533,7 @@ def run_simulation_frames_persistent(
     consumed_task_keys = set()
     recent_deterrences = deque(maxlen=200)  # {"x","y","t","mode","beta","sigma","omega"}
     model_deterring_accepted = 0
+    model_deterring_accepted_by_source = {}
     model_deterring_rejected_budget = 0
     model_deterring_rejected_budget_count_mode = 0
     model_deterring_rejected_budget_utility_mode = 0
@@ -1086,6 +1625,8 @@ def run_simulation_frames_persistent(
             "budget": 0,
         },
         rejected_model_det_tasks=[],
+        ordering_policy="",
+        ordered_candidate_preview=[],
         replaced_patrol_count=0,
         active_load_after_dispatch={rid: 0 for rid in robots},
         active_patrol_load_after_dispatch={rid: 0 for rid in robots},
@@ -1366,7 +1907,7 @@ def run_simulation_frames_persistent(
         )
 
     def _run_dispatch_stage(now_t, task_stage):
-        nonlocal next_tid, model_deterring_accepted, model_deterring_rejected_budget, consumed_task_keys
+        nonlocal next_tid, model_deterring_accepted, model_deterring_accepted_by_source, model_deterring_rejected_budget, consumed_task_keys
         nonlocal model_deterring_rejected_budget_count_mode, model_deterring_rejected_budget_utility_mode
         nonlocal planner_rejected_unassigned, planner_rejected_task_cap
         nonlocal planner_rejected_patrol_cap, planner_rejected_patrol_locked_model_det, planner_rejected_model_det_cap
@@ -1395,24 +1936,14 @@ def run_simulation_frames_persistent(
         rejected_model_det_tasks = []
         assigner.set_robot_poses(pose if bool(use_live_robot_pose_for_task_planning) else None)
         model_deterring_accepted_this_cycle = 0
-
-        def _is_model_det_task(task_row):
-            return (
-                str(task_row.get("type", "")).strip().lower() == "deterring"
-                and task_row.get("mode") not in (None, "", "none")
-            )
-
-        non_model_tasks = [t for t in task_stage.candidate_tasks if not _is_model_det_task(t)]
-        model_det_tasks = [t for t in task_stage.candidate_tasks if _is_model_det_task(t)]
-        model_det_tasks.sort(
-            key=lambda t: (
-                float(t.get("p_event", 0.0)),
-                float(t.get("deltaJ_per_cost", 0.0)),
-                float(t.get("predicted_deltaJ", t.get("score", 0.0))),
-                -float(t.get("eta_s", float("inf"))),
-            ),
-            reverse=True,
+        ordering_policy = (
+            "direct-detection deterring tasks keep absolute priority; remaining patrol and "
+            "model-scored preventive tasks share one lexicographic ordering by utility/score, "
+            "predicted_deltaJ, deltaJ_per_cost, and lower ETA; admission constraints still "
+            "apply afterward."
         )
+        ordered_candidates = _ordered_dispatch_candidates(task_stage.candidate_tasks)
+        ordered_candidate_preview = _build_dispatch_order_preview(task_stage.candidate_tasks)
 
         def _has_direct_detection_conflict(task_row, assigned_primary):
             if not bool(protect_direct_detection_from_model_deterring):
@@ -1451,7 +1982,7 @@ def run_simulation_frames_persistent(
             return False
 
         def _record_model_det_rejection(reason, task_row, assigned_primary=None, assigned_secondary=None):
-            if (not bool(emit_rejected_model_det_debug)) or (not _is_model_det_task(task_row)):
+            if (not bool(emit_rejected_model_det_debug)) or (not _is_model_deterring_candidate(task_row)):
                 return
             rejected_model_det_tasks.append(
                 {
@@ -1486,10 +2017,23 @@ def run_simulation_frames_persistent(
                 and eta_s <= float(model_deterring_busy_fallback_eta_s_max)
             )
 
-        for t in non_model_tasks + model_det_tasks:
+        def _evict_active_patrol_task(evict_tr):
+            nonlocal planner_replaced_patrol
+            rid_e = evict_tr.get("assigned_primary")
+            active_tasks[:] = [tr for tr in active_tasks if tr.get("id") != evict_tr.get("id")]
+            if rid_e in active_load:
+                active_load[rid_e] = max(0, active_load.get(rid_e, 0) - 1)
+                active_patrol_load[rid_e] = max(0, active_patrol_load.get(rid_e, 0) - 1)
+            if rid_e in goal and goal.get(rid_e) is not None:
+                gx, gy = goal[rid_e]
+                if math.hypot(float(evict_tr.get("x", 0.0)) - gx, float(evict_tr.get("y", 0.0)) - gy) <= arrival_radius_m:
+                    goal[rid_e] = None
+            planner_replaced_patrol += 1
+
+        for t in ordered_candidates:
             assigner.set_load(active_load)
             ttype = str(t.get("type", "")).strip().lower()
-            is_model_det = (ttype == "deterring" and (t.get("mode") not in (None, "", "none")))
+            is_model_det = _is_model_deterring_candidate(t)
             res = None
             if is_model_det and bool(model_deterring_prefer_idle_robots_for_assignment):
                 idle_robot_ids = [
@@ -1520,38 +2064,9 @@ def run_simulation_frames_persistent(
                 rejected_counts["patrol_locked_model_det"] += 1
                 continue
 
-            if active_load.get(assigned_primary, 0) >= int(max_active_tasks_per_robot):
-                if (ttype == "patrolling") or is_model_det:
-                    _record_model_det_rejection("task_cap", t, assigned_primary, assigned_secondary)
-                    planner_rejected_task_cap += 1
-                    rejected_counts["task_cap"] += 1
-                    continue
-
-            if ttype == "patrolling" and active_patrol_load.get(assigned_primary, 0) >= int(max_active_patrolling_per_robot):
-                patrol_active = [
-                    tr for tr in active_tasks
-                    if (
-                        tr.get("assigned_primary") == assigned_primary
-                        and str(tr.get("state", "")).strip().lower() == "active"
-                        and str(tr.get("type", "")).strip().lower() == "patrolling"
-                    )
-                ]
-                if patrol_active:
-                    worst = min(patrol_active, key=lambda tr: float(tr.get("score", 0.0)))
-                    if float(t.get("score", 0.0)) <= float(worst.get("score", 0.0)):
-                        planner_rejected_patrol_cap += 1
-                        rejected_counts["patrol_cap"] += 1
-                        continue
-                    active_tasks[:] = [tr for tr in active_tasks if tr.get("id") != worst.get("id")]
-                    if goal.get(assigned_primary) is not None:
-                        gx, gy = goal[assigned_primary]
-                        if math.hypot(float(worst.get("x", 0.0)) - gx, float(worst.get("y", 0.0)) - gy) <= arrival_radius_m:
-                            goal[assigned_primary] = None
-                    active_load[assigned_primary] = max(0, active_load.get(assigned_primary, 0) - 1)
-                    active_patrol_load[assigned_primary] = max(0, active_patrol_load.get(assigned_primary, 0) - 1)
-                    planner_replaced_patrol += 1
-                    replaced_patrol_count += 1
-
+            budget_queue = None
+            budget_mode = "count_per_hour"
+            t_utility = max(0.0, _dispatch_task_value(t))
             if is_model_det:
                 if (
                     model_deterring_global_admission_cap_per_cycle > 0
@@ -1582,10 +2097,9 @@ def run_simulation_frames_persistent(
                     planner_rejected_model_det_cap += 1
                     rejected_counts["model_det_cap"] += 1
                     continue
-                q = model_deterring_by_robot.get(assigned_primary, deque())
+                q = deque(model_deterring_by_robot.get(assigned_primary, deque()))
                 while q and float(q[0][0]) < (now_t - 3600.0):
                     q.popleft()
-                t_utility = max(0.0, float(t.get("utility", t.get("score", 0.0))))
                 budget_mode = str(model_deterring_budget_mode).strip().lower()
                 if budget_mode not in ("count_per_hour", "utility_per_hour"):
                     budget_mode = "count_per_hour"
@@ -1605,10 +2119,38 @@ def run_simulation_frames_persistent(
                     else:
                         model_deterring_rejected_budget_count_mode += 1
                     continue
-                q.append((float(now_t), t_utility))
-                model_deterring_by_robot[assigned_primary] = q
+
+                budget_queue = q
+
+            if active_load.get(assigned_primary, 0) >= int(max_active_tasks_per_robot):
+                if (ttype == "patrolling") or is_model_det:
+                    worst_patrol = _select_patrol_replacement_task(active_tasks, assigned_primary, t)
+                    if worst_patrol is None:
+                        _record_model_det_rejection("task_cap", t, assigned_primary, assigned_secondary)
+                        planner_rejected_task_cap += 1
+                        rejected_counts["task_cap"] += 1
+                        continue
+                    _evict_active_patrol_task(worst_patrol)
+                    replaced_patrol_count += 1
+
+            if ttype == "patrolling" and active_patrol_load.get(assigned_primary, 0) >= int(max_active_patrolling_per_robot):
+                worst_patrol = _select_patrol_replacement_task(active_tasks, assigned_primary, t)
+                if worst_patrol is None:
+                    planner_rejected_patrol_cap += 1
+                    rejected_counts["patrol_cap"] += 1
+                    continue
+                _evict_active_patrol_task(worst_patrol)
+                replaced_patrol_count += 1
+
+            if is_model_det:
+                budget_queue.append((float(now_t), t_utility))
+                model_deterring_by_robot[assigned_primary] = budget_queue
                 model_deterring_admissions_by_robot[assigned_primary].append(float(now_t))
                 model_deterring_accepted += 1
+                accepted_origin = str(t.get("origin", "unknown")).strip().lower() or "unknown"
+                model_deterring_accepted_by_source[accepted_origin] = int(
+                    model_deterring_accepted_by_source.get(accepted_origin, 0) + 1
+                )
                 model_deterring_accepted_this_cycle += 1
                 if assigned_primary_busy:
                     planner_accepted_model_det_busy_primary += 1
@@ -1665,6 +2207,8 @@ def run_simulation_frames_persistent(
             accepted_tasks=accepted_tasks,
             rejected_counts=rejected_counts,
             rejected_model_det_tasks=rejected_model_det_tasks,
+            ordering_policy=str(ordering_policy),
+            ordered_candidate_preview=ordered_candidate_preview,
             replaced_patrol_count=int(replaced_patrol_count),
             active_load_after_dispatch=dict(active_load),
             active_patrol_load_after_dispatch=dict(active_patrol_load),
@@ -1912,20 +2456,21 @@ def run_simulation_frames_persistent(
             sigma_u = float(sigma_true)
             omega_u = float(omega_true)
             mode_label = str(mode) if mode else "direct_detection"
+        action_id = int(task_row.get("id", -1))
         recent_deterrences.append({
             "x": float(task_row["x"]),
             "y": float(task_row["y"]),
             "t": float(now_t),
             "mode": mode_label,
             "source": _deterring_source(task_row),
-            "action_id": int(task_row.get("id", -1)),
+            "action_id": action_id,
             "beta": beta_u,
             "sigma": sigma_u,
             "omega": omega_u,
         })
-        w = float(params.get("beta", 1.0))
-        omega_u = float(params.get("omega", robots[rid].m.omega_inhib))
-        sigma_u = float(params.get("sigma", robots[rid].m.sigma))
+        feedback_beta = float(params.get("beta", 1.0))
+        feedback_omega = float(params.get("omega", robots[rid].m.omega_inhib))
+        feedback_sigma = float(params.get("sigma", robots[rid].m.sigma))
         if enable_intervention_feedback:
             nonlocal step_intervention_feedback_applied
             step_intervention_feedback_applied += 1
@@ -1933,11 +2478,24 @@ def run_simulation_frames_persistent(
                 task_row["x"],
                 task_row["y"],
                 now_t,
-                weight=w,
-                sigma=sigma_u,
-                omega_inhib=omega_u,
+                weight=feedback_beta,
+                sigma=feedback_sigma,
+                omega_inhib=feedback_omega,
+                mode=mode_label,
+                beta=feedback_beta,
+                action_id=action_id,
             )
-            b = robots[rid].intervention_boundary_events(task_row["x"], task_row["y"], now_t, weight=w)
+            b = robots[rid].intervention_boundary_events(
+                task_row["x"],
+                task_row["y"],
+                now_t,
+                weight=feedback_beta,
+                mode=mode_label,
+                sigma=feedback_sigma,
+                omega_inhib=feedback_omega,
+                beta=feedback_beta,
+                action_id=action_id,
+            )
             bus.send_intervention_events(
                 b,
                 source_id=rid,
@@ -2608,6 +3166,20 @@ def run_simulation_frames_persistent(
         if final_step:
             deterring_quality_cache = _compute_deterring_quality()
         diag_counts = getattr(taskgen, "diag_counts", {})
+        def _diag_source_counts(prefix):
+            prefix_text = f"{prefix}_"
+            out = {}
+            for key, value in diag_counts.items():
+                if key.startswith(prefix_text):
+                    out[key[len(prefix_text):]] = int(value)
+            return out
+
+        model_deterring_candidate_source_counts = _diag_source_counts("model_deterring_candidates")
+        model_deterring_generated_source_counts = _diag_source_counts("model_deterring_generated")
+        model_deterring_not_selected_source_counts = _diag_source_counts("model_deterring_not_selected")
+        model_deterring_accepted_source_counts = {
+            str(k): int(v) for k, v in model_deterring_accepted_by_source.items()
+        }
         llr_values = np.asarray(getattr(taskgen, "_diag_model_deterring_llr_values", []), dtype=float)
         llr_samples = int(diag_counts.get("model_deterring_llr_samples", 0))
         p_event_samples = int(diag_counts.get("model_deterring_p_event_samples", 0))
@@ -2642,6 +3214,14 @@ def run_simulation_frames_persistent(
             float(preventive_capacity_remaining_mean_accum) / float(preventive_capacity_sample_count)
             if preventive_capacity_sample_count > 0 else float("nan")
         )
+        selected_calibration_metrics_map = dict(selected_calibration_summary_metrics or {})
+
+        def _selected_calibration_metric(name: str) -> float:
+            try:
+                value = float(selected_calibration_metrics_map.get(name, float("nan")))
+            except Exception:
+                return float("nan")
+            return float(value) if np.isfinite(value) else float("nan")
 
         metrics = {
             "value_weighted_exposure": float(value_weighted_exposure),
@@ -2694,11 +3274,29 @@ def run_simulation_frames_persistent(
             "direct_detection_task_cluster_groups": int(direct_detection_task_cluster_groups),
             "direct_detection_task_cluster_merged": int(direct_detection_task_cluster_merged),
             "direct_detection_task_response_matches": int(direct_detection_task_response_matches),
+            "preventive_policy": str(preventive_policy),
+            "preventive_policy_source": str(preventive_policy_source),
+            "selective_preventive_enabled": int(bool(selective_preventive_enabled)),
+            "use_frozen_calibration": int(bool(use_frozen_calibration)),
+            "selected_calibration_config_id": str(selected_calibration_config_id),
+            "selected_calibration_source": str(selected_calibration_source),
+            "calibrated_model_alpha_inhib": float(calibrated_model_alpha_inhib),
+            "calibrated_model_omega_inhib": float(calibrated_model_omega_inhib),
+            "calibrated_model_mu_base": float(calibrated_model_mu_base),
+            "calibrated_model_bg_ema": float(calibrated_model_bg_ema),
+            "selected_calibration_rank": _selected_calibration_metric("rank"),
+            "selected_calibration_proposed_field_logloss_mean": _selected_calibration_metric("proposed_field_logloss_mean"),
+            "selected_calibration_proposed_field_brier_mean": _selected_calibration_metric("proposed_field_brier_mean"),
+            "selected_calibration_proposed_nll_mean": _selected_calibration_metric("proposed_nll_mean"),
+            "selected_calibration_nll_improvement_pct_mean": _selected_calibration_metric("nll_improvement_pct_mean"),
             "model_deterring_gate_policy": str(model_deterring_gate_policy),
             "model_deterring_accepted": int(model_deterring_accepted),
             "model_deterring_rejected_budget": int(model_deterring_rejected_budget),
             "model_deterring_generated": int(diag_counts.get("model_deterring_generated", 0)),
             "model_deterring_candidates_total": int(diag_counts.get("model_deterring_candidates_total", 0)),
+            "model_deterring_candidates_by_source": dict(model_deterring_candidate_source_counts),
+            "model_deterring_generated_by_source": dict(model_deterring_generated_source_counts),
+            "model_deterring_accepted_by_source": dict(model_deterring_accepted_source_counts),
             "model_deterring_rejected_cooldown": int(diag_counts.get("model_deterring_rejected_cooldown", 0)),
             "model_deterring_rejected_field": int(diag_counts.get("model_deterring_rejected_field", 0)),
             "model_deterring_pass_field": int(diag_counts.get("model_deterring_pass_field", 0)),
@@ -2721,8 +3319,10 @@ def run_simulation_frames_persistent(
             "model_deterring_rejected_chance": int(diag_counts.get("model_deterring_rejected_chance", 0)),
             "model_deterring_pass_utility_ratio": int(diag_counts.get("model_deterring_pass_utility_ratio", 0)),
             "model_deterring_rejected_utility_ratio": int(diag_counts.get("model_deterring_rejected_utility_ratio", 0)),
+            "model_deterring_pass_selection_weight": int(diag_counts.get("model_deterring_pass_selection_weight", 0)),
             "model_deterring_rejected_selection_weight": int(diag_counts.get("model_deterring_rejected_selection_weight", 0)),
             "model_deterring_pass_capacity": int(diag_counts.get("model_deterring_pass_capacity", 0)),
+            "model_deterring_capacity_pending": int(diag_counts.get("model_deterring_capacity_pending", 0)),
             "model_deterring_rejected_capacity": int(diag_counts.get("model_deterring_rejected_capacity", 0)),
             "model_deterring_llr_mean": float(llr_mean),
             "model_deterring_llr_max": float(llr_max),
@@ -2736,6 +3336,7 @@ def run_simulation_frames_persistent(
             "model_deterring_cluster_key_churn": int(diag_counts.get("model_deterring_cluster_key_churn", 0)),
             "model_deterring_cluster_key_new": int(diag_counts.get("model_deterring_cluster_key_new", 0)),
             "model_deterring_not_selected": int(diag_counts.get("model_deterring_not_selected", 0)),
+            "model_deterring_not_selected_by_source": dict(model_deterring_not_selected_source_counts),
             "model_deterring_rejected_budget_count_mode": int(model_deterring_rejected_budget_count_mode),
             "model_deterring_rejected_budget_utility_mode": int(model_deterring_rejected_budget_utility_mode),
             "model_deterring_budget_mode": str(model_deterring_budget_mode),
@@ -2757,6 +3358,10 @@ def run_simulation_frames_persistent(
             "truth_candidate_events": int(truth_candidate_events),
             "truth_accepted_events": int(truth_accepted_events),
             "truth_suppressed_events": int(truth_suppressed_events),
+            "truth_detection_opportunities": int(truth_detection_opportunities),
+            "truth_detections_observed": int(truth_detections_observed),
+            "truth_detections_missed_range": int(truth_detections_missed_range),
+            "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
@@ -2794,11 +3399,29 @@ def run_simulation_frames_persistent(
             "direct_detection_task_cluster_groups": int(direct_detection_task_cluster_groups),
             "direct_detection_task_cluster_merged": int(direct_detection_task_cluster_merged),
             "direct_detection_task_response_matches": int(direct_detection_task_response_matches),
+            "preventive_policy": str(preventive_policy),
+            "preventive_policy_source": str(preventive_policy_source),
+            "selective_preventive_enabled": int(bool(selective_preventive_enabled)),
+            "use_frozen_calibration": int(bool(use_frozen_calibration)),
+            "selected_calibration_config_id": str(selected_calibration_config_id),
+            "selected_calibration_source": str(selected_calibration_source),
+            "calibrated_model_alpha_inhib": float(calibrated_model_alpha_inhib),
+            "calibrated_model_omega_inhib": float(calibrated_model_omega_inhib),
+            "calibrated_model_mu_base": float(calibrated_model_mu_base),
+            "calibrated_model_bg_ema": float(calibrated_model_bg_ema),
+            "selected_calibration_rank": _selected_calibration_metric("rank"),
+            "selected_calibration_proposed_field_logloss_mean": _selected_calibration_metric("proposed_field_logloss_mean"),
+            "selected_calibration_proposed_field_brier_mean": _selected_calibration_metric("proposed_field_brier_mean"),
+            "selected_calibration_proposed_nll_mean": _selected_calibration_metric("proposed_nll_mean"),
+            "selected_calibration_nll_improvement_pct_mean": _selected_calibration_metric("nll_improvement_pct_mean"),
             "model_deterring_gate_policy": str(model_deterring_gate_policy),
             "model_deterring_accepted": int(model_deterring_accepted),
             "model_deterring_rejected_budget": int(model_deterring_rejected_budget),
             "model_deterring_generated": int(diag_counts.get("model_deterring_generated", 0)),
             "model_deterring_candidates_total": int(diag_counts.get("model_deterring_candidates_total", 0)),
+            "model_deterring_candidates_by_source": dict(model_deterring_candidate_source_counts),
+            "model_deterring_generated_by_source": dict(model_deterring_generated_source_counts),
+            "model_deterring_accepted_by_source": dict(model_deterring_accepted_source_counts),
             "model_deterring_rejected_cooldown": int(diag_counts.get("model_deterring_rejected_cooldown", 0)),
             "model_deterring_rejected_field": int(diag_counts.get("model_deterring_rejected_field", 0)),
             "model_deterring_pass_field": int(diag_counts.get("model_deterring_pass_field", 0)),
@@ -2821,8 +3444,10 @@ def run_simulation_frames_persistent(
             "model_deterring_rejected_chance": int(diag_counts.get("model_deterring_rejected_chance", 0)),
             "model_deterring_pass_utility_ratio": int(diag_counts.get("model_deterring_pass_utility_ratio", 0)),
             "model_deterring_rejected_utility_ratio": int(diag_counts.get("model_deterring_rejected_utility_ratio", 0)),
+            "model_deterring_pass_selection_weight": int(diag_counts.get("model_deterring_pass_selection_weight", 0)),
             "model_deterring_rejected_selection_weight": int(diag_counts.get("model_deterring_rejected_selection_weight", 0)),
             "model_deterring_pass_capacity": int(diag_counts.get("model_deterring_pass_capacity", 0)),
+            "model_deterring_capacity_pending": int(diag_counts.get("model_deterring_capacity_pending", 0)),
             "model_deterring_rejected_capacity": int(diag_counts.get("model_deterring_rejected_capacity", 0)),
             "model_deterring_llr_mean": float(llr_mean),
             "model_deterring_llr_max": float(llr_max),
@@ -2836,6 +3461,7 @@ def run_simulation_frames_persistent(
             "model_deterring_cluster_key_churn": int(diag_counts.get("model_deterring_cluster_key_churn", 0)),
             "model_deterring_cluster_key_new": int(diag_counts.get("model_deterring_cluster_key_new", 0)),
             "model_deterring_not_selected": int(diag_counts.get("model_deterring_not_selected", 0)),
+            "model_deterring_not_selected_by_source": dict(model_deterring_not_selected_source_counts),
             "model_deterring_rejected_budget_count_mode": int(model_deterring_rejected_budget_count_mode),
             "model_deterring_rejected_budget_utility_mode": int(model_deterring_rejected_budget_utility_mode),
             "model_deterring_budget_mode": str(model_deterring_budget_mode),
@@ -2857,6 +3483,10 @@ def run_simulation_frames_persistent(
             "truth_candidate_events": int(truth_candidate_events),
             "truth_accepted_events": int(truth_accepted_events),
             "truth_suppressed_events": int(truth_suppressed_events),
+            "truth_detection_opportunities": int(truth_detection_opportunities),
+            "truth_detections_observed": int(truth_detections_observed),
+            "truth_detections_missed_range": int(truth_detections_missed_range),
+            "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
@@ -2991,6 +3621,10 @@ def run_simulation_frames_persistent(
                     task_type="deterring",
                     limit=int(planning_candidate_limit),
                 ),
+                "model_deterring_candidate_counts_by_source": _count_task_rows_by_origin(
+                    last_task_generation_structured.candidate_tasks,
+                    task_type="deterring",
+                ),
                 "accepted_patrol_tasks": _compact_task_rows(
                     last_dispatch_structured.accepted_tasks,
                     task_type="patrolling",
@@ -3000,6 +3634,10 @@ def run_simulation_frames_persistent(
                     last_dispatch_structured.accepted_tasks,
                     task_type="deterring",
                     limit=int(planning_candidate_limit),
+                ),
+                "accepted_deterring_counts_by_source": _count_task_rows_by_origin(
+                    last_dispatch_structured.accepted_tasks,
+                    task_type="deterring",
                 ),
             }
         yield {
@@ -3160,6 +3798,17 @@ def run_metrics_experiments(
         "exposure_per_completed_task": _safe_stats("exposure_per_completed_task"),
         "boundary_message_count": _safe_stats("boundary_message_count"),
         "boundary_bytes_sent": _safe_stats("boundary_bytes_sent"),
+        "selective_preventive_enabled": _safe_stats("selective_preventive_enabled"),
+        "use_frozen_calibration": _safe_stats("use_frozen_calibration"),
+        "calibrated_model_alpha_inhib": _safe_stats("calibrated_model_alpha_inhib"),
+        "calibrated_model_omega_inhib": _safe_stats("calibrated_model_omega_inhib"),
+        "calibrated_model_mu_base": _safe_stats("calibrated_model_mu_base"),
+        "calibrated_model_bg_ema": _safe_stats("calibrated_model_bg_ema"),
+        "selected_calibration_rank": _safe_stats("selected_calibration_rank"),
+        "selected_calibration_proposed_field_logloss_mean": _safe_stats("selected_calibration_proposed_field_logloss_mean"),
+        "selected_calibration_proposed_field_brier_mean": _safe_stats("selected_calibration_proposed_field_brier_mean"),
+        "selected_calibration_proposed_nll_mean": _safe_stats("selected_calibration_proposed_nll_mean"),
+        "selected_calibration_nll_improvement_pct_mean": _safe_stats("selected_calibration_nll_improvement_pct_mean"),
         "intervention_msg_dropped_debounce": _safe_stats("intervention_msg_dropped_debounce"),
         "intervention_msg_dropped_low_weight": _safe_stats("intervention_msg_dropped_low_weight"),
         "forecast_recall_at_k": _safe_stats("forecast_recall_at_k"),
@@ -3188,7 +3837,9 @@ def run_metrics_experiments(
         "model_deterring_rejected_busy": _safe_stats("model_deterring_rejected_busy"),
         "model_deterring_rejected_margin": _safe_stats("model_deterring_rejected_margin"),
         "model_deterring_rejected_sprt_margin": _safe_stats("model_deterring_rejected_sprt_margin"),
+        "model_deterring_pass_selection_weight": _safe_stats("model_deterring_pass_selection_weight"),
         "model_deterring_rejected_selection_weight": _safe_stats("model_deterring_rejected_selection_weight"),
+        "model_deterring_capacity_pending": _safe_stats("model_deterring_capacity_pending"),
         "planner_rejected_unassigned": _safe_stats("planner_rejected_unassigned"),
         "planner_rejected_task_cap": _safe_stats("planner_rejected_task_cap"),
         "planner_rejected_patrol_cap": _safe_stats("planner_rejected_patrol_cap"),
@@ -3204,6 +3855,10 @@ def run_metrics_experiments(
         "truth_candidate_events": _safe_stats("truth_candidate_events"),
         "truth_accepted_events": _safe_stats("truth_accepted_events"),
         "truth_suppressed_events": _safe_stats("truth_suppressed_events"),
+        "truth_detection_opportunities": _safe_stats("truth_detection_opportunities"),
+        "truth_detections_observed": _safe_stats("truth_detections_observed"),
+        "truth_detections_missed_range": _safe_stats("truth_detections_missed_range"),
+        "truth_detections_missed_false_negative": _safe_stats("truth_detections_missed_false_negative"),
         "truth_suppression_rate": _safe_stats("truth_suppression_rate"),
         "truth_suppression_effect_mean": _safe_stats("truth_suppression_effect_mean"),
         "truth_suppression_effect_sum": _safe_stats("truth_suppression_effect_sum"),
@@ -3250,11 +3905,24 @@ def run_metrics_experiments(
                 out[f"{k}_var"] = float(np.var(arr)) if arr.size else float("nan")
             time_summary.append(out)
 
+    def _uniform_run_value(key, default=""):
+        values = [m.get(key, default) for m in run_metrics if key in m]
+        if not values:
+            return default
+        first = values[0]
+        return first if all(v == first for v in values[1:]) else default
+
     return {
         "num_runs": len(run_metrics),
         "runs": run_metrics,
         "summary": summary,
         "time_summary": time_summary,
+        "config_summary": {
+            "preventive_policy": str(_uniform_run_value("preventive_policy", "")),
+            "preventive_policy_source": str(_uniform_run_value("preventive_policy_source", "")),
+            "selected_calibration_config_id": str(_uniform_run_value("selected_calibration_config_id", "")),
+            "selected_calibration_source": str(_uniform_run_value("selected_calibration_source", "")),
+        },
     }
 
 
@@ -3268,6 +3936,11 @@ def run_baseline_suite(
     time_metrics_period_s=900.0,
     proposed_enable_model_scored_deterring=None,
     proposed_enable_intervention_feedback=None,
+    use_frozen_calibration=False,
+    calibration_ranking_path=None,
+    calibration_manifest_path=None,
+    calibration_config_id=None,
+    proposed_preventive_policy=None,
     **sim_kwargs,
 ):
     """
@@ -3279,18 +3952,21 @@ def run_baseline_suite(
     """
     baseline_cfgs = {
         "reactive": {
+            "simulation_mode": "reactive",
             "enable_patrolling": False,
             "enable_intervention_feedback": False,
             "include_fallback_patrol": False,
             "enable_model_scored_deterring": False,
         },
         "prediction_only": {
+            "simulation_mode": "prediction_only",
             "enable_patrolling": True,
             "enable_intervention_feedback": False,
             "include_fallback_patrol": True,
             "enable_model_scored_deterring": False,
         },
         "proposed": {
+            "simulation_mode": "proposed",
             "enable_patrolling": True,
             "enable_intervention_feedback": True,
             "include_fallback_patrol": True,
@@ -3312,13 +3988,39 @@ def run_baseline_suite(
     baseline_names = list(baseline_cfgs.keys())
     total_runs_all = int(num_runs) * len(baseline_names)
     runs_done_all = 0
+    proposed_only_keys = {
+        "preventive_policy",
+        "use_frozen_calibration",
+        "calibration_ranking_path",
+        "calibration_manifest_path",
+        "calibration_config_id",
+    }
+    shared_sim_kwargs = {k: v for k, v in sim_kwargs.items() if k not in proposed_only_keys}
+
+    def _uniform_run_value(run_list, key, default=""):
+        values = [m.get(key, default) for m in run_list if key in m]
+        if not values:
+            return default
+        first = values[0]
+        return first if all(v == first for v in values[1:]) else default
 
     for bidx, name in enumerate(baseline_names, start=1):
         cfg = baseline_cfgs[name]
         if report_each_run:
             print(f"[baseline] {name}")
-        run_kwargs = dict(sim_kwargs)
+        run_kwargs = dict(shared_sim_kwargs)
         run_kwargs.update(cfg)
+        if name == "proposed":
+            if proposed_preventive_policy not in (None, ""):
+                run_kwargs["preventive_policy"] = str(proposed_preventive_policy)
+            if bool(use_frozen_calibration):
+                run_kwargs["use_frozen_calibration"] = True
+                if calibration_ranking_path not in (None, ""):
+                    run_kwargs["calibration_ranking_path"] = calibration_ranking_path
+                if calibration_manifest_path not in (None, ""):
+                    run_kwargs["calibration_manifest_path"] = calibration_manifest_path
+                if calibration_config_id not in (None, ""):
+                    run_kwargs["calibration_config_id"] = calibration_config_id
         def _baseline_progress(run_idx, run_total, seed, metrics):
             nonlocal runs_done_all
             runs_done_all = (bidx - 1) * int(num_runs) + int(run_idx)
@@ -3348,10 +4050,19 @@ def run_baseline_suite(
         )
         all_results[name] = result
         summary = result.get("summary", {})
+        run_list = result.get("runs", [])
         row = {"baseline": name, "num_runs": int(result.get("num_runs", 0))}
         for metric_name, stats in summary.items():
             row[f"{metric_name}_mean"] = float(stats.get("mean", np.nan))
             row[f"{metric_name}_var"] = float(stats.get("var", np.nan))
+        row["preventive_policy"] = str(_uniform_run_value(run_list, "preventive_policy", ""))
+        row["preventive_policy_source"] = str(_uniform_run_value(run_list, "preventive_policy_source", ""))
+        row["selected_calibration_config_id"] = str(
+            _uniform_run_value(run_list, "selected_calibration_config_id", "")
+        )
+        row["selected_calibration_source"] = str(
+            _uniform_run_value(run_list, "selected_calibration_source", "")
+        )
         rows.append(row)
         for tr in result.get("time_summary", []):
             tr_out = {"baseline": name}

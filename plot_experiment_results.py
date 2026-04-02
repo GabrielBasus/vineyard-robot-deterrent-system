@@ -9,18 +9,23 @@ import numpy as np
 
 
 RESULTS_DIR = Path("results")
+ARCHIVE_OUTPUTS_DIR = Path("etc/archive_outputs")
 
 
 def _pick_existing(candidates: Iterable[str]) -> Path | None:
     for c in candidates:
-        p = Path(c)
-        if p.exists():
-            return p
+        for base in (Path("."), ARCHIVE_OUTPUTS_DIR):
+            p = base / c
+            if p.exists():
+                return p
     return None
 
 
 def _pick_latest_by_glob(pattern: str) -> Path | None:
-    matches = sorted(Path(".").glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+    matches: list[Path] = []
+    for base in (Path("."), ARCHIVE_OUTPUTS_DIR):
+        matches.extend(base.glob(pattern))
+    matches = sorted(matches, key=lambda p: p.stat().st_mtime, reverse=True)
     return matches[0] if matches else None
 
 
@@ -263,12 +268,8 @@ def main() -> None:
     over_time_path = None
     if "baseline_runs_24h_sweep_parallel" in runs_path.name:
         suffix = _suffix_from_runs_path(runs_path)
-        s = Path(f"thesis_summary_24h_sweep_parallel{suffix}.csv")
-        if s.exists():
-            summary_path = s
-        o = Path(f"baseline_over_time_24h_sweep_parallel{suffix}.csv")
-        if o.exists():
-            over_time_path = o
+        summary_path = _pick_existing([f"thesis_summary_24h_sweep_parallel{suffix}.csv"])
+        over_time_path = _pick_existing([f"baseline_over_time_24h_sweep_parallel{suffix}.csv"])
     if summary_path is None:
         summary_path = _pick_latest_by_glob("thesis_summary_24h_sweep_parallel*.csv")
     if summary_path is None:

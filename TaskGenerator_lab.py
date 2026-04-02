@@ -33,6 +33,7 @@ class TaskGenerator:
         self._dt = dedupe_t_decimals
         self._cooldown = float(patrol_cooldown_s)
         self._next_allowed: dict[str,float] = {}  # per-robot next allowed time for patrolling
+        self._fallback_patrol_state: dict[str, dict] = {}
         # Per-robot cluster memory for preventive model-scored deterring gates.
         self._deterring_cluster_state: dict[tuple[str, int, int], dict] = {}
         self._last_model_deterring_fire: dict[tuple[str, int, int], dict] = {}
@@ -119,6 +120,91 @@ class TaskGenerator:
             if len(picks) >= int(top_k):
                 break
         return picks
+
+    def _fallback_zone_key(self, zone_polygon) -> tuple:
+        if not zone_polygon:
+            return ()
+        return tuple(
+            (round(float(x), 3), round(float(y), 3))
+            for (x, y) in zone_polygon
+        )
+
+    def _fallback_waypoints(self, zone_polygon) -> list[tuple[float, float]]:
+        if not zone_polygon:
+            return []
+
+        # Use a coarse boustrophedon lattice so fallback patrol still covers the zone.
+        xs = [float(x) for (x, _y) in zone_polygon]
+        ys = [float(y) for (_x, y) in zone_polygon]
+        xmin = min(xs)
+        xmax = max(xs)
+        ymin = min(ys)
+        ymax = max(ys)
+        width = max(xmax - xmin, 1e-6)
+        height = max(ymax - ymin, 1e-6)
+        base_spacing = max(float(self.merge_radius_m), 1.0)
+        base_cols = max(2, min(4, int(math.ceil(width / base_spacing)) + 1))
+        base_rows = max(2, min(4, int(math.ceil(height / base_spacing)) + 1))
+
+        waypoints: list[tuple[float, float]] = []
+        for extra_density in (0, 2):
+            cols = min(6, base_cols + extra_density)
+            rows = min(6, base_rows + extra_density)
+            trial: list[tuple[float, float]] = []
+            seen = set()
+            x_positions = np.linspace(xmin, xmax, num=cols + 2, dtype=float)[1:-1]
+            y_positions = np.linspace(ymin, ymax, num=rows + 2, dtype=float)[1:-1]
+            for row_idx, y in enumerate(y_positions):
+                x_iter = x_positions if (row_idx % 2 == 0) else x_positions[::-1]
+                for x in x_iter:
+                    xf = float(x)
+                    yf = float(y)
+                    if not point_in_polygon(xf, yf, zone_polygon):
+                        continue
+                    key = (round(xf, 4), round(yf, 4))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    trial.append((xf, yf))
+            if trial:
+                waypoints = trial
+            if len(trial) >= 2:
+                break
+
+        if waypoints:
+            return waypoints
+
+        cx, cy = polygon_centroid(zone_polygon)
+        return [(float(cx), float(cy))]
+
+    def _select_fallback_patrol_point(self, rid: str, rob: "Robot") -> tuple[float, float]:
+        waypoints = self._fallback_waypoints(rob.zone_polygon)
+        if not waypoints:
+            cx, cy = polygon_centroid(rob.zone_polygon)
+            return float(cx), float(cy)
+
+        # Select the least-recently-used waypoint to avoid collapsing onto one anchor point.
+        zone_key = self._fallback_zone_key(rob.zone_polygon)
+        state = self._fallback_patrol_state.get(rid)
+        if (
+            state is None
+            or state.get("zone_key") != zone_key
+            or len(state.get("last_visit_step", [])) != len(waypoints)
+        ):
+            state = {
+                "zone_key": zone_key,
+                "last_visit_step": [-1] * len(waypoints),
+                "visit_counter": 0,
+            }
+
+        last_visit_step = list(state["last_visit_step"])
+        best_idx = min(range(len(waypoints)), key=lambda idx: (int(last_visit_step[idx]), idx))
+        visit_counter = int(state.get("visit_counter", 0)) + 1
+        last_visit_step[best_idx] = visit_counter
+        state["last_visit_step"] = last_visit_step
+        state["visit_counter"] = visit_counter
+        self._fallback_patrol_state[rid] = state
+        return waypoints[best_idx]
 
     def _monte_carlo_patrol_points(
         self,
@@ -937,10 +1023,8 @@ class TaskGenerator:
                     self._next_allowed[rid] = now_t + self._cooldown
 
             # fallback if nothing for this robot at this time slice
-            # Optional fallback (off by default). If you re-enable it, consider
-            # sweeping around the zone instead of always choosing the centroid.
             if include_fallback_patrol and not self._has_robot_at_time(rid, now_t):
-                cx, cy = polygon_centroid(rob.zone_polygon)
+                cx, cy = self._select_fallback_patrol_point(rid, rob)
                 self._add({
                     'robot_id': rid,
                     'type': 'patrolling',

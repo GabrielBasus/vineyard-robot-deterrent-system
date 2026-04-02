@@ -13,11 +13,21 @@ import pandas as pd
 
 import DeterrentSystem_assignment_lab as ds
 from config_loader import add_config_argument, parse_args_with_config
+from planner_profiles import apply_planner_profile_defaults, explicit_cli_dests
 from run_assignment_method_comparison_lab import _baseline_cfg
+from thesis_experiment_workflow import render_execution_order_lines, render_stage_readme_lines, stage_manifest
 
 
 DEFAULT_BASELINES = ["prediction_only", "proposed"]
-DEFAULT_METHODS = ["frozen_greedy", "hungarian"]
+DEFAULT_METHODS = ["hungarian"]
+METHOD_DELTA_COLUMNS = [
+    "scenario_id",
+    "baseline",
+    "assignment_method",
+    "delta_exposure_pct_mean",
+    "delta_response_pct_mean",
+    "delta_comm_pct_mean",
+]
 ASSIGNMENT_TUNING_CONFIG_ALIASES = {
     "runner.stage": "stage",
     "runner.num_runs": "num_runs",
@@ -30,6 +40,7 @@ ASSIGNMENT_TUNING_CONFIG_ALIASES = {
     "runner.resume": "resume",
     "runner.checkpoint_path": "checkpoint_path",
     "runner.max_workers": "max_workers",
+    "planner.profile": "planner_profile",
     "planner.distance_costs": "distance_costs",
     "planner.switch_penalties": "switch_penalties",
     "planner.replan_periods": "replan_periods",
@@ -52,6 +63,29 @@ ASSIGNMENT_TUNING_CONFIG_ALIASES = {
     "ground_truth.beta_true_values": "beta_true_values",
     "inputs.phase1_manifest": "phase1_manifest",
     "inputs.use_phase1_winner": "use_phase1_winner",
+}
+
+
+ASSIGNMENT_TUNING_PROFILE_DEST_MAP = {
+    "assigner_w_task_value": "assigner_w_task_values",
+    "model_deterring_window_s": "deterring_windows",
+    "model_deterring_min_persistence_replans": "min_persistence_replans",
+    "model_deterring_max_eta_s": "max_eta_values",
+    "model_deterring_score_margin": "score_margin_values",
+    "model_deterring_budget_per_robot_per_hr": "budget_per_hr",
+    "model_deterring_budget_mode": "budget_modes",
+    "model_deterring_budget_utility_per_robot_per_hr": "budget_utility_per_hr",
+    "model_deterring_gate_policy": "gate_policies",
+    "model_deterring_chance_threshold": "chance_threshold_values",
+    "model_deterring_min_deltaJ_per_cost": "min_deltaj_per_cost_values",
+}
+
+
+ASSIGNMENT_TUNING_SUBSTAGE_NOTES = {
+    "phase1": "Screen dispatch distance cost, switch penalty, and replan cadence to pick the fixed Hungarian dispatch setting.",
+    "phase2": "Hold the phase-1 Hungarian dispatch fixed and sweep persistence, ETA, budget, and support controls for robust planner behavior.",
+    "phase4": "Compare gate-policy families with the tuned dispatch frozen so only the downstream planner logic changes.",
+    "phase4_refine": "Refine the final SPRT / chance / utility thresholds around the best gated planner region.",
 }
 
 
@@ -85,6 +119,13 @@ def _stats(df: pd.DataFrame, col: str) -> dict:
         "ci95": _ci95(s),
         "n": int(len(s)),
     }
+
+
+def _nanmean_or_nan(values) -> float:
+    s = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+    if len(s) == 0:
+        return float("nan")
+    return float(s.mean())
 
 
 def _build_base_params(t_end: float, dt: float) -> dict:
@@ -208,6 +249,8 @@ def _empty_runs_df() -> pd.DataFrame:
             "planner_replaced_low_utility_count",
             "assigned_task_value_mean",
             "assignment_solver_runtime_ms",
+            "assignment_solver_assigned_mean",
+            "assignment_solver_objective_mean",
             "assignment_solver_calls",
             "assignment_solver_conflicts_resolved",
             "assignment_solver_unassigned",
@@ -456,6 +499,8 @@ def _run_combo_job(payload: dict) -> dict:
                     m.get("model_deterring_budget_spent_utility_per_robot_hr_max", np.nan)
                 ),
                 "assignment_solver_runtime_ms": float(m.get("assignment_solver_runtime_ms", np.nan)),
+                "assignment_solver_assigned_mean": float(m.get("assignment_solver_assigned_mean", np.nan)),
+                "assignment_solver_objective_mean": float(m.get("assignment_solver_objective_mean", np.nan)),
                 "assignment_solver_calls": float(m.get("assignment_solver_calls", np.nan)),
                 "assignment_solver_conflicts_resolved": float(m.get("assignment_solver_conflicts_resolved", np.nan)),
                 "assignment_solver_unassigned": float(m.get("assignment_solver_unassigned", np.nan)),
@@ -752,6 +797,8 @@ def build_summary(runs_df: pd.DataFrame) -> pd.DataFrame:
         "planner_replaced_low_utility_count",
         "assigned_task_value_mean",
         "assignment_solver_runtime_ms",
+        "assignment_solver_assigned_mean",
+        "assignment_solver_objective_mean",
         "assignment_solver_rounds_mean",
         "assignment_solver_message_passes",
         "assignment_solver_failures",
@@ -804,9 +851,11 @@ def build_summary(runs_df: pd.DataFrame) -> pd.DataFrame:
 
 def build_method_deltas_vs_frozen(runs_df: pd.DataFrame) -> pd.DataFrame:
     if runs_df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=METHOD_DELTA_COLUMNS)
     keys = ["scenario_id", "baseline", "seed", "run_idx"]
     base = runs_df[runs_df["assignment_method"] == "frozen_greedy"].copy()
+    if base.empty:
+        return pd.DataFrame(columns=METHOD_DELTA_COLUMNS)
     methods = sorted({m for m in runs_df["assignment_method"].unique() if m != "frozen_greedy"})
     out = []
     for method in methods:
@@ -827,7 +876,9 @@ def build_method_deltas_vs_frozen(runs_df: pd.DataFrame) -> pd.DataFrame:
             delta_comm_pct_mean=("delta_comm_pct", "mean"),
         )
         out.append(g)
-    return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
+    if not out:
+        return pd.DataFrame(columns=METHOD_DELTA_COLUMNS)
+    return pd.concat(out, ignore_index=True)
 
 
 def build_proposed_vs_prediction_deltas(runs_df: pd.DataFrame) -> pd.DataFrame:
@@ -894,20 +945,14 @@ def build_proposed_vs_prediction_deltas(runs_df: pd.DataFrame) -> pd.DataFrame:
                         p0.get("min_predicted_deltaJ_for_model_deterring", np.nan)
                     ),
                     "beta_true": float(p0.get("beta_true", np.nan)),
-                    "exp_improve_pct_mean": float(np.nanmean(exp_imp)),
-                    "resp_improve_pct_mean": float(np.nanmean(resp_imp)),
-                    "comm_increase_pct_mean": float(np.nanmean(comm_inc)),
-                    "proposed_yield_ratio_model_scored_mean": float(
-                        np.nanmean(pd.to_numeric(p["yield_ratio_model_scored"], errors="coerce"))
-                    ),
-                    "proposed_queue_depth_total_mean": float(
-                        np.nanmean(pd.to_numeric(p["queue_depth_total_mean"], errors="coerce"))
-                    ),
-                    "proposed_stale_task_evictions_count_mean": float(
-                        np.nanmean(pd.to_numeric(p["stale_task_evictions_count"], errors="coerce"))
-                    ),
-                    "runtime_ms_mean": float(np.nanmean(pd.to_numeric(p["assignment_solver_runtime_ms"], errors="coerce"))),
-                    "failures_mean": float(np.nanmean(pd.to_numeric(p["assignment_solver_failures"], errors="coerce"))),
+                    "exp_improve_pct_mean": _nanmean_or_nan(exp_imp),
+                    "resp_improve_pct_mean": _nanmean_or_nan(resp_imp),
+                    "comm_increase_pct_mean": _nanmean_or_nan(comm_inc),
+                    "proposed_yield_ratio_model_scored_mean": _nanmean_or_nan(p["yield_ratio_model_scored"]),
+                    "proposed_queue_depth_total_mean": _nanmean_or_nan(p["queue_depth_total_mean"]),
+                    "proposed_stale_task_evictions_count_mean": _nanmean_or_nan(p["stale_task_evictions_count"]),
+                    "runtime_ms_mean": _nanmean_or_nan(p["assignment_solver_runtime_ms"]),
+                    "failures_mean": _nanmean_or_nan(p["assignment_solver_failures"]),
                 }
             )
     return pd.DataFrame(out)
@@ -1121,7 +1166,77 @@ def build_calibration_summary(runs_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
-def main() -> None:
+def _fmt_metric(value: object) -> str:
+    try:
+        num = float(value)
+    except Exception:
+        return "nan"
+    if not np.isfinite(num):
+        return "nan"
+    return f"{num:.4f}" if abs(num) >= 1e-3 else f"{num:.3e}"
+
+
+def _write_readme(
+    outdir: Path,
+    stage: str,
+    planner_profile: str,
+    best: dict,
+    runs_path: Path,
+    summary_path: Path,
+    method_deltas_path: Path,
+    baseline_deltas_path: Path,
+    phase1_summary_path: Path,
+    phase2_ranking_path: Path,
+    phase4_ranking_path: Path,
+    calibration_path: Path,
+    manifest_path: Path,
+) -> Path:
+    lines = [
+        "# Assignment Tuning Sweep Lab",
+        "",
+        *render_stage_readme_lines("assignment_tuning", substage=stage),
+        "",
+        "## Current Sweep Intent",
+        f"- {ASSIGNMENT_TUNING_SUBSTAGE_NOTES.get(stage, 'Planner tuning sweep.')}",
+        f"- Planner profile seed defaults: `{planner_profile or 'manual'}`",
+        "- The proposed-vs-prediction CSV is built from matched seed/run pairs so the tradeoff rows stay comparable.",
+        "",
+        "## Key Outputs",
+        f"- Runs CSV: `{runs_path.name}`",
+        f"- Summary CSV: `{summary_path.name}`",
+        f"- Method deltas vs optional frozen baseline: `{method_deltas_path.name}`",
+        f"- Proposed-vs-prediction deltas: `{baseline_deltas_path.name}`",
+        f"- Phase-1 summary: `{phase1_summary_path.name}`",
+        f"- Phase-2 ranking: `{phase2_ranking_path.name}`",
+        f"- Phase-4 ranking: `{phase4_ranking_path.name}`",
+        f"- Calibration CSV: `{calibration_path.name}`",
+        f"- Manifest: `{manifest_path.name}`",
+        "",
+        "## Hard Reject Logic",
+        "- Reject any scenario with assignment solver failures.",
+        "- In phase-1 selection, also reject scenarios with communication increase above 100% when exposure gain stays below 0.5%.",
+    ]
+    best_row = dict(best.get("row", {}))
+    best_scenario = str(best.get("best_scenario") or "")
+    if best_scenario:
+        lines.extend(
+            [
+                "",
+                "## Current Best Hungarian Scenario",
+                f"- Scenario id: `{best_scenario}`",
+                f"- Exposure improve mean: {_fmt_metric(best_row.get('exp_improve_pct_mean'))}%",
+                f"- Response improve mean: {_fmt_metric(best_row.get('resp_improve_pct_mean'))}%",
+                f"- Communication increase mean: {_fmt_metric(best_row.get('comm_increase_pct_mean'))}%",
+                f"- Runtime mean: {_fmt_metric(best_row.get('runtime_ms_mean'))} ms",
+            ]
+        )
+    lines.extend(["", *render_execution_order_lines()])
+    readme_path = outdir / "ASSIGNMENT_TUNING_README.md"
+    readme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return readme_path
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Hungarian-focused assignment tuning sweep (lab only)")
     add_config_argument(parser)
     parser.add_argument("--stage", type=str, choices=["phase1", "phase2", "phase4", "phase4_refine"], default="phase1")
@@ -1129,12 +1244,18 @@ def main() -> None:
     parser.add_argument("--seed-start", type=int, default=2000)
     parser.add_argument("--t-end", type=float, default=3 * 3600.0)
     parser.add_argument("--dt", type=float, default=5.0)
-    parser.add_argument("--baselines", type=str, default="prediction_only,proposed")
-    parser.add_argument("--methods", type=str, default="frozen_greedy,hungarian")
+    parser.add_argument("--baselines", type=str, default=",".join(DEFAULT_BASELINES))
+    parser.add_argument("--methods", type=str, default=",".join(DEFAULT_METHODS))
     parser.add_argument("--distance-costs", type=str, default="0.004,0.005,0.006,0.008")
     parser.add_argument("--switch-penalties", type=str, default="0.4,0.5,0.7,1.0")
     parser.add_argument("--replan-periods", type=str, default="75,90,105")
     parser.add_argument("--assigner-w-task-values", type=str, default="0.0")
+    parser.add_argument(
+        "--planner-profile",
+        type=str,
+        default="",
+        help="Optional named planner preset. Example: thesis_confirm",
+    )
     parser.add_argument("--gate-policies", type=str, default="")
     parser.add_argument("--sprt-alpha-values", type=str, default="")
     parser.add_argument("--sprt-beta-values", type=str, default="")
@@ -1177,7 +1298,25 @@ def main() -> None:
         default=1,
         help="Process workers for parallel scenario execution; use 0 for auto (cpu_count-1).",
     )
-    args, config_meta = parse_args_with_config(parser, aliases=ASSIGNMENT_TUNING_CONFIG_ALIASES)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args, config_meta = parse_args_with_config(
+        parser,
+        aliases=ASSIGNMENT_TUNING_CONFIG_ALIASES,
+        argv=argv,
+    )
+    protected_profile_dests = explicit_cli_dests(parser) | set(config_meta.get("config_overrides", {}).keys())
+    planner_profile, planner_profile_values = apply_planner_profile_defaults(
+        vars(args),
+        getattr(args, "planner_profile", ""),
+        dest_map=ASSIGNMENT_TUNING_PROFILE_DEST_MAP,
+        protected_dests=protected_profile_dests,
+        stringify=True,
+    )
+    args.planner_profile = planner_profile
 
     if getattr(ds, "mon", None) is not None:
         ds.mon.enabled = False
@@ -1491,6 +1630,11 @@ def main() -> None:
         "beta_true_values": beta_true_values,
         "phase1_manifest": str(args.phase1_manifest),
         "use_phase1_winner": bool(args.use_phase1_winner),
+        "planner_profile": planner_profile,
+        "planner_profile_values": planner_profile_values,
+        "workflow_stage": stage_manifest("assignment_tuning"),
+        "tuning_substage": stage,
+        "tuning_substage_note": ASSIGNMENT_TUNING_SUBSTAGE_NOTES.get(stage, "Planner tuning sweep."),
         "resume": bool(args.resume),
         "checkpoint_path": str(checkpoint_path),
         "max_workers": int(args.max_workers),
@@ -1555,6 +1699,8 @@ def main() -> None:
             "preventive_capacity_remaining_per_robot_mean",
             "planner_replaced_low_utility_count",
             "assigned_task_value_mean",
+            "assignment_solver_assigned_mean",
+            "assignment_solver_objective_mean",
         ],
         "output_files": {
             "runs_csv": str(runs_path),
@@ -1568,6 +1714,21 @@ def main() -> None:
         },
     }
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    readme_path = _write_readme(
+        outdir=outdir,
+        stage=stage,
+        planner_profile=planner_profile,
+        best=best,
+        runs_path=runs_path,
+        summary_path=summary_path,
+        method_deltas_path=method_deltas_path,
+        baseline_deltas_path=baseline_deltas_path,
+        phase1_summary_path=phase1_summary_path,
+        phase2_ranking_path=phase2_ranking_path,
+        phase4_ranking_path=phase4_ranking_path,
+        calibration_path=calibration_path,
+        manifest_path=manifest_path,
+    )
 
     print(f"[done] wrote outputs to: {outdir}")
     print(f"- {runs_path}")
@@ -1579,6 +1740,7 @@ def main() -> None:
     print(f"- {phase4_ranking_path}")
     print(f"- {calibration_path}")
     print(f"- {manifest_path}")
+    print(f"- {readme_path}")
 
 
 if __name__ == "__main__":

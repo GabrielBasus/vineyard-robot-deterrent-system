@@ -1,0 +1,85 @@
+{
+  "config": {
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 80,
+    "NY": 64,
+    "dt": 5.0,
+    "T_end": 10800.0,
+    "warmup_s": 1800.0,
+    "eval_period_s": 30.0,
+    "forecast_horizon_s": 300.0,
+    "forecast_top_k": 5,
+    "match_radius_m": 20.0,
+    "mu_true": 1e-06,
+    "alpha_true": 0.3,
+    "omega_true": 600.0,
+    "sigma_true": 12.0,
+    "beta_true": 0.3,
+    "row_spacing_m": 4.8,
+    "row_gain": 1.5,
+    "edge_gain": 0.6,
+    "edge_scale_m": 35.0,
+    "intervention_prob": 0.45,
+    "intervention_cooldown_s": 40.0,
+    "intervention_delay_s": 10.0,
+    "intervention_sigma": 12.0,
+    "intervention_omega": 600.0,
+    "intervention_shuffle": "spacetime",
+    "shuffle_time_window_s": 300.0,
+    "model_sigma": 12.0,
+    "model_omega": 600.0,
+    "model_omega_inhib": 600.0,
+    "model_alpha_in": 0.25,
+    "model_alpha_cross": 0.0,
+    "model_alpha_inhib": 0.35,
+    "model_mu_base": 0.0001,
+    "model_bg_ema": 1e-06,
+    "runs": 8,
+    "seed_start": 2026,
+    "final_map_recent_truth": 400,
+    "final_map_recent_interventions": 120
+  },
+  "summary": {
+    "delta_forecast_recall_at_k_proposed_minus_prediction": {
+      "mean": 6.935325181913962e-07,
+      "std": 0.00040952260741530507,
+      "n": 8
+    },
+    "delta_forecast_precision_at_k_proposed_minus_prediction": {
+      "mean": -0.0018229166666666602,
+      "std": 0.005805107781295041,
+      "n": 8
+    },
+    "delta_forecast_hit_rate_proposed_minus_prediction": {
+      "mean": 0.001041666666666663,
+      "std": 0.007073454440091437,
+      "n": 8
+    },
+    "delta_forecast_lead_time_s_proposed_minus_prediction": {
+      "mean": 0.3186435280634008,
+      "std": 1.4916215357171563,
+      "n": 8
+    },
+    "delta_nll_proposed_minus_prediction": {
+      "mean": -2274453.53046659,
+      "std": 33011.28080557011,
+      "n": 8
+    },
+    "nll_improvement_pct": {
+      "mean": 6.543852532793994,
+      "std": 0.05899838838835657,
+      "n": 8
+    },
+    "delta_mean_log_lambda_at_events_proposed_minus_prediction": {
+      "mean": -0.4850153988265957,
+      "std": 0.039811534986143475,
+      "n": 8
+    },
+    "delta_mean_lambda_at_events_proposed_minus_prediction": {
+      "mean": -0.0008369138247461049,
+      "std": 4.2160285519917276e-05,
+      "n": 8
+    }
+  }
+}

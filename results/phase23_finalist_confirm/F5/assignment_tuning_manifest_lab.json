@@ -1,0 +1,152 @@
+{
+  "num_runs": 10,
+  "seed_start": 16000,
+  "seed_list": [
+    16000,
+    16001,
+    16002,
+    16003,
+    16004,
+    16005,
+    16006,
+    16007,
+    16008,
+    16009
+  ],
+  "t_end": 10800.0,
+  "dt": 5.0,
+  "baselines": [
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "hungarian"
+  ],
+  "stage": "phase2",
+  "distance_costs": [
+    0.006
+  ],
+  "switch_penalties": [
+    1.0
+  ],
+  "replan_periods_s": [
+    90
+  ],
+  "assigner_w_task_values": [
+    0.3
+  ],
+  "model_deterring_risk_thresholds": [
+    0.6
+  ],
+  "model_deterring_min_persistence_replans": [
+    3
+  ],
+  "model_deterring_max_eta_s": [
+    60.0
+  ],
+  "model_deterring_score_margin": [
+    0.1
+  ],
+  "model_deterring_budget_per_robot_per_hr": [
+    2
+  ],
+  "model_deterring_budget_mode": [
+    "count_per_hour"
+  ],
+  "model_deterring_budget_utility_per_robot_per_hr": [
+    6.0
+  ],
+  "model_deterring_window_s": [
+    120.0
+  ],
+  "min_predicted_deltaJ_for_model_deterring": [
+    0.0
+  ],
+  "beta_true_values": [
+    0.35
+  ],
+  "phase1_manifest": "results/assignment_tuning_sweep_lab_phase1_fast/assignment_tuning_manifest_lab.json",
+  "use_phase1_winner": true,
+  "resume": true,
+  "checkpoint_path": "results\\phase23_finalist_confirm\\F5\\assignment_tuning_runs_lab.checkpoint.csv",
+  "max_workers": 16,
+  "best_hungarian_scenario": {
+    "best_scenario": "d0.006_s1_rp90_tv0.3_rt0.6_mp3_eta60_sm0.1_bh2_bmcph_bu6_dw120_mdj0_bt0.35",
+    "row": {
+      "scenario_id": "d0.006_s1_rp90_tv0.3_rt0.6_mp3_eta60_sm0.1_bh2_bmcph_bu6_dw120_mdj0_bt0.35",
+      "assignment_method": "hungarian",
+      "assignment_distance_cost_per_m": 0.006,
+      "assignment_switch_penalty": 1.0,
+      "task_replan_period_s": 90.0,
+      "assigner_w_task_value": 0.3,
+      "model_deterring_risk_threshold": 0.6,
+      "model_deterring_min_persistence_replans": 3.0,
+      "model_deterring_max_eta_s": 60.0,
+      "model_deterring_score_margin": 0.1,
+      "model_deterring_budget_per_robot_per_hr": 2.0,
+      "model_deterring_budget_mode": "count_per_hour",
+      "model_deterring_budget_utility_per_robot_per_hr": 6.0,
+      "model_deterring_window_s": 120.0,
+      "min_predicted_deltaJ_for_model_deterring": 0.0,
+      "beta_true": 0.35,
+      "exp_improve_pct_mean": -0.6868668588851949,
+      "resp_improve_pct_mean": -1.2896797599588212,
+      "comm_increase_pct_mean": 59.3668180213392,
+      "runtime_ms_mean": 3.220314793358461,
+      "failures_mean": 0.0,
+      "hard_reject": false
+    }
+  },
+  "diagnostic_metrics_exported": [
+    "predicted_deltaJ_sum",
+    "realized_suppression_sum",
+    "yield_ratio_total",
+    "yield_ratio_direct_detection",
+    "yield_ratio_model_scored",
+    "queue_depth_total_mean",
+    "queue_depth_patrolling_mean",
+    "queue_depth_deterring_mean",
+    "queue_depth_model_deterring_mean",
+    "queue_depth_total_max",
+    "queue_depth_patrolling_max",
+    "queue_depth_deterring_max",
+    "queue_depth_model_deterring_max",
+    "stale_task_evictions_count",
+    "robot_moving_fraction_mean",
+    "robot_active_task_fraction_mean",
+    "model_deterring_accepted",
+    "model_deterring_generated",
+    "model_deterring_candidates_total",
+    "model_deterring_rejected_cooldown",
+    "model_deterring_rejected_field",
+    "model_deterring_pass_field",
+    "model_deterring_rejected_predicted_deltaJ",
+    "model_deterring_pass_predicted_deltaJ",
+    "model_deterring_pass_risk",
+    "model_deterring_pass_support",
+    "model_deterring_rejected_risk",
+    "model_deterring_rejected_support",
+    "model_deterring_rejected_persistence",
+    "model_deterring_rejected_repeat_no_new_support",
+    "model_deterring_rejected_margin",
+    "model_deterring_rejected_eta",
+    "model_deterring_rejected_busy",
+    "model_deterring_rejected_budget",
+    "model_deterring_rejected_budget_count_mode",
+    "model_deterring_rejected_budget_utility_mode",
+    "model_deterring_budget_spent_count_per_robot_hr_mean",
+    "model_deterring_budget_spent_count_per_robot_hr_max",
+    "model_deterring_budget_spent_utility_per_robot_hr_mean",
+    "model_deterring_budget_spent_utility_per_robot_hr_max",
+    "planner_replaced_low_utility_count",
+    "assigned_task_value_mean"
+  ],
+  "output_files": {
+    "runs_csv": "results\\phase23_finalist_confirm\\F5\\assignment_tuning_runs_lab.csv",
+    "summary_csv": "results\\phase23_finalist_confirm\\F5\\assignment_tuning_summary_lab.csv",
+    "method_deltas_csv": "results\\phase23_finalist_confirm\\F5\\assignment_tuning_method_deltas_lab.csv",
+    "proposed_vs_prediction_csv": "results\\phase23_finalist_confirm\\F5\\assignment_tuning_proposed_vs_prediction_lab.csv",
+    "phase1_summary_csv": "results\\phase23_finalist_confirm\\F5\\assignment_tuning_phase1_summary_lab.csv",
+    "phase2_ranking_csv": "results\\phase23_finalist_confirm\\F5\\assignment_tuning_phase2_ranking_lab.csv"
+  }
+}

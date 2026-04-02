@@ -1,0 +1,102 @@
+{
+  "num_runs": 1,
+  "seed_start": 4100,
+  "seed_list": [
+    4100
+  ],
+  "t_end": 600.0,
+  "dt": 5.0,
+  "baselines": [
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "hungarian"
+  ],
+  "stage": "phase1",
+  "distance_costs": [
+    0.005
+  ],
+  "switch_penalties": [
+    0.5
+  ],
+  "replan_periods_s": [
+    90
+  ],
+  "assigner_w_task_values": [
+    0.0
+  ],
+  "model_deterring_risk_thresholds": [
+    0.35
+  ],
+  "model_deterring_budget_per_robot_per_hr": [
+    4
+  ],
+  "model_deterring_window_s": [
+    90.0
+  ],
+  "beta_true_values": [
+    0.35
+  ],
+  "phase1_manifest": "",
+  "use_phase1_winner": true,
+  "resume": true,
+  "checkpoint_path": "results\\phase2_utility_quick_before\\assignment_tuning_runs_lab.checkpoint.csv",
+  "max_workers": 1,
+  "best_hungarian_scenario": {
+    "best_scenario": "d0.005_s0.5_rp90_tv0_rt0.35_bh4_dw90_bt0.35",
+    "row": {
+      "scenario_id": "d0.005_s0.5_rp90_tv0_rt0.35_bh4_dw90_bt0.35",
+      "assignment_method": "hungarian",
+      "assignment_distance_cost_per_m": 0.005,
+      "assignment_switch_penalty": 0.5,
+      "task_replan_period_s": 90.0,
+      "assigner_w_task_value": 0.0,
+      "model_deterring_risk_threshold": 0.35,
+      "model_deterring_budget_per_robot_per_hr": 4.0,
+      "model_deterring_window_s": 90.0,
+      "beta_true": 0.35,
+      "exp_improve_pct_mean": 0.0,
+      "resp_improve_pct_mean": 0.0,
+      "comm_increase_pct_mean": 4.054054054054054,
+      "runtime_ms_mean": 1.3469714284448335,
+      "failures_mean": 0.0,
+      "hard_reject": false
+    }
+  },
+  "diagnostic_metrics_exported": [
+    "predicted_deltaJ_sum",
+    "realized_suppression_sum",
+    "yield_ratio_total",
+    "yield_ratio_direct_detection",
+    "yield_ratio_model_scored",
+    "queue_depth_total_mean",
+    "queue_depth_patrolling_mean",
+    "queue_depth_deterring_mean",
+    "queue_depth_model_deterring_mean",
+    "queue_depth_total_max",
+    "queue_depth_patrolling_max",
+    "queue_depth_deterring_max",
+    "queue_depth_model_deterring_max",
+    "stale_task_evictions_count",
+    "robot_moving_fraction_mean",
+    "robot_active_task_fraction_mean",
+    "model_deterring_rejected_risk",
+    "model_deterring_rejected_support",
+    "model_deterring_rejected_persistence",
+    "model_deterring_rejected_margin",
+    "model_deterring_rejected_eta",
+    "model_deterring_rejected_busy",
+    "model_deterring_rejected_budget",
+    "planner_replaced_low_utility_count",
+    "assigned_task_value_mean"
+  ],
+  "output_files": {
+    "runs_csv": "results\\phase2_utility_quick_before\\assignment_tuning_runs_lab.csv",
+    "summary_csv": "results\\phase2_utility_quick_before\\assignment_tuning_summary_lab.csv",
+    "method_deltas_csv": "results\\phase2_utility_quick_before\\assignment_tuning_method_deltas_lab.csv",
+    "proposed_vs_prediction_csv": "results\\phase2_utility_quick_before\\assignment_tuning_proposed_vs_prediction_lab.csv",
+    "phase1_summary_csv": "results\\phase2_utility_quick_before\\assignment_tuning_phase1_summary_lab.csv",
+    "phase2_ranking_csv": "results\\phase2_utility_quick_before\\assignment_tuning_phase2_ranking_lab.csv"
+  }
+}

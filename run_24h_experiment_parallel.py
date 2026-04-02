@@ -12,6 +12,7 @@ import pandas as pd
 
 import DeterrentSystem as ds
 from config_loader import add_config_argument, parse_args_with_config, write_resolved_config_manifest
+from planner_profiles import canonicalize_planner_profile_name, get_planner_profile_values
 
 
 EXPERIMENT_RUNNER_CONFIG_ALIASES = {
@@ -27,9 +28,75 @@ EXPERIMENT_RUNNER_CONFIG_ALIASES = {
     "simulation.ny": "ny",
     "simulation.time_horizons_h": "time_horizons_h",
     "sweep.tune_preset": "tune_preset",
+    "planner.profile": "planner_profile",
+    "planner.proposed_preventive_policy": "proposed_preventive_policy",
+    "calibration.use_frozen_calibration": "use_frozen_calibration",
+    "calibration.ranking_path": "calibration_ranking_path",
+    "calibration.manifest_path": "calibration_manifest_path",
+    "calibration.config_id": "calibration_config_id",
     "winner.enable_winner_profile": "enable_winner_profile",
     "winner.winner_profile_id": "winner_profile_id",
 }
+
+VALID_PREVENTIVE_POLICIES = ("off", "heuristic", "sprt_capacity")
+
+
+def _clean_optional_text(value) -> str:
+    if value in (None, ""):
+        return ""
+    return str(value).strip()
+
+
+def _resolve_requested_runtime_controls(args: argparse.Namespace) -> dict:
+    planner_profile = _clean_optional_text(getattr(args, "planner_profile", ""))
+    if planner_profile:
+        planner_profile = canonicalize_planner_profile_name(planner_profile)
+    planner_profile_values = get_planner_profile_values(planner_profile)
+
+    proposed_preventive_policy = _clean_optional_text(getattr(args, "proposed_preventive_policy", "")).lower()
+    calibration_ranking_path = _clean_optional_text(getattr(args, "calibration_ranking_path", ""))
+    calibration_manifest_path = _clean_optional_text(getattr(args, "calibration_manifest_path", ""))
+    calibration_config_id = _clean_optional_text(getattr(args, "calibration_config_id", ""))
+    explicit_calibration_selector = bool(
+        calibration_ranking_path or calibration_manifest_path or calibration_config_id
+    )
+    use_frozen_calibration = bool(getattr(args, "use_frozen_calibration", False) or explicit_calibration_selector)
+
+    # Fail fast by reusing the production runtime's own preventive-policy validation.
+    ds._resolve_preventive_policy_settings(
+        simulation_mode="proposed",
+        preventive_policy=(proposed_preventive_policy or None),
+        planner_profile=planner_profile,
+        planner_profile_values=planner_profile_values,
+        enable_model_scored_deterring=True,
+        enable_predicted_deltaJ_gate=bool(planner_profile_values.get("enable_predicted_deltaJ_gate", False)),
+        model_deterring_gate_policy=str(planner_profile_values.get("model_deterring_gate_policy", "heuristic")),
+    )
+
+    # Validate frozen-calibration requests with the production resolver instead of duplicating lookup logic here.
+    if use_frozen_calibration or bool(planner_profile_values.get("use_frozen_calibration", False)):
+        ds._resolve_calibration_runtime_overrides(
+            simulation_mode="proposed",
+            use_frozen_calibration=bool(use_frozen_calibration),
+            calibration_ranking_path=(calibration_ranking_path or None),
+            calibration_manifest_path=(calibration_manifest_path or None),
+            calibration_config_id=(calibration_config_id or None),
+            planner_profile=planner_profile,
+            planner_profile_values=planner_profile_values,
+            alpha_inhib=0.0,
+            omega_inhib=0.0,
+            mu_base=0.0,
+            bg_ema=0.0,
+        )
+
+    return {
+        "planner_profile": str(planner_profile),
+        "proposed_preventive_policy": str(proposed_preventive_policy),
+        "use_frozen_calibration": bool(use_frozen_calibration),
+        "calibration_ranking_path": str(calibration_ranking_path),
+        "calibration_manifest_path": str(calibration_manifest_path),
+        "calibration_config_id": str(calibration_config_id),
+    }
 
 
 def _mode_pack(scale_beta=1.0, scale_cost=1.0):
@@ -38,6 +105,35 @@ def _mode_pack(scale_beta=1.0, scale_cost=1.0):
         "laser": {"beta": 0.45 * scale_beta, "omega": 400.0, "sigma": 10.0, "w_eta": 1.5 * scale_cost, "fixed_cost": 0.0},
         "biosonic": {"beta": 0.25 * scale_beta, "omega": 600.0, "sigma": 20.0, "w_eta": 1.2 * scale_cost, "fixed_cost": 0.0},
     }
+
+
+def _normalize_tune_entry(tune: dict) -> dict:
+    out = dict(tune)
+    out.setdefault("assigner_w_load", 0.8)
+    out.setdefault("preempt_deterring_goals", True)
+    out.setdefault("preempt_direct_detection_goals", True)
+    out.setdefault("preempt_model_scored_goals", False)
+    out.setdefault("intervention_boundary_min_interval_s", 60.0)
+    out.setdefault("intervention_boundary_spatial_quant_m", 20.0)
+    out.setdefault("intervention_boundary_min_weight", 0.35)
+
+    out.setdefault("tune_assigner_w_load", float(out["assigner_w_load"]))
+    out.setdefault("tune_preempt_deterring_goals", int(bool(out["preempt_deterring_goals"])))
+    out.setdefault("tune_preempt_direct_detection_goals", int(bool(out["preempt_direct_detection_goals"])))
+    out.setdefault("tune_preempt_model_scored_goals", int(bool(out["preempt_model_scored_goals"])))
+    out.setdefault(
+        "tune_intervention_boundary_min_interval_s",
+        float(out["intervention_boundary_min_interval_s"]),
+    )
+    out.setdefault(
+        "tune_intervention_boundary_spatial_quant_m",
+        float(out["intervention_boundary_spatial_quant_m"]),
+    )
+    out.setdefault(
+        "tune_intervention_boundary_min_weight",
+        float(out["intervention_boundary_min_weight"]),
+    )
+    return out
 
 
 def _flatten_run_metrics(result, seed_start, exp_id, scenario_id, tune_id, time_horizon_h):
@@ -98,6 +194,29 @@ def _flatten_run_metrics(result, seed_start, exp_id, scenario_id, tune_id, time_
                     "model_deterring_rejected_eta": int(m.get("model_deterring_rejected_eta", 0)),
                     "model_deterring_rejected_busy": int(m.get("model_deterring_rejected_busy", 0)),
                     "model_deterring_rejected_margin": int(m.get("model_deterring_rejected_margin", 0)),
+                    "preventive_policy": str(m.get("preventive_policy", "")),
+                    "preventive_policy_source": str(m.get("preventive_policy_source", "")),
+                    "selective_preventive_enabled": int(m.get("selective_preventive_enabled", 0)),
+                    "use_frozen_calibration": int(m.get("use_frozen_calibration", 0)),
+                    "selected_calibration_config_id": str(m.get("selected_calibration_config_id", "")),
+                    "selected_calibration_source": str(m.get("selected_calibration_source", "")),
+                    "calibrated_model_alpha_inhib": float(m.get("calibrated_model_alpha_inhib", float("nan"))),
+                    "calibrated_model_omega_inhib": float(m.get("calibrated_model_omega_inhib", float("nan"))),
+                    "calibrated_model_mu_base": float(m.get("calibrated_model_mu_base", float("nan"))),
+                    "calibrated_model_bg_ema": float(m.get("calibrated_model_bg_ema", float("nan"))),
+                    "selected_calibration_rank": float(m.get("selected_calibration_rank", float("nan"))),
+                    "selected_calibration_proposed_field_logloss_mean": float(
+                        m.get("selected_calibration_proposed_field_logloss_mean", float("nan"))
+                    ),
+                    "selected_calibration_proposed_field_brier_mean": float(
+                        m.get("selected_calibration_proposed_field_brier_mean", float("nan"))
+                    ),
+                    "selected_calibration_proposed_nll_mean": float(
+                        m.get("selected_calibration_proposed_nll_mean", float("nan"))
+                    ),
+                    "selected_calibration_nll_improvement_pct_mean": float(
+                        m.get("selected_calibration_nll_improvement_pct_mean", float("nan"))
+                    ),
                     "model_deterring_gate_policy": str(m.get("model_deterring_gate_policy", "")),
                     "model_deterring_pass_sprt": int(m.get("model_deterring_pass_sprt", 0)),
                     "model_deterring_rejected_sprt_pending": int(m.get("model_deterring_rejected_sprt_pending", 0)),
@@ -107,8 +226,10 @@ def _flatten_run_metrics(result, seed_start, exp_id, scenario_id, tune_id, time_
                     "model_deterring_rejected_chance": int(m.get("model_deterring_rejected_chance", 0)),
                     "model_deterring_pass_utility_ratio": int(m.get("model_deterring_pass_utility_ratio", 0)),
                     "model_deterring_rejected_utility_ratio": int(m.get("model_deterring_rejected_utility_ratio", 0)),
+                    "model_deterring_pass_selection_weight": int(m.get("model_deterring_pass_selection_weight", 0)),
                     "model_deterring_rejected_selection_weight": int(m.get("model_deterring_rejected_selection_weight", 0)),
                     "model_deterring_pass_capacity": int(m.get("model_deterring_pass_capacity", 0)),
+                    "model_deterring_capacity_pending": int(m.get("model_deterring_capacity_pending", 0)),
                     "model_deterring_rejected_capacity": int(m.get("model_deterring_rejected_capacity", 0)),
                     "model_deterring_llr_mean": float(m.get("model_deterring_llr_mean", float("nan"))),
                     "model_deterring_llr_max": float(m.get("model_deterring_llr_max", float("nan"))),
@@ -194,6 +315,11 @@ def _run_one_experiment(job):
         time_metrics_period_s=float(job["time_metrics_period_s"]),
         proposed_enable_model_scored_deterring=bool(job.get("tune_proposed_enable_model_scored_deterring", 1)),
         proposed_enable_intervention_feedback=bool(job.get("tune_proposed_enable_intervention_feedback", 1)),
+        proposed_preventive_policy=(job.get("proposed_preventive_policy") or None),
+        use_frozen_calibration=bool(job.get("use_frozen_calibration", False)),
+        calibration_ranking_path=(job.get("calibration_ranking_path") or None),
+        calibration_manifest_path=(job.get("calibration_manifest_path") or None),
+        calibration_config_id=(job.get("calibration_config_id") or None),
         **run_kwargs,
     )
 
@@ -288,6 +414,12 @@ def _run_one_experiment(job):
         "num_runs": num_runs,
         "seed_start": seed_start,
         "time_horizon_h": time_horizon_h,
+        "planner_profile": str(run_kwargs.get("planner_profile", "")),
+        "proposed_preventive_policy": str(job.get("proposed_preventive_policy", "")),
+        "use_frozen_calibration": int(bool(job.get("use_frozen_calibration", False))),
+        "calibration_ranking_path": str(job.get("calibration_ranking_path", "")),
+        "calibration_manifest_path": str(job.get("calibration_manifest_path", "")),
+        "calibration_config_id": str(job.get("calibration_config_id", "")),
         "params": str(run_kwargs),
         "tune_enable_winner_profile": int(job.get("tune_enable_winner_profile", 0)),
         "tune_winner_profile_id": str(job.get("tune_winner_profile_id", "F1")),
@@ -1892,8 +2024,17 @@ def _build_grids(profile: str, tune_preset: str = "full", scenario_scope: str = 
     return scenario_grid, tune_grid
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Parallel 24h experiment sweep")
+def main(argv: list[str] | None = None):
+    parser = argparse.ArgumentParser(
+        description="Parallel 24h experiment sweep",
+        epilog=(
+            "Example thesis selective proposed run:\n"
+            "  python run_24h_experiment_parallel.py --profile final --scenario-scope s23 "
+            "--time-horizons-h 24 --max-workers 8 --planner-profile thesis_calibrated_selective_proposed "
+            "--proposed-preventive-policy sprt_capacity --use-frozen-calibration --calibration-config-id C37"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     add_config_argument(parser)
     parser.add_argument("--profile", choices=["fast", "final"], default="final")
     parser.add_argument("--max-workers", type=int, default=0, help="0 => auto")
@@ -1913,6 +2054,38 @@ def main():
     )
     parser.add_argument("--time-metrics-period-s", type=float, default=900.0, help="Sampling period for over-time metrics")
     parser.add_argument(
+        "--planner-profile",
+        default="",
+        help="Optional production planner profile, e.g. thesis_calibrated_selective_proposed.",
+    )
+    parser.add_argument(
+        "--proposed-preventive-policy",
+        choices=VALID_PREVENTIVE_POLICIES,
+        default="",
+        help="Explicit preventive policy override for the proposed baseline only.",
+    )
+    parser.add_argument(
+        "--use-frozen-calibration",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable frozen SESTPP calibration for the proposed baseline only.",
+    )
+    parser.add_argument(
+        "--calibration-ranking-path",
+        default="",
+        help="Optional frozen-calibration ranking CSV path.",
+    )
+    parser.add_argument(
+        "--calibration-manifest-path",
+        default="",
+        help="Optional frozen-calibration manifest JSON path.",
+    )
+    parser.add_argument(
+        "--calibration-config-id",
+        default="",
+        help="Optional frozen-calibration config id, e.g. C37.",
+    )
+    parser.add_argument(
         "--enable-winner-profile",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -1924,7 +2097,10 @@ def main():
         default="F1",
         help="Winner profile variant to apply when --enable-winner-profile is set.",
     )
-    args, config_meta = parse_args_with_config(parser, aliases=EXPERIMENT_RUNNER_CONFIG_ALIASES)
+    args, config_meta = parse_args_with_config(parser, aliases=EXPERIMENT_RUNNER_CONFIG_ALIASES, argv=argv)
+    requested_runtime_controls = _resolve_requested_runtime_controls(args)
+    for key, value in requested_runtime_controls.items():
+        setattr(args, key, value)
 
     seed_start = int(args.seed_start)
     if args.max_workers > 0:
@@ -1956,6 +2132,8 @@ def main():
         "telemetry_clear_on_start": False,
         "telemetry_prompt_save": False,
     }
+    if args.planner_profile:
+        base_params["planner_profile"] = str(args.planner_profile)
     if args.tune_preset == "diagnostic_like":
         # Match diagnostic_compare_systems defaults for fair A/B validation.
         base_params["dt"] = 5.0 if args.dt <= 0 else float(args.dt)
@@ -1979,6 +2157,7 @@ def main():
         tune_preset=str(args.tune_preset),
         scenario_scope=str(args.scenario_scope),
     )
+    tune_grid = [_normalize_tune_entry(t) for t in tune_grid]
     horizons_h = [float(x.strip()) for x in str(args.time_horizons_h).split(",") if x.strip()]
     if not horizons_h:
         horizons_h = [24.0]
@@ -2125,6 +2304,11 @@ def main():
                         "tune_omega_inhib": float(t.get("tune_omega_inhib", t.get("omega_inhib", float("nan")))),
                         "tune_enable_winner_profile": int(bool(args.enable_winner_profile)),
                         "tune_winner_profile_id": str(args.winner_profile_id),
+                        "proposed_preventive_policy": str(args.proposed_preventive_policy),
+                        "use_frozen_calibration": bool(args.use_frozen_calibration),
+                        "calibration_ranking_path": str(args.calibration_ranking_path),
+                        "calibration_manifest_path": str(args.calibration_manifest_path),
+                        "calibration_config_id": str(args.calibration_config_id),
                         "time_metrics_period_s": float(args.time_metrics_period_s),
                     }
                 )
@@ -2193,6 +2377,7 @@ def main():
         config_meta=config_meta,
         extra={
             "base_params": json.loads(json.dumps(base_params, default=str)),
+            "requested_runtime_controls": dict(requested_runtime_controls),
             "winner_profile_overrides": json.loads(json.dumps(winner_profile_overrides, default=str)),
             "job_count": int(len(jobs)),
         },

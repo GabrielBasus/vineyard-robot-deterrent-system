@@ -1,0 +1,80 @@
+{
+  "created_utc": "2026-03-03T18:38:01.931616Z",
+  "checkpoint_dir": "results\\checkpoints\\planner_dispatch_2026-03-03",
+  "files": {
+    "baseline_comparison_24h_sweep_parallel_fast_planner_tune_s2.csv": {
+      "sha256": "ab6ee6218b8a1c17692656993f6188b39535434db60f8f8585500b9ff39c8120",
+      "bytes": 33551
+    },
+    "baseline_comparison_24h_sweep_parallel_fast_planner_tune_s3.csv": {
+      "sha256": "67894ad27ce3893b371a755b982c3076507d680304feaab2d64d9938fdc26bff",
+      "bytes": 25501
+    },
+    "baseline_runs_24h_sweep_parallel_fast_planner_tune_s2.csv": {
+      "sha256": "4d9e522734b62adb76eb34882fa18e65006696c344dd184603167087fa9a423f",
+      "bytes": 29074
+    },
+    "baseline_runs_24h_sweep_parallel_fast_planner_tune_s3.csv": {
+      "sha256": "34ec7cf4337a3b0e68049685d8caff95702e4e824accc60ce27eaf46f52cd340",
+      "bytes": 16038
+    },
+    "CHECKPOINT_SUMMARY.md": {
+      "sha256": "28ca0353d5bf35225db056692697462c592f483be5506c5596441769d01cbcdb",
+      "bytes": 1183
+    },
+    "diagnostic_report.json": {
+      "sha256": "c168a6fa458d359ffe4af8e47e67cf28526694ea55fbcfc3d73f7f892fe41a99",
+      "bytes": 11593
+    },
+    "experiment_manifest_24h_sweep_parallel_fast_planner_tune_s2.csv": {
+      "sha256": "2439773502e35762d9be17f068b71e314b44c3eb91b0e0f37ea1bce3d8f0ff81",
+      "bytes": 12741
+    },
+    "experiment_manifest_24h_sweep_parallel_fast_planner_tune_s3.csv": {
+      "sha256": "6c8b7d99a4b9b65bae9362f6703f36fccbd6f39ccbbeeaa7f9466bb64e08877a",
+      "bytes": 12896
+    },
+    "parameter_comparison_ground_truth_vs_proposed.csv": {
+      "sha256": "5debb7ac95e50c3fb3486d33b325c8a523134930bad1a8464edab93257352929",
+      "bytes": 1102
+    },
+    "planner_tune_improvement_summary.csv": {
+      "sha256": "69b75bc5cd456861878e48f125725a35131cc2279a14d5d8385365cc811f88db",
+      "bytes": 4834
+    },
+    "plot_exposure_improvement_by_tune.png": {
+      "sha256": "b69449d2594b40baf3f8fbaf38305be417a25a96635110ba64beff934e63b46a",
+      "bytes": 58340
+    },
+    "plot_horizon_sensitivity_p01_p02.png": {
+      "sha256": "ebe41ef9ab89932d45031ac22ac134cd58c0585616d0b6b1454fe32f39fddc59",
+      "bytes": 38511
+    },
+    "plot_model_deterring_funnel_best_tunes.png": {
+      "sha256": "fdc0ef54711efd0ad83a689f0c144967f7fb4e51d20a9aa6d4f044ffb7b2281c",
+      "bytes": 76476
+    },
+    "plot_tradeoff_exposure_vs_comm.png": {
+      "sha256": "5d52758a7e5e7e6d294792449280b81cd52287d8e824148dbe143cd4cd1fc8ee",
+      "bytes": 71376
+    },
+    "REPRODUCE.md": {
+      "sha256": "c4428e0e90b951f0d29e588fb32f9152af8d580297d3de3c133da70b01015231",
+      "bytes": 1278
+    },
+    "thesis_summary_24h_sweep_parallel_fast_planner_tune.csv": {
+      "sha256": "cab2647259640e6d4f728230bf5163ede21e31b618c270854a1d372236af5203",
+      "bytes": 10033
+    },
+    "thesis_summary_24h_sweep_parallel_fast_planner_tune_s2.csv": {
+      "sha256": "041248122167b54d93481586d698a77474ac92a150ba22439faa9b82a607c947",
+      "bytes": 35210
+    },
+    "thesis_summary_24h_sweep_parallel_fast_planner_tune_s3.csv": {
+      "sha256": "971e4d5e6207064a3e576c46a7e02fa712e44e4614f280df48fefa3cc1a130ad",
+      "bytes": 27153
+    }
+  },
+  "git_head_short": "d33f0e9",
+  "git_status_short": "M DeterrentSystem.py\n M EXPERIMENTS.md\n M TaskGenerator.py\n M plot_experiment_results.py\n M results/bar_mean_comm_overhead.png\n M results/bar_mean_exposure.png\n M results/bar_mean_response_time.png\n M results/bar_mean_task_efficiency.png\n M results/boxplot_comm_overhead.png\n M results/boxplot_exposure.png\n M results/boxplot_response_time.png\n M results/boxplot_task_efficiency.png\n M results/mean_rank_heatmap.png\n M results/tradeoff_exposure_vs_response_S1_low_pressure_short_range.png\n M results/winner_count_by_baseline.png\n M run_24h_experiment.py\n M run_24h_experiment_parallel.py\n?? demo_live_day_vineyard.py\n?? diagnostic_compare_systems.py\n?? diagnostic_sestpp_subsystem.py\n?? results/bar_mean_forecast_precision_at_k.png\n?? results/bar_mean_robot_idle_fraction.png\n?? results/bar_mean_robot_task_utilization.png\n?? results/bar_mean_robots_zero_distance_count.png\n?? results/boxplot_forecast_lead_time_s.png\n?? results/boxplot_forecast_precision_at_k.png\n?? results/boxplot_forecast_recall_at_k.png\n?? results/boxplot_robot_idle_fraction.png\n?? results/boxplot_robot_task_utilization.png\n?? results/boxplot_robots_zero_distance_count.png\n?? results/checkpoints/\n?? results/diagnostic_compare/\n?? results/diagnostic_compare_quick/\n?? results/diagnostics_planner_dispatch_v1_smoke/\n?? results/diagnostics_planner_dispatch_verify/\n?? results/diagnostics_planner_dispatch_verify_10800/\n?? results/diagnostics_post_gate/\n?? results/diagnostics_post_gate_v2/\n?? results/diagnostics_post_gates_v10/\n?? results/diagnostics_post_gates_v3_smoke/\n?? results/diagnostics_post_gates_v4/\n?? results/diagnostics_post_gates_v5/\n?? results/diagnostics_post_gates_v6/\n?? results/diagnostics_post_gates_v7_smoke/\n?? results/diagnostics_post_gates_v8_smoke/\n?? results/diagnostics_post_gates_v9_smoke/\n?? results/line_exposure_over_time.png\n?? results/line_exposure_rate_over_time.png\n?? results/line_fleet_idle_no_task_fraction_over_time.png\n?? results/line_fleet_moving_fraction_over_time.png\n?? results/line_fleet_task_assigned_fraction_over_time.png\n?? results/line_fleet_task_engagement_so_far_over_time.png\n?? results/line_improvement_by_horizon.png\n?? results/line_model_deterring_accepted_over_time.png\n?? results/line_proposed_vs_prediction_improvement_over_time.png\n?? results/line_tasks_per_hour_over_time.png\n?? results/planner_tune_analysis.md\n?? results/sestpp_subsystem_ablations/\n?? results/sestpp_subsystem_check0_unshuffled/\n?? results/sestpp_subsystem_check1_no_interventions/\n?? results/sestpp_subsystem_check1_no_interventions_v2/\n?? results/sestpp_subsystem_check2_shuffled_spacetime/\n?? results/sestpp_subsystem_check2_shuffled_spacetime_v2/\n?? results/sestpp_subsystem_full/\n?? results/sestpp_subsystem_smoke/\n?? thesis_summary_24h_sweep_parallel_fast.md\n?? thesis_summary_24h_sweep_parallel_fast_planner_tune.md\n?? thesis_summary_24h_sweep_parallel_fast_planner_tune_s2.md\n?? thesis_summary_24h_sweep_parallel_fast_planner_tune_s3.md\n?? thesis_summary_24h_sweep_parallel_fast_tuesday_focus.md\n?? thesis_summary_24h_sweep_parallel_fast_tuesday_focus_v2.md\n?? thesis_summary_24h_sweep_parallel_tuesday_focus_v2.md"
+}

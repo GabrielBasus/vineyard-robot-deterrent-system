@@ -1,0 +1,59 @@
+{
+  "seeds": [
+    2000,
+    2001,
+    2002,
+    2003,
+    2004
+  ],
+  "configs": [
+    {
+      "gate_policy": "heuristic",
+      "filter_mode": "percentile",
+      "percentile": 97.0,
+      "keep_top_k": null,
+      "replan": 60.0
+    },
+    {
+      "gate_policy": "sprt_capacity",
+      "filter_mode": "percentile",
+      "percentile": 97.0,
+      "keep_top_k": null,
+      "replan": 60.0
+    }
+  ],
+  "args": {
+    "seeds": "2000,2001,2002,2003,2004",
+    "t_end": 3600.0,
+    "dt": 5.0,
+    "sample_period_s": 300.0,
+    "hotspot_top_k": 5,
+    "hotspot_match_radius_m": 25.0,
+    "patrol_match_radius_m": 25.0,
+    "recent_deterrence_window_s": 300.0,
+    "recent_deterrence_radius_m": 25.0,
+    "local_patch_radius_m": 20.0,
+    "assignment_method": "hungarian",
+    "assignment_distance_cost_per_m": 0.006,
+    "assignment_switch_penalty": 1.0,
+    "assigner_w_task_value": 0.0,
+    "patrol_min_hotspot_score": 0.0001,
+    "patrol_filter_modes": "percentile",
+    "patrol_percentiles": "97",
+    "patrol_keep_top_k_values": "4,5,6",
+    "task_replan_period_values": "60",
+    "patrol_hotspot_score_percentile": 90.0,
+    "patrol_hotspot_keep_top_k": 6,
+    "model_deterring_window_s": 90.0,
+    "model_deterring_gate_policies": "heuristic,sprt_capacity",
+    "model_deterring_sprt_alpha": 0.05,
+    "model_deterring_sprt_beta": 0.2,
+    "model_deterring_chance_threshold": 0.2,
+    "model_deterring_min_deltaj_per_cost": 0.15,
+    "truth_beta_scale": 1.0,
+    "truth_omega_scale": 1.0,
+    "truth_sigma_scale": 1.0,
+    "model_beta_scale": 1.0,
+    "outdir": "results/field_divergence_filter_gate_compare"
+  }
+}

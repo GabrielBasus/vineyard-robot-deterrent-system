@@ -54,17 +54,49 @@ class Robot:
         self.m.advance_time(t - self.m.t_now)
         self.m.add_cross_event(x, y, weight=weight, sigma=sigma, omega=omega)
 
-    def ingest_intervention_event(self, x, y, t, weight=1.0, sigma=None, omega_inhib=None):
+    def ingest_intervention_event(
+        self,
+        x,
+        y,
+        t,
+        weight=1.0,
+        sigma=None,
+        omega_inhib=None,
+        *,
+        mode=None,
+        beta=None,
+        action_id=None,
+    ):
         self.m.advance_time(t - self.m.t_now)
-        self.m.add_intervention_event(x, y, weight=weight, sigma=sigma, omega_inhib=omega_inhib)
+        self.m.add_intervention_event(x, y, weight=weight, sigma=sigma, omega_inhib=omega_inhib, mode=mode)
 
-    def intervention_boundary_events(self, x: float, y: float, t: float, weight=1.0):
+    def intervention_boundary_events(
+        self,
+        x: float,
+        y: float,
+        t: float,
+        weight=1.0,
+        *,
+        mode,
+        sigma,
+        omega_inhib,
+        beta=None,
+        action_id=None,
+    ):
         boundary_events = []
         dist_edge = point_to_poly_distance((x, y), self.zone_polygon)
         if dist_edge <= self.border_radius_m and self.neighbors:
             for nbr in self.neighbors:
-                boundary_events.append({
+                event = {
                     'target_robot': nbr, 'x': float(x), 'y': float(y), 't': float(t),
-                    'weight': float(weight), 'sigma': self.m.sigma, 'omega_inhib': self.m.omega_inhib
-                })
+                    'weight': float(weight),
+                    'mode': mode,
+                    'sigma': float(sigma),
+                    'omega_inhib': float(omega_inhib),
+                }
+                if beta is not None:
+                    event['beta'] = float(beta)
+                if action_id is not None:
+                    event['action_id'] = action_id
+                boundary_events.append(event)
         return boundary_events

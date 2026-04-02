@@ -10,6 +10,9 @@ import pandas as pd
 import DeterrentSystem as ds
 
 
+ARCHIVE_OUTPUTS_DIR = Path("etc/archive_outputs")
+
+
 def _mode_pack(scale_beta=1.0, scale_cost=1.0):
     return {
         "formation": {"beta": 0.30 * scale_beta, "omega": 800.0, "sigma": 18.0, "w_eta": 1.0 * scale_cost, "fixed_cost": 0.0},
@@ -92,6 +95,18 @@ def _select_best_from_summary(summary_path: Path):
     return {"scenario_id": row["scenario_id"], "tune_id": row["tune_id"]}
 
 
+def _resolve_summary_csv(path_str: str) -> Path:
+    requested = Path(path_str)
+    if requested.exists():
+        return requested
+
+    archived = ARCHIVE_OUTPUTS_DIR / requested
+    if archived.exists():
+        return archived
+
+    return requested
+
+
 def main():
     parser = argparse.ArgumentParser(description="Visual demo for best proposed 24h configuration")
     parser.add_argument("--summary-csv", default="thesis_summary_24h_sweep.csv")
@@ -106,7 +121,7 @@ def main():
     scenario_by_id = {s["scenario_id"]: s for s in scenarios}
     tune_by_id = {t["tune_id"]: t for t in tunes}
 
-    best = _select_best_from_summary(Path(args.summary_csv))
+    best = _select_best_from_summary(_resolve_summary_csv(args.summary_csv))
     if best is None:
         scenario_id = "S2_nominal"
         tune_id = "T08"

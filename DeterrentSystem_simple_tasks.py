@@ -73,7 +73,14 @@ class EventBus:
                     else:
                         qx = int(round(x))
                         qy = int(round(y))
-                    k = (str(source_id), str(rid), qx, qy)
+                    k = (
+                        str(source_id),
+                        str(rid),
+                        qx,
+                        qy,
+                        None if ev.get('mode') is None else str(ev.get('mode')),
+                        ev.get('action_id'),
+                    )
                     t_last = float(self._last_intervention_key_t.get(k, -1e18))
                     if (t - t_last) < min_interval_s:
                         self.intervention_msg_dropped_debounce += 1
@@ -83,7 +90,12 @@ class EventBus:
                 self.intervention_bytes += self.bytes_per_intervention_msg
                 self.robots[rid].ingest_intervention_event(
                     x=ev['x'], y=ev['y'], t=ev['t'],
-                    weight=w, sigma=ev.get('sigma'), omega_inhib=ev.get('omega_inhib')
+                    weight=w,
+                    sigma=ev.get('sigma'),
+                    omega_inhib=ev.get('omega_inhib'),
+                    mode=ev.get('mode'),
+                    beta=ev.get('beta'),
+                    action_id=ev.get('action_id'),
                 )
 
 def make_robot_profiles(robots_def, rng, uav_fraction=0.4):
@@ -223,7 +235,7 @@ def run_simulation_frames_persistent(
     detect_rate_per_robot=0.01, detect_sigma_m=10.0,
 
     bird_stay_mean_s=20.0,       # how long a bird lingers near a robot (exp. mean)
-    bird_detection_prob=0.10,    # per-step chance to emit a detection while present
+    bird_detection_prob=0.10,    # truth-event observation probability within range; per-step while present in fallback mode
     per_robot_cooldown_s=10.0,   # minimum time between detections for each robot
     max_detections_per_step=2,   # safety cap per step per robot
     
@@ -482,9 +494,14 @@ def run_simulation_frames_persistent(
     truth_candidate_events = 0
     truth_accepted_events = 0
     truth_suppressed_events = 0
+    truth_detection_opportunities = 0
+    truth_detections_observed = 0
+    truth_detections_missed_range = 0
+    truth_detections_missed_false_negative = 0
     suppression_effect_sum = 0.0
     suppression_effect_by_mode = {}
     suppression_effect_by_source = {"direct_detection": 0.0, "model_scored": 0.0}
+    truth_event_detection_prob = min(max(float(bird_detection_prob), 0.0), 1.0)
     w_cdf = None
     w_shape = None
     dx = W / max(NX - 1, 1)
@@ -562,6 +579,8 @@ def run_simulation_frames_persistent(
 
     def _process_truth_event(x, y, t_now, enqueue_tasks=True, record_metrics=True):
         nonlocal value_weighted_exposure
+        nonlocal truth_detection_opportunities, truth_detections_observed
+        nonlocal truth_detections_missed_range, truth_detections_missed_false_negative
         truth_events.append((x, y, t_now))
         truth_event_times.append(float(t_now))
         recent_truth.append((x, y, t_now))
@@ -574,10 +593,16 @@ def run_simulation_frames_persistent(
             if zone_rr and point_in_polygon(x, y, zone_rr):
                 owner = zid; break
         if owner is not None:
+            truth_detection_opportunities += 1
             # Only detect if within range of the owning robot
             ox, oy = pose[owner]
             if math.hypot(x - ox, y - oy) > detect_range_m:
+                truth_detections_missed_range += 1
                 return
+            if rng.random() > truth_event_detection_prob:
+                truth_detections_missed_false_negative += 1
+                return
+            truth_detections_observed += 1
             b = robots[owner].ingest_detection(x, y, t_now)
             bus.send_boundary_events(b, source_id=owner)
             if enqueue_tasks:
@@ -1398,24 +1423,44 @@ def run_simulation_frames_persistent(
                                     sigma_u = float(sigma_true)
                                     omega_u = float(omega_true)
                                     mode_label = str(mode) if mode else "direct_detection"
+                                action_id = int(tr.get("id", -1))
                                 recent_deterrences.append({
                                     "x": float(tr["x"]),
                                     "y": float(tr["y"]),
                                     "t": float(t),
                                     "mode": mode_label,
                                     "source": _deterring_source(tr),
-                                    "action_id": int(tr.get("id", -1)),
+                                    "action_id": action_id,
                                     "beta": beta_u,
                                     "sigma": sigma_u,
                                     "omega": omega_u,
                                 })
-                                w = float(params.get("beta", 1.0))
-                                omega_u = float(params.get("omega", robots[rid].m.omega_inhib))
-                                sigma_u = float(params.get("sigma", robots[rid].m.sigma))
+                                feedback_beta = float(params.get("beta", 1.0))
+                                feedback_omega = float(params.get("omega", robots[rid].m.omega_inhib))
+                                feedback_sigma = float(params.get("sigma", robots[rid].m.sigma))
                                 if enable_intervention_feedback:
-                                    robots[rid].ingest_intervention_event(tr["x"], tr["y"], t, weight=w,
-                                                                         sigma=sigma_u, omega_inhib=omega_u)
-                                    b = robots[rid].intervention_boundary_events(tr["x"], tr["y"], t, weight=w)
+                                    robots[rid].ingest_intervention_event(
+                                        tr["x"],
+                                        tr["y"],
+                                        t,
+                                        weight=feedback_beta,
+                                        sigma=feedback_sigma,
+                                        omega_inhib=feedback_omega,
+                                        mode=mode_label,
+                                        beta=feedback_beta,
+                                        action_id=action_id,
+                                    )
+                                    b = robots[rid].intervention_boundary_events(
+                                        tr["x"],
+                                        tr["y"],
+                                        t,
+                                        weight=feedback_beta,
+                                        mode=mode_label,
+                                        sigma=feedback_sigma,
+                                        omega_inhib=feedback_omega,
+                                        beta=feedback_beta,
+                                        action_id=action_id,
+                                    )
                                     bus.send_intervention_events(
                                         b,
                                         source_id=rid,
@@ -1726,6 +1771,10 @@ def run_simulation_frames_persistent(
             "truth_candidate_events": int(truth_candidate_events),
             "truth_accepted_events": int(truth_accepted_events),
             "truth_suppressed_events": int(truth_suppressed_events),
+            "truth_detection_opportunities": int(truth_detection_opportunities),
+            "truth_detections_observed": int(truth_detections_observed),
+            "truth_detections_missed_range": int(truth_detections_missed_range),
+            "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
@@ -1782,6 +1831,10 @@ def run_simulation_frames_persistent(
             "truth_candidate_events": int(truth_candidate_events),
             "truth_accepted_events": int(truth_accepted_events),
             "truth_suppressed_events": int(truth_suppressed_events),
+            "truth_detection_opportunities": int(truth_detection_opportunities),
+            "truth_detections_observed": int(truth_detections_observed),
+            "truth_detections_missed_range": int(truth_detections_missed_range),
+            "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
@@ -1964,6 +2017,10 @@ def run_metrics_experiments(
         "truth_candidate_events": _safe_stats("truth_candidate_events"),
         "truth_accepted_events": _safe_stats("truth_accepted_events"),
         "truth_suppressed_events": _safe_stats("truth_suppressed_events"),
+        "truth_detection_opportunities": _safe_stats("truth_detection_opportunities"),
+        "truth_detections_observed": _safe_stats("truth_detections_observed"),
+        "truth_detections_missed_range": _safe_stats("truth_detections_missed_range"),
+        "truth_detections_missed_false_negative": _safe_stats("truth_detections_missed_false_negative"),
         "truth_suppression_rate": _safe_stats("truth_suppression_rate"),
         "truth_suppression_effect_mean": _safe_stats("truth_suppression_effect_mean"),
         "truth_suppression_effect_sum": _safe_stats("truth_suppression_effect_sum"),

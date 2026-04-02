@@ -1,0 +1,85 @@
+{
+  "config": {
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 80,
+    "NY": 64,
+    "dt": 5.0,
+    "T_end": 600.0,
+    "warmup_s": 300.0,
+    "eval_period_s": 30.0,
+    "forecast_horizon_s": 300.0,
+    "forecast_top_k": 5,
+    "match_radius_m": 20.0,
+    "mu_true": 1e-06,
+    "alpha_true": 0.3,
+    "omega_true": 600.0,
+    "sigma_true": 12.0,
+    "beta_true": 0.3,
+    "row_spacing_m": 4.8,
+    "row_gain": 1.5,
+    "edge_gain": 0.6,
+    "edge_scale_m": 35.0,
+    "intervention_prob": 0.45,
+    "intervention_cooldown_s": 40.0,
+    "intervention_delay_s": 10.0,
+    "intervention_sigma": 12.0,
+    "intervention_omega": 600.0,
+    "intervention_shuffle": "none",
+    "shuffle_time_window_s": 300.0,
+    "model_sigma": 12.0,
+    "model_omega": 600.0,
+    "model_omega_inhib": 900.0,
+    "model_alpha_in": 0.25,
+    "model_alpha_cross": 0.0,
+    "model_alpha_inhib": 0.45,
+    "model_mu_base": 5e-05,
+    "model_bg_ema": 1e-06,
+    "runs": 1,
+    "seed_start": 2026,
+    "final_map_recent_truth": 400,
+    "final_map_recent_interventions": 120
+  },
+  "summary": {
+    "delta_field_brier_proposed_minus_prediction": {
+      "mean": -0.06300346484102504,
+      "std": 0.0,
+      "n": 1
+    },
+    "delta_field_logloss_proposed_minus_prediction": {
+      "mean": -1.2855634721201668,
+      "std": 0.0,
+      "n": 1
+    },
+    "delta_field_rate_l1_proposed_minus_prediction": {
+      "mean": -8.686160938620592e-05,
+      "std": 0.0,
+      "n": 1
+    },
+    "delta_event_cell_probability_mean_proposed_minus_prediction": {
+      "mean": -0.04047557615534603,
+      "std": 0.0,
+      "n": 1
+    },
+    "delta_nll_proposed_minus_prediction": {
+      "mean": -111588.015734658,
+      "std": 0.0,
+      "n": 1
+    },
+    "brier_improvement_pct": {
+      "mean": 7.016066158123157,
+      "std": 0.0,
+      "n": 1
+    },
+    "logloss_improvement_pct": {
+      "mean": 8.24181568268026,
+      "std": 0.0,
+      "n": 1
+    },
+    "nll_improvement_pct": {
+      "mean": 14.036339161921894,
+      "std": 0.0,
+      "n": 1
+    }
+  }
+}

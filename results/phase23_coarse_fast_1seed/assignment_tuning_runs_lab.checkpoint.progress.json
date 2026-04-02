@@ -1,0 +1,19 @@
+{
+  "checkpoint_version": 3,
+  "num_rows": 972,
+  "last_completed_scenario": "d0.006_s1_rp90_tv0.6_rt0.6_mp4_eta90_sm0.3_bh4_bmcph_bu6_dw120_mdj0_bt0.35",
+  "last_completed_pair": {
+    "baseline": "proposed",
+    "assignment_method": "hungarian"
+  },
+  "num_runs": 1,
+  "seed_start": 12000,
+  "baselines": [
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "hungarian"
+  ],
+  "max_workers": 16
+}

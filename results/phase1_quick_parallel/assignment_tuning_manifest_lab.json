@@ -1,0 +1,42 @@
+{
+  "num_runs": 1,
+  "seed_start": 2000,
+  "seed_list": [
+    2000
+  ],
+  "t_end": 600.0,
+  "dt": 5.0,
+  "baselines": [
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "frozen_greedy",
+    "hungarian"
+  ],
+  "distance_costs": [
+    0.005
+  ],
+  "switch_penalties": [
+    0.5
+  ],
+  "replan_periods_s": [
+    90
+  ],
+  "resume": true,
+  "checkpoint_path": "results\\phase1_quick_parallel\\assignment_tuning_runs_lab.checkpoint.csv",
+  "max_workers": 2,
+  "best_hungarian_scenario": {
+    "best_scenario": "d0.005_s0.5_rp90",
+    "row": {
+      "scenario_id": "d0.005_s0.5_rp90",
+      "assignment_method": "hungarian",
+      "exp_improve_pct_mean": 0.0,
+      "resp_improve_pct_mean": 0.0,
+      "comm_increase_pct_mean": 0.0,
+      "runtime_ms_mean": 0.8292857258181486,
+      "failures_mean": 0.0,
+      "hard_reject": false
+    }
+  }
+}

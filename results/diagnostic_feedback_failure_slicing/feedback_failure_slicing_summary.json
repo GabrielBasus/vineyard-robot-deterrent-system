@@ -1,0 +1,144 @@
+{
+  "parameters": {
+    "runs": 8,
+    "seed_start": 2026,
+    "T_end": 10800.0,
+    "dt": 5.0,
+    "warmup_s": 1800.0,
+    "eval_period_s": 30.0,
+    "forecast_horizon_s": 300.0,
+    "sample_every_s": 30.0,
+    "bin_s": 30.0,
+    "task_replan_period_s": 60.0,
+    "hotspot_top_k": 5,
+    "match_radius_m": 25.0,
+    "support_radius_m": 25.0,
+    "patrol_hotspot_filter_mode": "percentile",
+    "patrol_hotspot_score_percentile": 97.0,
+    "alpha_inhib": 0.45,
+    "omega_inhib": 600.0,
+    "mu_base": 5e-05,
+    "bg_ema": 1e-06,
+    "intervention_shuffle": "none"
+  },
+  "outcome_summary": {
+    "exposure_improve_pct_mean": 0.08583678992807103,
+    "exposure_improve_pct_std": 1.3197529901071368,
+    "response_improve_pct_mean": -2.2043358597369953,
+    "response_improve_pct_std": 3.250163060580132,
+    "comm_increase_pct_mean": 54.71135903675142,
+    "runs_exposure_positive": 4,
+    "runs_response_positive": 2,
+    "runs_both_positive": 0
+  },
+  "top_exposure_correlates": [
+    {
+      "metric": "hotspot_detection_count_delta",
+      "pearson_r": -0.7946094996532426,
+      "spearman_r": -0.880952380952381,
+      "has_finite_correlation": true,
+      "abs_score": 0.880952380952381,
+      "valid_n": 8,
+      "metric_mean": -0.14127423822714683,
+      "metric_std": 0.026172521514681107
+    },
+    {
+      "metric": "p90_assign_lag_delta_s",
+      "pearson_r": 0.8704505691581417,
+      "spearman_r": 0.8571428571428572,
+      "has_finite_correlation": true,
+      "abs_score": 0.8704505691581417,
+      "valid_n": 8,
+      "metric_mean": 0.4014533802780571,
+      "metric_std": 4.059308834556018
+    },
+    {
+      "metric": "hotspot_detection_hit_delta",
+      "pearson_r": -0.8045256537008777,
+      "spearman_r": -0.8434347122457898,
+      "has_finite_correlation": true,
+      "abs_score": 0.8434347122457898,
+      "valid_n": 8,
+      "metric_mean": -0.12520775623268698,
+      "metric_std": 0.02139967636102822
+    },
+    {
+      "metric": "detection_boundary_corr_delta",
+      "pearson_r": -0.8161045105635594,
+      "spearman_r": -0.5476190476190477,
+      "has_finite_correlation": true,
+      "abs_score": 0.8161045105635594,
+      "valid_n": 8,
+      "metric_mean": -0.01586732636127014,
+      "metric_std": 0.05965052242601539
+    },
+    {
+      "metric": "hotspot_overlap_mean",
+      "pearson_r": -0.7789545481518738,
+      "spearman_r": -0.6666666666666669,
+      "has_finite_correlation": true,
+      "abs_score": 0.7789545481518738,
+      "valid_n": 8,
+      "metric_mean": 0.04445983379501385,
+      "metric_std": 0.021289579965677697
+    }
+  ],
+  "top_response_correlates": [
+    {
+      "metric": "completion_lag_delta_s",
+      "pearson_r": -0.890590803486654,
+      "spearman_r": -0.7619047619047621,
+      "has_finite_correlation": true,
+      "abs_score": 0.890590803486654,
+      "valid_n": 8,
+      "metric_mean": 1.4679211930812741,
+      "metric_std": 3.585908899699307
+    },
+    {
+      "metric": "direct_completion_ratio_delta",
+      "pearson_r": -0.7339907466817988,
+      "spearman_r": -0.8333333333333335,
+      "has_finite_correlation": true,
+      "abs_score": 0.8333333333333335,
+      "valid_n": 8,
+      "metric_mean": -1.6076659109062752e-05,
+      "metric_std": 0.005330782260937502
+    },
+    {
+      "metric": "active_patrol_truth_count_delta",
+      "pearson_r": -0.5163137606977506,
+      "spearman_r": -0.8095238095238096,
+      "has_finite_correlation": true,
+      "abs_score": 0.8095238095238096,
+      "valid_n": 8,
+      "metric_mean": -0.0024067675893385447,
+      "metric_std": 0.014163537910457316
+    },
+    {
+      "metric": "active_patrol_truth_hit_delta",
+      "pearson_r": -0.44548687073657417,
+      "spearman_r": -0.8095238095238096,
+      "has_finite_correlation": true,
+      "abs_score": 0.8095238095238096,
+      "valid_n": 8,
+      "metric_mean": -0.00291693144446776,
+      "metric_std": 0.01141596666220148
+    },
+    {
+      "metric": "active_direct_fano_delta",
+      "pearson_r": 0.7892208299652667,
+      "spearman_r": 0.6904761904761906,
+      "has_finite_correlation": true,
+      "abs_score": 0.7892208299652667,
+      "valid_n": 8,
+      "metric_mean": 0.12833050769690713,
+      "metric_std": 1.4286547160939846
+    }
+  ],
+  "conclusions": [
+    "Feedback-on proposed is not robust across seeds on exposure.",
+    "Field-level feedback benefit remains positive on average across the same seeds.",
+    "Strongest exposure correlate: `hotspot_detection_count_delta` (pearson `-0.7946094996532426`, spearman `-0.880952380952381`).",
+    "Strongest response correlate: `completion_lag_delta_s` (pearson `-0.890590803486654`, spearman `-0.7619047619047621`)."
+  ]
+}

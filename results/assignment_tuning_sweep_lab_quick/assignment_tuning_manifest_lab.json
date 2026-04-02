@@ -1,0 +1,40 @@
+{
+  "num_runs": 1,
+  "seed_start": 2000,
+  "seed_list": [
+    2000
+  ],
+  "t_end": 600.0,
+  "dt": 5.0,
+  "baselines": [
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "frozen_greedy",
+    "hungarian"
+  ],
+  "distance_costs": [
+    0.0,
+    0.002
+  ],
+  "switch_penalties": [
+    0.0
+  ],
+  "replan_periods_s": [
+    45
+  ],
+  "best_hungarian_scenario": {
+    "best_scenario": "d0.002_s0_rp45",
+    "row": {
+      "scenario_id": "d0.002_s0_rp45",
+      "assignment_method": "hungarian",
+      "exp_improve_pct_mean": 0.0,
+      "resp_improve_pct_mean": 0.0,
+      "comm_increase_pct_mean": 37.5,
+      "runtime_ms_mean": 0.763764272310904,
+      "failures_mean": 0.0,
+      "hard_reject": false
+    }
+  }
+}

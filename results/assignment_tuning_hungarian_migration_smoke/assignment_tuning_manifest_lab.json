@@ -1,0 +1,212 @@
+{
+  "num_runs": 1,
+  "seed_start": 2000,
+  "seed_list": [
+    2000
+  ],
+  "t_end": 300.0,
+  "dt": 5.0,
+  "baselines": [
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "hungarian"
+  ],
+  "stage": "phase1",
+  "distance_costs": [
+    0.006
+  ],
+  "switch_penalties": [
+    1.0
+  ],
+  "replan_periods_s": [
+    60
+  ],
+  "assigner_w_task_values": [
+    0.0
+  ],
+  "model_deterring_gate_policy": [
+    "heuristic"
+  ],
+  "model_deterring_sprt_alpha": [
+    0.05
+  ],
+  "model_deterring_sprt_beta": [
+    0.2
+  ],
+  "model_deterring_chance_threshold": [
+    0.2
+  ],
+  "model_deterring_min_deltaJ_per_cost": [
+    0.15
+  ],
+  "model_deterring_capacity_rho_max": [
+    0.85
+  ],
+  "model_deterring_risk_thresholds": [
+    0.35
+  ],
+  "model_deterring_min_persistence_replans": [
+    2
+  ],
+  "model_deterring_max_eta_s": [
+    120.0
+  ],
+  "model_deterring_score_margin": [
+    0.05
+  ],
+  "model_deterring_budget_per_robot_per_hr": [
+    4
+  ],
+  "model_deterring_budget_mode": [
+    "count_per_hour"
+  ],
+  "model_deterring_budget_utility_per_robot_per_hr": [
+    5.0
+  ],
+  "model_deterring_window_s": [
+    90.0
+  ],
+  "min_predicted_deltaJ_for_model_deterring": [
+    0.0
+  ],
+  "beta_true_values": [
+    0.35
+  ],
+  "phase1_manifest": "",
+  "use_phase1_winner": true,
+  "planner_profile": "",
+  "planner_profile_values": {},
+  "workflow_stage": {
+    "stage_key": "assignment_tuning",
+    "stage_title": "Planner / Assignment Tuning",
+    "stage_order": 4,
+    "stage_total": 6,
+    "runner": "run_assignment_tuning_sweep_lab.py",
+    "depends_on": [
+      "field_divergence_confirm"
+    ],
+    "optional": false,
+    "order_note": "Tune dispatch and gating only after the field-divergence mechanism is confirmed, otherwise planner fixes may optimize around a model artifact.",
+    "question": "Which planner, assignment, and gating settings preserve exposure gains without unacceptable response, communication, or solver regressions?"
+  },
+  "tuning_substage": "phase1",
+  "tuning_substage_note": "Screen dispatch distance cost, switch penalty, and replan cadence to pick the fixed Hungarian dispatch setting.",
+  "resume": false,
+  "checkpoint_path": "results\\assignment_tuning_hungarian_migration_smoke\\assignment_tuning_runs_lab.checkpoint.csv",
+  "max_workers": 1,
+  "config": {
+    "config_path": "",
+    "raw_config": {},
+    "config_overrides": {}
+  },
+  "best_hungarian_scenario": {
+    "best_scenario": "d0.006_s1_rp60_tv0_gpheuristic_sa0.05_sb0.2_ct0.2_ucr0.15_rho0.85_rt0.35_mp2_eta120_sm0.05_bh4_bmcph_bu5_dw90_mdj0_bt0.35",
+    "row": {
+      "scenario_id": "d0.006_s1_rp60_tv0_gpheuristic_sa0.05_sb0.2_ct0.2_ucr0.15_rho0.85_rt0.35_mp2_eta120_sm0.05_bh4_bmcph_bu5_dw90_mdj0_bt0.35",
+      "assignment_method": "hungarian",
+      "assignment_distance_cost_per_m": 0.006,
+      "assignment_switch_penalty": 1.0,
+      "task_replan_period_s": 60.0,
+      "assigner_w_task_value": 0.0,
+      "model_deterring_gate_policy": "heuristic",
+      "model_deterring_sprt_alpha": 0.05,
+      "model_deterring_sprt_beta": 0.2,
+      "model_deterring_chance_threshold": 0.2,
+      "model_deterring_min_deltaJ_per_cost": 0.15,
+      "model_deterring_capacity_rho_max": 0.85,
+      "model_deterring_risk_threshold": 0.35,
+      "model_deterring_min_persistence_replans": 2.0,
+      "model_deterring_max_eta_s": 120.0,
+      "model_deterring_score_margin": 0.05,
+      "model_deterring_budget_per_robot_per_hr": 4.0,
+      "model_deterring_budget_mode": "count_per_hour",
+      "model_deterring_budget_utility_per_robot_per_hr": 5.0,
+      "model_deterring_window_s": 90.0,
+      "min_predicted_deltaJ_for_model_deterring": 0.0,
+      "beta_true": 0.35,
+      "exp_improve_pct_mean": 0.0,
+      "resp_improve_pct_mean": 0.0,
+      "comm_increase_pct_mean": 0.0,
+      "proposed_yield_ratio_model_scored_mean": NaN,
+      "proposed_queue_depth_total_mean": 12.278688524590164,
+      "proposed_stale_task_evictions_count_mean": 44.0,
+      "runtime_ms_mean": 1.2516667290280263,
+      "failures_mean": 0.0,
+      "hard_reject": false
+    }
+  },
+  "diagnostic_metrics_exported": [
+    "predicted_deltaJ_sum",
+    "realized_suppression_sum",
+    "yield_ratio_total",
+    "yield_ratio_direct_detection",
+    "yield_ratio_model_scored",
+    "queue_depth_total_mean",
+    "queue_depth_patrolling_mean",
+    "queue_depth_deterring_mean",
+    "queue_depth_model_deterring_mean",
+    "queue_depth_total_max",
+    "queue_depth_patrolling_max",
+    "queue_depth_deterring_max",
+    "queue_depth_model_deterring_max",
+    "stale_task_evictions_count",
+    "robot_moving_fraction_mean",
+    "robot_active_task_fraction_mean",
+    "model_deterring_accepted",
+    "model_deterring_generated",
+    "model_deterring_candidates_total",
+    "model_deterring_rejected_cooldown",
+    "model_deterring_rejected_field",
+    "model_deterring_pass_field",
+    "model_deterring_rejected_predicted_deltaJ",
+    "model_deterring_pass_predicted_deltaJ",
+    "model_deterring_pass_sprt",
+    "model_deterring_rejected_sprt_pending",
+    "model_deterring_rejected_sprt_negative",
+    "model_deterring_pass_chance",
+    "model_deterring_rejected_chance",
+    "model_deterring_pass_utility_ratio",
+    "model_deterring_rejected_utility_ratio",
+    "model_deterring_pass_capacity",
+    "model_deterring_rejected_capacity",
+    "model_deterring_pass_risk",
+    "model_deterring_pass_support",
+    "model_deterring_rejected_risk",
+    "model_deterring_rejected_support",
+    "model_deterring_rejected_persistence",
+    "model_deterring_rejected_repeat_no_new_support",
+    "model_deterring_rejected_margin",
+    "model_deterring_rejected_eta",
+    "model_deterring_rejected_busy",
+    "model_deterring_rejected_budget",
+    "model_deterring_rejected_budget_count_mode",
+    "model_deterring_rejected_budget_utility_mode",
+    "model_deterring_budget_spent_count_per_robot_hr_mean",
+    "model_deterring_budget_spent_count_per_robot_hr_max",
+    "model_deterring_budget_spent_utility_per_robot_hr_mean",
+    "model_deterring_budget_spent_utility_per_robot_hr_max",
+    "model_deterring_llr_mean",
+    "model_deterring_llr_max",
+    "model_deterring_p_event_mean",
+    "model_deterring_deltaJ_per_cost_mean",
+    "preventive_service_rate_per_robot_mean",
+    "preventive_direct_arrival_rate_per_robot_mean",
+    "preventive_capacity_remaining_per_robot_mean",
+    "planner_replaced_low_utility_count",
+    "assigned_task_value_mean",
+    "assignment_solver_assigned_mean",
+    "assignment_solver_objective_mean"
+  ],
+  "output_files": {
+    "runs_csv": "results\\assignment_tuning_hungarian_migration_smoke\\assignment_tuning_runs_lab.csv",
+    "summary_csv": "results\\assignment_tuning_hungarian_migration_smoke\\assignment_tuning_summary_lab.csv",
+    "method_deltas_csv": "results\\assignment_tuning_hungarian_migration_smoke\\assignment_tuning_method_deltas_lab.csv",
+    "proposed_vs_prediction_csv": "results\\assignment_tuning_hungarian_migration_smoke\\assignment_tuning_proposed_vs_prediction_lab.csv",
+    "phase1_summary_csv": "results\\assignment_tuning_hungarian_migration_smoke\\assignment_tuning_phase1_summary_lab.csv",
+    "phase2_ranking_csv": "results\\assignment_tuning_hungarian_migration_smoke\\assignment_tuning_phase2_ranking_lab.csv",
+    "phase4_ranking_csv": "results\\assignment_tuning_hungarian_migration_smoke\\assignment_tuning_phase4_ranking_lab.csv",
+    "calibration_csv": "results\\assignment_tuning_hungarian_migration_smoke\\model_deterring_calibration_lab.csv"
+  }
+}

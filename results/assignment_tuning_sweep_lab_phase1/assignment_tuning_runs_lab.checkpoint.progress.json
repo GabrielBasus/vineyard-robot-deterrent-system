@@ -1,0 +1,15 @@
+{
+  "checkpoint_version": 1,
+  "num_rows": 120,
+  "last_completed_scenario": "d0.004_s0.4_rp105",
+  "num_runs": 10,
+  "seed_start": 2000,
+  "baselines": [
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "frozen_greedy",
+    "hungarian"
+  ]
+}

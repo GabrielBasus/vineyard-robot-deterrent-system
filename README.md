@@ -64,6 +64,14 @@ Launch live dashboard (if telemetry is being flushed by a running sim):
 streamlit run streamlit_app.py
 ```
 
+## Thesis Evaluation Order
+
+Use the staged thesis workflow in [`EXPERIMENT_EXECUTION_ORDER.md`](EXPERIMENT_EXECUTION_ORDER.md). Each stage runner now writes a README into its output directory describing:
+
+- the question that stage answers,
+- the metrics that matter,
+- what counts as failure before you proceed to the next stage.
+
 ## Outputs
 
 Typical experiment outputs include:
@@ -120,6 +128,7 @@ You can also open the generated summary tables:
 Detailed instructions for experiment workflows and CLI options are in:
 
 - `EXPERIMENTS.md`
+- `EXPERIMENT_EXECUTION_ORDER.md`
 
 ## Notes on Visualization vs Batch Runs
 

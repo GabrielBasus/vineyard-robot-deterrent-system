@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 import DeterrentSystem as ds
+from thesis_experiment_workflow import render_execution_order_lines, render_stage_readme_lines
 
 
 SCENARIOS = {
@@ -154,6 +157,14 @@ def _flatten_runs(result: dict, scenario_id: str, robot_count: int, seed_start: 
                     ),
                     "model_deterring_generated": float(m.get("model_deterring_generated", np.nan)),
                     "model_deterring_accepted": float(m.get("model_deterring_accepted", np.nan)),
+                    "preventive_policy": str(m.get("preventive_policy", "")),
+                    "selective_preventive_enabled": float(m.get("selective_preventive_enabled", np.nan)),
+                    "use_frozen_calibration": float(m.get("use_frozen_calibration", np.nan)),
+                    "selected_calibration_config_id": str(m.get("selected_calibration_config_id", "")),
+                    "calibrated_model_alpha_inhib": float(m.get("calibrated_model_alpha_inhib", np.nan)),
+                    "calibrated_model_omega_inhib": float(m.get("calibrated_model_omega_inhib", np.nan)),
+                    "calibrated_model_mu_base": float(m.get("calibrated_model_mu_base", np.nan)),
+                    "calibrated_model_bg_ema": float(m.get("calibrated_model_bg_ema", np.nan)),
                     "intervention_msg_dropped_debounce": float(
                         m.get("intervention_msg_dropped_debounce", np.nan)
                     ),
@@ -304,6 +315,9 @@ def _write_readme(outdir: Path, robot_counts: list[int], scenarios: list[str], n
     lines = []
     lines.append("# Robot Scaling Experiment")
     lines.append("")
+    lines.extend(render_stage_readme_lines("robot_scaling"))
+    lines.append("")
+    lines.append("## Experiment Setup")
     lines.append(f"- Robot counts: {robot_counts}")
     lines.append(f"- Scenarios: {scenarios}")
     lines.append(f"- Runs per setting: {num_runs}")
@@ -320,11 +334,14 @@ def _write_readme(outdir: Path, robot_counts: list[int], scenarios: list[str], n
     lines.append("- `04_model_done_gain_vs_robot_count.png`")
     lines.append("- `05_absolute_exposure_by_baseline_vs_robot_count.png`")
     lines.append("")
-    lines.append("## How to interpret")
-    lines.append("- Exposure curve should trend up (positive) for proposed-vs-prediction as robots increase.")
-    lines.append("- Response curve should not trend strongly negative.")
-    lines.append("- Communication curve should stay near/below +30% target if possible.")
-    lines.append("- Model-done gain should increase with robot count; if not, planner bottlenecks remain.")
+    lines.append("## Pairwise Scaling Interpretation")
+    lines.append("- Every scaling delta is a proposed-vs-prediction comparison on the same scenario, robot count, and seed before CI95 aggregation.")
+    lines.append("- Exposure improvement should grow with robot count or at least stay clearly positive.")
+    lines.append("- Response should not collapse as the fleet grows.")
+    lines.append("- Communication should stay controlled rather than expanding faster than the benefit.")
+    lines.append("- Model-scored deterring gain should rise with robot count if planner bottlenecks are removed.")
+    lines.append("")
+    lines.extend(render_execution_order_lines())
     (outdir / "README.md").write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -338,6 +355,12 @@ def main() -> None:
     parser.add_argument("--seed-start", type=int, default=1000)
     parser.add_argument("--outdir", default="results/robot_scaling")
     parser.add_argument("--report-each-run", action="store_true")
+    parser.add_argument("--planner-profile", default="")
+    parser.add_argument("--proposed-preventive-policy", choices=["off", "heuristic", "sprt_capacity"], default="")
+    parser.add_argument("--use-frozen-calibration", action="store_true")
+    parser.add_argument("--calibration-ranking-path", default="")
+    parser.add_argument("--calibration-manifest-path", default="")
+    parser.add_argument("--calibration-config-id", default="")
     args = parser.parse_args()
 
     robot_counts = _parse_int_list(args.robot_counts)
@@ -351,6 +374,8 @@ def main() -> None:
 
     base_params, default_runs = _build_base_params(args.profile, args.time_horizon_h)
     num_runs = int(args.num_runs) if int(args.num_runs) > 0 else int(default_runs)
+    if args.planner_profile:
+        base_params["planner_profile"] = str(args.planner_profile)
 
     summary_rows = []
     run_rows = []
@@ -371,6 +396,11 @@ def main() -> None:
                 report_each_run=bool(args.report_each_run),
                 csv_path=None,
                 collect_time_metrics=False,
+                proposed_preventive_policy=(args.proposed_preventive_policy or None),
+                use_frozen_calibration=bool(args.use_frozen_calibration),
+                calibration_ranking_path=(args.calibration_ranking_path or None),
+                calibration_manifest_path=(args.calibration_manifest_path or None),
+                calibration_config_id=(args.calibration_config_id or None),
                 **run_kwargs,
             )
 

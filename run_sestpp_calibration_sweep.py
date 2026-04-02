@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from diagnostic_field_truth_compare import SubsystemConfig, simulate_one_run
+from thesis_experiment_workflow import render_execution_order_lines, render_stage_readme_lines, stage_manifest
 
 
 def _parse_float_list(raw: str):
@@ -66,6 +67,55 @@ def _plot_ranking(summary_df: pd.DataFrame, out_png: Path):
     plt.close(fig)
 
 
+def _format_metric(value: object) -> str:
+    try:
+        num = float(value)
+    except Exception:
+        return "nan"
+    if not np.isfinite(num):
+        return "nan"
+    return f"{num:.4f}" if abs(num) >= 1e-3 else f"{num:.3e}"
+
+
+def _write_readme(
+    outdir: Path,
+    run_csv: Path,
+    summary_csv: Path,
+    ranking_csv: Path,
+    manifest_json: Path,
+    summary_df: pd.DataFrame,
+) -> Path:
+    lines = [
+        "# SESTPP Calibration Sweep",
+        "",
+        *render_stage_readme_lines("model_calibration"),
+        "",
+        "## Key Outputs",
+        f"- Per-run CSV: `{run_csv.name}`",
+        f"- Summary CSV: `{summary_csv.name}`",
+        f"- Ranking CSV: `{ranking_csv.name}`",
+        f"- Manifest: `{manifest_json.name}`",
+        "- Ranking plot: `sestpp_calibration_sweep_tradeoff.png`",
+    ]
+    if not summary_df.empty:
+        top = summary_df.iloc[0]
+        lines.extend(
+            [
+                "",
+                "## Current Best-Ranked Config",
+                f"- Config id: `{top['config_id']}`",
+                f"- Proposed field log loss mean +/- CI95: {_format_metric(top['proposed_field_logloss_mean'])} +/- {_format_metric(top['proposed_field_logloss_ci95'])}",
+                f"- Proposed field Brier mean +/- CI95: {_format_metric(top['proposed_field_brier_mean'])} +/- {_format_metric(top['proposed_field_brier_ci95'])}",
+                f"- Proposed NLL mean +/- CI95: {_format_metric(top['proposed_nll_mean'])} +/- {_format_metric(top['proposed_nll_ci95'])}",
+                f"- NLL improvement mean: {_format_metric(top['nll_improvement_pct_mean'])}%",
+            ]
+        )
+    lines.extend(["", *render_execution_order_lines()])
+    readme_path = outdir / "SESTPP_CALIBRATION_README.md"
+    readme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return readme_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="SESTPP-only calibration sweep")
     parser.add_argument("--runs", type=int, default=8)
@@ -106,6 +156,7 @@ def main():
         "base_args": vars(args),
         "num_configs": int(len(grid)),
         "grid": [],
+        "workflow_stage": stage_manifest("model_calibration"),
     }
 
     for idx, (alpha_inhib, omega_inhib, mu_base, bg_ema) in enumerate(grid, start=1):
@@ -231,10 +282,24 @@ def main():
     run_df.to_csv(run_csv, index=False)
     summary_df.to_csv(summary_csv, index=False)
     ranking_df.to_csv(ranking_csv, index=False)
+    manifest["outputs"] = {
+        "per_run_csv": run_csv.name,
+        "summary_csv": summary_csv.name,
+        "ranking_csv": ranking_csv.name,
+        "tradeoff_png": "sestpp_calibration_sweep_tradeoff.png",
+        "readme_md": "SESTPP_CALIBRATION_README.md",
+    }
+    if not summary_df.empty:
+        manifest["best_config_id"] = str(summary_df.iloc[0]["config_id"])
+        manifest["best_config"] = {
+            key: value.item() if hasattr(value, "item") else value
+            for key, value in summary_df.iloc[0].to_dict().items()
+        }
     with open(manifest_json, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
     _plot_ranking(summary_df, outdir / "sestpp_calibration_sweep_tradeoff.png")
+    readme_path = _write_readme(outdir, run_csv, summary_csv, ranking_csv, manifest_json, summary_df)
 
     print("Saved:")
     print(f"- {run_csv}")
@@ -242,6 +307,7 @@ def main():
     print(f"- {ranking_csv}")
     print(f"- {manifest_json}")
     print(f"- {outdir / 'sestpp_calibration_sweep_tradeoff.png'}")
+    print(f"- {readme_path}")
 
 
 if __name__ == "__main__":

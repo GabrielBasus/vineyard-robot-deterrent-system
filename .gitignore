@@ -7,6 +7,9 @@ telemetry*
 
 Backup/
 Spatio-Temporal-Point-Process-Simulator/
+etc/archive_outputs/
+etc/external/
+etc/tmp/
 
 # Data/outputs
 *.csv

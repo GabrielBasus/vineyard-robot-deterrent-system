@@ -9,6 +9,17 @@ This repo includes two experiment runners:
 The first two are designed for 24-hour simulated vineyard experiments and export CSVs for thesis analysis.
 The demo script is for live visualization and presentation.
 
+## Thesis Staged Workflow Checklist
+
+- [ ] Stage 1, model calibration: `python run_sestpp_calibration_sweep.py`
+- [ ] Stage 2, field divergence lab: `python compare_field_divergence_lab.py --config configs/compare_field_divergence_lab.yaml`
+- [ ] Stage 3, field divergence confirm: `python run_field_divergence_confirm_lab.py --config configs/run_field_divergence_confirm_lab.yaml`
+- [ ] Stage 4, planner / assignment tuning: `python run_assignment_tuning_sweep_lab.py --config configs/run_assignment_tuning_sweep_lab.yaml`
+- [ ] Stage 5, assignment-method comparison if still needed: `python run_assignment_method_comparison_lab.py --with-smoke-check` then `python plot_assignment_method_comparison_lab.py`
+- [ ] Stage 6, robot scaling / long-horizon confirmation: `python run_robot_scaling_experiment.py --profile fast`
+- Use the README written into each stage output directory to decide whether the next stage is justified.
+- The concise thesis-methods version of this order is in `EXPERIMENT_EXECUTION_ORDER.md`.
+
 ## Requirements
 
 - Python 3.10+

@@ -190,6 +190,8 @@ def run_matrix(
                         ),
                         "stale_goal_clears": float(r.get("stale_goal_clears", np.nan)),
                         "assignment_solver_runtime_ms": float(r.get("assignment_solver_runtime_ms", np.nan)),
+                        "assignment_solver_assigned_mean": float(r.get("assignment_solver_assigned_mean", np.nan)),
+                        "assignment_solver_objective_mean": float(r.get("assignment_solver_objective_mean", np.nan)),
                         "assignment_solver_calls": float(r.get("assignment_solver_calls", np.nan)),
                         "assignment_solver_conflicts_resolved": float(
                             r.get("assignment_solver_conflicts_resolved", np.nan)
@@ -223,6 +225,8 @@ def build_summary(runs_df: pd.DataFrame) -> pd.DataFrame:
         "deterring_actions_completed_model_scored",
         "stale_goal_clears",
         "assignment_solver_runtime_ms",
+        "assignment_solver_assigned_mean",
+        "assignment_solver_objective_mean",
         "assignment_solver_conflicts_resolved",
         "assignment_solver_unassigned",
         "assignment_solver_rounds_mean",

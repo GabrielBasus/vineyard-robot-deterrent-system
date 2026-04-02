@@ -1,0 +1,96 @@
+{
+  "num_runs": 1,
+  "seed_start": 1000,
+  "seed_list": [
+    1000
+  ],
+  "t_end": 600.0,
+  "dt": 5.0,
+  "baselines": [
+    "reactive",
+    "prediction_only",
+    "proposed"
+  ],
+  "methods": [
+    "frozen_greedy",
+    "hungarian",
+    "auction",
+    "cbba"
+  ],
+  "base_params": {
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 80,
+    "NY": 64,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "warmup_s": 1800.0,
+    "task_replan_period_s": 45.0,
+    "model_deterring_window_s": 90.0,
+    "model_deterring_risk_threshold": 0.35,
+    "model_deterring_budget_per_robot_per_hr": 4,
+    "model_deterring_min_recent_points": 1,
+    "forecast_horizon_s": 300.0,
+    "forecast_match_radius_m": 20.0,
+    "forecast_top_k": 5,
+    "forecast_eval_period_s": 30.0,
+    "telemetry_clear_on_start": false,
+    "telemetry_prompt_save": false,
+    "collect_time_metrics": false,
+    "T_end": 600.0,
+    "dt": 5.0
+  },
+  "winner_selection": {
+    "objective": [
+      "maximize proposed exposure reduction vs prediction_only",
+      "then maximize response improvement",
+      "then minimize communication increase",
+      "then minimize solver runtime"
+    ],
+    "hard_reject": [
+      "unstable or infeasible assignments",
+      "communication increase >100% with exposure gain <0.5%"
+    ],
+    "winner": {
+      "winner": "frozen_greedy",
+      "table": [
+        {
+          "assignment_method": "frozen_greedy",
+          "exp_improve_pct_mean": 4.688650954873162,
+          "resp_improve_pct_mean": 0.8800226031078832,
+          "comm_increase_pct_mean": 54.54545454545455,
+          "runtime_ms_mean": 0.056014283992616196,
+          "unstable": false,
+          "hard_reject": false
+        },
+        {
+          "assignment_method": "hungarian",
+          "exp_improve_pct_mean": 0.0,
+          "resp_improve_pct_mean": 5.523837664575507,
+          "comm_increase_pct_mean": 62.5,
+          "runtime_ms_mean": 1.2285285795639669,
+          "unstable": false,
+          "hard_reject": false
+        },
+        {
+          "assignment_method": "auction",
+          "exp_improve_pct_mean": 0.0,
+          "resp_improve_pct_mean": 6.624540612697099,
+          "comm_increase_pct_mean": 57.142857142857146,
+          "runtime_ms_mean": 1260.8595571405854,
+          "unstable": false,
+          "hard_reject": false
+        },
+        {
+          "assignment_method": "cbba",
+          "exp_improve_pct_mean": 0.0,
+          "resp_improve_pct_mean": -0.609912649068918,
+          "comm_increase_pct_mean": 36.36363636363637,
+          "runtime_ms_mean": 0.2362499986442604,
+          "unstable": false,
+          "hard_reject": false
+        }
+      ]
+    }
+  }
+}

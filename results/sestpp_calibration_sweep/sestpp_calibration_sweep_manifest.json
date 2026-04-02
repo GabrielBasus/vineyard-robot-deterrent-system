@@ -1,0 +1,467 @@
+{
+  "base_args": {
+    "runs": 8,
+    "seed_start": 2026,
+    "T_end": 10800.0,
+    "warmup_s": 1800.0,
+    "dt": 5.0,
+    "forecast_horizon_s": 300.0,
+    "eval_period_s": 30.0,
+    "outdir": "results/sestpp_calibration_sweep",
+    "limit_settings": 0,
+    "intervention_prob": 0.45,
+    "intervention_cooldown_s": 40.0,
+    "intervention_delay_s": 10.0,
+    "intervention_shuffle": "none",
+    "shuffle_time_window_s": 300.0,
+    "beta_true": 0.3,
+    "model_alpha_inhib_values": "0.25,0.35,0.45",
+    "model_omega_inhib_values": "450,600,900",
+    "model_mu_base_values": "5e-5,1e-4,2e-4",
+    "model_bg_ema_values": "1e-7,1e-6"
+  },
+  "num_configs": 54,
+  "grid": [
+    {
+      "config_id": "C01",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C02",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C03",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C04",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C05",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C06",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C07",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C08",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C09",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C10",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C11",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C12",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C13",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C14",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C15",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C16",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C17",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C18",
+      "model_alpha_inhib": 0.25,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C19",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C20",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C21",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C22",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C23",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C24",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C25",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C26",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C27",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C28",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C29",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C30",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C31",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C32",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C33",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C34",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C35",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C36",
+      "model_alpha_inhib": 0.35,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C37",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C38",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C39",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C40",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C41",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C42",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 450.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C43",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C44",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C45",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C46",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C47",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C48",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 600.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C49",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C50",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 5e-05,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C51",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C52",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0001,
+      "model_bg_ema": 1e-06
+    },
+    {
+      "config_id": "C53",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-07
+    },
+    {
+      "config_id": "C54",
+      "model_alpha_inhib": 0.45,
+      "model_omega_inhib": 900.0,
+      "model_mu_base": 0.0002,
+      "model_bg_ema": 1e-06
+    }
+  ],
+  "workflow_stage": {
+    "stage_key": "model_calibration",
+    "stage_title": "Model Calibration",
+    "stage_order": 1,
+    "stage_total": 6,
+    "runner": "run_sestpp_calibration_sweep.py",
+    "depends_on": [],
+    "optional": false,
+    "order_note": "Freeze the intervention-aware SESTPP settings that every downstream stage will reuse.",
+    "question": "Which intervention-aware SESTPP hyperparameters best calibrate the proposed field before any planner conclusions are made?"
+  },
+  "outputs": {
+    "per_run_csv": "sestpp_calibration_sweep_per_run.csv",
+    "summary_csv": "sestpp_calibration_sweep_summary.csv",
+    "ranking_csv": "sestpp_calibration_sweep_ranking.csv",
+    "tradeoff_png": "sestpp_calibration_sweep_tradeoff.png",
+    "readme_md": "SESTPP_CALIBRATION_README.md"
+  },
+  "best_config_id": "C37",
+  "best_config": {
+    "rank": 1,
+    "config_id": "C37",
+    "model_alpha_inhib": 0.45,
+    "model_omega_inhib": 450.0,
+    "model_mu_base": 5e-05,
+    "model_bg_ema": 1e-07,
+    "proposed_field_logloss_mean": 19.813312316603234,
+    "proposed_field_logloss_std": 0.034615740943245106,
+    "proposed_field_logloss_ci95": 0.02398748465363012,
+    "proposed_field_logloss_n": 8,
+    "proposed_field_brier_mean": 0.964129495624813,
+    "proposed_field_brier_std": 0.0012272545105126698,
+    "proposed_field_brier_ci95": 0.00085044398689278,
+    "proposed_field_brier_n": 8,
+    "proposed_nll_mean": 31210070.774888895,
+    "proposed_nll_std": 787233.6043869046,
+    "proposed_nll_ci95": 545525.0556391099,
+    "proposed_nll_n": 8,
+    "delta_field_logloss_proposed_minus_prediction_mean": -0.31002035739027045,
+    "delta_field_logloss_proposed_minus_prediction_std": 0.03260830969891782,
+    "delta_field_logloss_proposed_minus_prediction_ci95": 0.02259640577291314,
+    "delta_field_logloss_proposed_minus_prediction_n": 8,
+    "delta_field_brier_proposed_minus_prediction_mean": -0.010177722345218215,
+    "delta_field_brier_proposed_minus_prediction_std": 0.0011775307556212383,
+    "delta_field_brier_proposed_minus_prediction_ci95": 0.0008159871827083869,
+    "delta_field_brier_proposed_minus_prediction_n": 8,
+    "delta_nll_proposed_minus_prediction_mean": -3144792.111636038,
+    "delta_nll_proposed_minus_prediction_std": 27287.86887978883,
+    "delta_nll_proposed_minus_prediction_ci95": 18909.52838644748,
+    "delta_nll_proposed_minus_prediction_n": 8,
+    "brier_improvement_pct_mean": 1.0446005115105441,
+    "brier_improvement_pct_std": 0.12075009725583892,
+    "brier_improvement_pct_ci95": 0.08367554834656804,
+    "brier_improvement_pct_n": 8,
+    "logloss_improvement_pct_mean": 1.5406020823804814,
+    "logloss_improvement_pct_std": 0.162014942445312,
+    "logloss_improvement_pct_ci95": 0.11227062716749574,
+    "logloss_improvement_pct_n": 8,
+    "nll_improvement_pct_mean": 9.158225546757892,
+    "nll_improvement_pct_std": 0.20528323954111802,
+    "nll_improvement_pct_ci95": 0.1422540273285976,
+    "nll_improvement_pct_n": 8
+  }
+}

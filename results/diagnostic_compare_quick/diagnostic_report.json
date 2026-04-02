@@ -1,0 +1,142 @@
+{
+  "parameters": {
+    "T_end": 1800.0,
+    "dt": 5.0,
+    "seed": 2026,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 80,
+    "NY": 64,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "warmup_s": 1800.0,
+    "task_replan_period_s": 45.0,
+    "model_deterring_window_s": 90.0,
+    "model_deterring_risk_threshold": 0.35,
+    "model_deterring_budget_per_robot_per_hr": 4,
+    "model_deterring_min_recent_points": 1,
+    "forecast_horizon_s": 300.0,
+    "forecast_match_radius_m": 20.0,
+    "forecast_top_k": 5,
+    "forecast_eval_period_s": 30.0,
+    "telemetry_clear_on_start": false,
+    "telemetry_prompt_save": false
+  },
+  "prediction_only_final_metrics": {
+    "value_weighted_exposure": 3153.3986080132877,
+    "mean_response_time_s": 334.8691457571367,
+    "response_samples": 78,
+    "travel_distance_by_robot": {
+      "r1": 2984.7361346638877,
+      "r2": 3109.739673618309,
+      "r3": 2543.3222462551203,
+      "r4": 3200.0215852646265,
+      "r5": 3241.3399006803766,
+      "r6": 2894.2400631308437
+    },
+    "travel_distance_by_type": {
+      "UGV": 17973.399603613165,
+      "UAV": 0.0
+    },
+    "energy_by_robot": {
+      "r1": 2984.7361346638877,
+      "r2": 3109.739673618309,
+      "r3": 2543.3222462551203,
+      "r4": 3200.0215852646265,
+      "r5": 3241.3399006803766,
+      "r6": 2894.2400631308437
+    },
+    "energy_by_type": {
+      "UGV": 17973.399603613165,
+      "UAV": 0.0
+    },
+    "completed_tasks_by_type": {
+      "deterring": 79,
+      "patrolling": 187
+    },
+    "completed_tasks_total": 266,
+    "tasks_per_unit_distance": 0.014799648695649455,
+    "exposure_per_completed_task": 11.85488198501236,
+    "score_per_completed_task": 1147.854577367243,
+    "boundary_message_count": 52,
+    "boundary_bytes_sent": 3328,
+    "boundary_message_count_by_type": {
+      "detection": 52,
+      "intervention": 0
+    },
+    "boundary_bytes_by_type": {
+      "detection": 3328,
+      "intervention": 0
+    },
+    "model_deterring_accepted": 16,
+    "model_deterring_rejected_budget": 75,
+    "model_deterring_generated": 9,
+    "model_deterring_rejected_risk": 0,
+    "model_deterring_rejected_support": 0,
+    "forecast_recall_at_k": NaN,
+    "forecast_precision_at_k": 0.0,
+    "forecast_hotspot_hit_rate": 0.0,
+    "forecast_lead_time_s": NaN,
+    "forecast_samples": 61
+  },
+  "proposed_final_metrics": {
+    "value_weighted_exposure": 3153.3986080132877,
+    "mean_response_time_s": 326.4258155865306,
+    "response_samples": 77,
+    "travel_distance_by_robot": {
+      "r1": 2987.955561821567,
+      "r2": 3109.739673618309,
+      "r3": 2543.3222462551203,
+      "r4": 3344.5597268012943,
+      "r5": 3241.3399006803766,
+      "r6": 2908.834450261712
+    },
+    "travel_distance_by_type": {
+      "UGV": 18135.75155943838,
+      "UAV": 0.0
+    },
+    "energy_by_robot": {
+      "r1": 2987.955561821567,
+      "r2": 3109.739673618309,
+      "r3": 2543.3222462551203,
+      "r4": 3344.5597268012943,
+      "r5": 3241.3399006803766,
+      "r6": 2908.834450261712
+    },
+    "energy_by_type": {
+      "UGV": 18135.75155943838,
+      "UAV": 0.0
+    },
+    "completed_tasks_by_type": {
+      "deterring": 78,
+      "patrolling": 186
+    },
+    "completed_tasks_total": 264,
+    "tasks_per_unit_distance": 0.014556882251874839,
+    "exposure_per_completed_task": 11.94469169702003,
+    "score_per_completed_task": 1156.6646811103508,
+    "boundary_message_count": 77,
+    "boundary_bytes_sent": 5168,
+    "boundary_message_count_by_type": {
+      "detection": 47,
+      "intervention": 30
+    },
+    "boundary_bytes_by_type": {
+      "detection": 3008,
+      "intervention": 2160
+    },
+    "model_deterring_accepted": 2,
+    "model_deterring_rejected_budget": 0,
+    "model_deterring_generated": 1,
+    "model_deterring_rejected_risk": 0,
+    "model_deterring_rejected_support": 0,
+    "forecast_recall_at_k": NaN,
+    "forecast_precision_at_k": 0.0,
+    "forecast_hotspot_hit_rate": 0.0,
+    "forecast_lead_time_s": NaN,
+    "forecast_samples": 61
+  },
+  "critical_recommendations": [
+    "Proposed exposure is not lower: verify model-scored deterrence generation and alignment of sigma_true with intervention footprint."
+  ]
+}
