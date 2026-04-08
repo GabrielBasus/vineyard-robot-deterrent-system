@@ -1,0 +1,91 @@
+{
+  "base_variant": "row_local_priority_queue",
+  "risk_threshold": 0.0,
+  "risk_scale": 0.0001,
+  "distance_values": [
+    0.02,
+    0.05
+  ],
+  "deterring_bonus_values": [
+    8.0,
+    12.0
+  ],
+  "direct_bonus_values": [
+    10.0
+  ],
+  "age_weight_values": [
+    0.01
+  ],
+  "preempt_margin_values": [
+    0.25
+  ],
+  "repartition_period_values": [
+    60.0
+  ],
+  "num_runs": 1,
+  "seed_start": 123,
+  "t_end": 60.0,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 30.0,
+  "output_root": "results\\exploration_local_queue_weight_sweep_smoke",
+  "max_workers": 2,
+  "elapsed_wall_s": 2.6064963340759277,
+  "variants": [
+    {
+      "family": "base",
+      "param_key": "",
+      "param_value": NaN,
+      "output_name": "row_local_priority_queue__risk_open__base",
+      "overrides": {}
+    },
+    {
+      "family": "distance",
+      "param_key": "local_queue_distance_weight",
+      "param_value": 0.02,
+      "output_name": "row_local_priority_queue__risk_open__distance_0p02",
+      "overrides": {
+        "local_queue_distance_weight": 0.02
+      }
+    },
+    {
+      "family": "deterring_bonus",
+      "param_key": "local_queue_deterring_bonus",
+      "param_value": 12.0,
+      "output_name": "row_local_priority_queue__risk_open__deterring_bonus_12",
+      "overrides": {
+        "local_queue_deterring_bonus": 12.0
+      }
+    }
+  ],
+  "runtime_results": [
+    {
+      "output_name": "row_local_priority_queue__risk_open__distance_0p02",
+      "family": "distance",
+      "status": "ok",
+      "duration_s": 1.2979769706726074,
+      "output_dir": "results\\exploration_local_queue_weight_sweep_smoke\\row_local_priority_queue__risk_open__distance_0p02",
+      "stdout_path": "results\\exploration_local_queue_weight_sweep_smoke\\row_local_priority_queue__risk_open__distance_0p02\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration_local_queue_weight_sweep_smoke\\row_local_priority_queue__risk_open__distance_0p02\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__base",
+      "family": "base",
+      "status": "ok",
+      "duration_s": 1.3049774169921875,
+      "output_dir": "results\\exploration_local_queue_weight_sweep_smoke\\row_local_priority_queue__risk_open__base",
+      "stdout_path": "results\\exploration_local_queue_weight_sweep_smoke\\row_local_priority_queue__risk_open__base\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration_local_queue_weight_sweep_smoke\\row_local_priority_queue__risk_open__base\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__deterring_bonus_12",
+      "family": "deterring_bonus",
+      "status": "ok",
+      "duration_s": 1.266178846359253,
+      "output_dir": "results\\exploration_local_queue_weight_sweep_smoke\\row_local_priority_queue__risk_open__deterring_bonus_12",
+      "stdout_path": "results\\exploration_local_queue_weight_sweep_smoke\\row_local_priority_queue__risk_open__deterring_bonus_12\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration_local_queue_weight_sweep_smoke\\row_local_priority_queue__risk_open__deterring_bonus_12\\weight_sweep_worker_stderr.log"
+    }
+  ]
+}

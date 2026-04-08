@@ -3,7 +3,7 @@ import unittest
 
 import pandas as pd
 
-import run_current_vs_main_benchmark as bench
+import experiments.run_current_vs_main_benchmark as bench
 
 
 class BenchmarkCollectorTests(unittest.TestCase):

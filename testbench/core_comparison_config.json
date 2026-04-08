@@ -1,0 +1,115 @@
+{
+  "scenario": {
+    "num_runs": 5,
+    "seed_start": 123,
+    "duration_s": 14400.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 300.0
+  },
+  "outputs": {
+    "outdir": "results/testbench/core_comparison",
+    "reference_system": "s1_risk_open_core",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_birds_deterred_pct_last_hour",
+      "completed_tasks_total",
+      "completed_deterring_total",
+      "tasks_per_km_travel",
+      "native_boundary_message_count"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_birds_deterred_pct_last_hour",
+      "completed_deterring_total"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_birds_deterred_pct_last_hour",
+      "completed_deterring_total",
+      "completed_tasks_total",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "s0_simple_tasks_core",
+      "type": "simplification_stage",
+      "stage": "s0_simple_tasks_core",
+      "title": "S0 Simple Tasks Core"
+    },
+    {
+      "key": "s1_main_core",
+      "type": "simplification_stage",
+      "stage": "s1_main_core",
+      "title": "S1 Main Core"
+    },
+    {
+      "key": "s1_risk_open_core",
+      "type": "simplification_stage",
+      "stage": "s1_risk_open_core",
+      "title": "S1 Risk Open Core"
+    },
+    {
+      "key": "s1_capacity_aware_selection_core",
+      "type": "simplification_stage",
+      "stage": "s1_capacity_aware_selection_core",
+      "title": "S1 Capacity-Aware Selection"
+    },
+    {
+      "key": "s2_direct_conflict",
+      "type": "simplification_stage",
+      "stage": "s2_direct_conflict",
+      "title": "S2 Direct Conflict"
+    },
+    {
+      "key": "s3_persistence",
+      "type": "simplification_stage",
+      "stage": "s3_persistence",
+      "title": "S3 Persistence"
+    },
+    {
+      "key": "s4_capacity_budget",
+      "type": "simplification_stage",
+      "stage": "s4_capacity_budget",
+      "title": "S4 Capacity Budget"
+    },
+    {
+      "key": "s5_current_thesis_profile",
+      "type": "simplification_stage",
+      "stage": "s5_current_thesis_profile",
+      "title": "S5 Current Thesis Profile"
+    },
+    {
+      "key": "main_native",
+      "type": "repo_module",
+      "repo": "main",
+      "module": "DeterrentSystem",
+      "title": "Main Native"
+    },
+    {
+      "key": "row_local_priority_queue",
+      "type": "exploration_variant",
+      "variant": "row_local_priority_queue",
+      "title": "Row Local Priority Queue"
+    },
+    {
+      "key": "row_local_priority_queue_frequent_repartition",
+      "type": "exploration_variant",
+      "variant": "row_local_priority_queue_frequent_repartition",
+      "title": "Row Local Priority Queue Frequent Repartition"
+    }
+  ]
+}

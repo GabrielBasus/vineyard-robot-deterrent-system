@@ -1,0 +1,46 @@
+{
+  "base_stage": "s1_main_core",
+  "current_risk_threshold": 0.35,
+  "current_risk_scale": 0.0001,
+  "threshold_values": [
+    0.0,
+    0.35
+  ],
+  "scale_values": [
+    0.0001
+  ],
+  "cross_product": false,
+  "include_current": true,
+  "num_runs": 1,
+  "seed_start": 123,
+  "t_end": 60.0,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 30.0,
+  "output_root": "results\\verify_risk_gate_sweep",
+  "max_workers": 2,
+  "elapsed_wall_s": 5.274470567703247,
+  "successful_variants": [
+    "s1_main_core__thr_0__scale_0p0001",
+    "s1_main_core__thr_0p35__scale_0p0001"
+  ],
+  "results": [
+    {
+      "output_name": "s1_main_core__thr_0__scale_0p0001",
+      "status": "ok",
+      "duration_s": 4.986889839172363,
+      "output_dir": "results\\verify_risk_gate_sweep\\s1_main_core__thr_0__scale_0p0001",
+      "stdout_path": "results\\verify_risk_gate_sweep\\s1_main_core__thr_0__scale_0p0001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\verify_risk_gate_sweep\\s1_main_core__thr_0__scale_0p0001\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p35__scale_0p0001",
+      "status": "ok",
+      "duration_s": 5.113948106765747,
+      "output_dir": "results\\verify_risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0001",
+      "stdout_path": "results\\verify_risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\verify_risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0001\\risk_gate_worker_stderr.log"
+    }
+  ]
+}

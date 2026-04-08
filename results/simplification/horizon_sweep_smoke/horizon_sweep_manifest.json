@@ -1,0 +1,65 @@
+{
+  "generated_at_unix_s": 1775182627.7649662,
+  "elapsed_wall_s": 178.55452919006348,
+  "stage_keys": [
+    "s1_risk_open_core",
+    "s5_current_thesis_profile"
+  ],
+  "time_horizons_h": [
+    0.5,
+    1.0
+  ],
+  "num_runs": 1,
+  "seed_start": 123,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 30.0,
+  "output_root": "results\\simplification\\horizon_sweep_smoke",
+  "main_stage": "s5_current_thesis_profile",
+  "max_workers": 2,
+  "skip_existing": false,
+  "verbose_stage_logs": false,
+  "runtime_rows": [
+    {
+      "stage_key": "s1_risk_open_core",
+      "horizon_h": 0.5,
+      "output_name": "s1_risk_open_core__h_0p5",
+      "status": "ok",
+      "duration_s": 38.1198525428772,
+      "output_dir": "results\\simplification\\horizon_sweep_smoke\\s1_risk_open_core__h_0p5",
+      "stdout_path": "results\\simplification\\horizon_sweep_smoke\\s1_risk_open_core__h_0p5\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep_smoke\\s1_risk_open_core__h_0p5\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s1_risk_open_core",
+      "horizon_h": 1.0,
+      "output_name": "s1_risk_open_core__h_1",
+      "status": "ok",
+      "duration_s": 67.11634302139282,
+      "output_dir": "results\\simplification\\horizon_sweep_smoke\\s1_risk_open_core__h_1",
+      "stdout_path": "results\\simplification\\horizon_sweep_smoke\\s1_risk_open_core__h_1\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep_smoke\\s1_risk_open_core__h_1\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s5_current_thesis_profile",
+      "horizon_h": 0.5,
+      "output_name": "s5_current_thesis_profile__h_0p5",
+      "status": "ok",
+      "duration_s": 61.95362710952759,
+      "output_dir": "results\\simplification\\horizon_sweep_smoke\\s5_current_thesis_profile__h_0p5",
+      "stdout_path": "results\\simplification\\horizon_sweep_smoke\\s5_current_thesis_profile__h_0p5\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep_smoke\\s5_current_thesis_profile__h_0p5\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s5_current_thesis_profile",
+      "horizon_h": 1.0,
+      "output_name": "s5_current_thesis_profile__h_1",
+      "status": "ok",
+      "duration_s": 111.24267172813416,
+      "output_dir": "results\\simplification\\horizon_sweep_smoke\\s5_current_thesis_profile__h_1",
+      "stdout_path": "results\\simplification\\horizon_sweep_smoke\\s5_current_thesis_profile__h_1\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep_smoke\\s5_current_thesis_profile__h_1\\horizon_sweep_stderr.log"
+    }
+  ]
+}

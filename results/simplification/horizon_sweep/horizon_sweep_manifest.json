@@ -1,0 +1,86 @@
+{
+  "generated_at_unix_s": 1775185934.3338368,
+  "elapsed_wall_s": 3253.307104587555,
+  "stage_keys": [
+    "s1_risk_open_core",
+    "s5_current_thesis_profile"
+  ],
+  "time_horizons_h": [
+    2.0,
+    4.0,
+    6.0
+  ],
+  "num_runs": 3,
+  "seed_start": 123,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 300.0,
+  "output_root": "results\\simplification\\horizon_sweep",
+  "main_stage": "s5_current_thesis_profile",
+  "max_workers": 6,
+  "skip_existing": false,
+  "verbose_stage_logs": false,
+  "runtime_rows": [
+    {
+      "stage_key": "s1_risk_open_core",
+      "horizon_h": 2.0,
+      "output_name": "s1_risk_open_core__h_2",
+      "status": "ok",
+      "duration_s": 547.329029083252,
+      "output_dir": "results\\simplification\\horizon_sweep\\s1_risk_open_core__h_2",
+      "stdout_path": "results\\simplification\\horizon_sweep\\s1_risk_open_core__h_2\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep\\s1_risk_open_core__h_2\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s5_current_thesis_profile",
+      "horizon_h": 2.0,
+      "output_name": "s5_current_thesis_profile__h_2",
+      "status": "ok",
+      "duration_s": 1159.6148488521576,
+      "output_dir": "results\\simplification\\horizon_sweep\\s5_current_thesis_profile__h_2",
+      "stdout_path": "results\\simplification\\horizon_sweep\\s5_current_thesis_profile__h_2\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep\\s5_current_thesis_profile__h_2\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s1_risk_open_core",
+      "horizon_h": 4.0,
+      "output_name": "s1_risk_open_core__h_4",
+      "status": "ok",
+      "duration_s": 1259.5615260601044,
+      "output_dir": "results\\simplification\\horizon_sweep\\s1_risk_open_core__h_4",
+      "stdout_path": "results\\simplification\\horizon_sweep\\s1_risk_open_core__h_4\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep\\s1_risk_open_core__h_4\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s1_risk_open_core",
+      "horizon_h": 6.0,
+      "output_name": "s1_risk_open_core__h_6",
+      "status": "ok",
+      "duration_s": 2052.576908826828,
+      "output_dir": "results\\simplification\\horizon_sweep\\s1_risk_open_core__h_6",
+      "stdout_path": "results\\simplification\\horizon_sweep\\s1_risk_open_core__h_6\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep\\s1_risk_open_core__h_6\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s5_current_thesis_profile",
+      "horizon_h": 4.0,
+      "output_name": "s5_current_thesis_profile__h_4",
+      "status": "ok",
+      "duration_s": 2293.778641939163,
+      "output_dir": "results\\simplification\\horizon_sweep\\s5_current_thesis_profile__h_4",
+      "stdout_path": "results\\simplification\\horizon_sweep\\s5_current_thesis_profile__h_4\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep\\s5_current_thesis_profile__h_4\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s5_current_thesis_profile",
+      "horizon_h": 6.0,
+      "output_name": "s5_current_thesis_profile__h_6",
+      "status": "ok",
+      "duration_s": 3252.931819677353,
+      "output_dir": "results\\simplification\\horizon_sweep\\s5_current_thesis_profile__h_6",
+      "stdout_path": "results\\simplification\\horizon_sweep\\s5_current_thesis_profile__h_6\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep\\s5_current_thesis_profile__h_6\\horizon_sweep_stderr.log"
+    }
+  ]
+}

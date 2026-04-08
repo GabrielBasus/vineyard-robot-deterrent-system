@@ -1,0 +1,65 @@
+{
+  "generated_at_unix_s": 1775194586.7836761,
+  "elapsed_wall_s": 1414.9898717403412,
+  "stage_keys": [
+    "s1_risk_open_core",
+    "s1_capacity_aware_selection_core"
+  ],
+  "time_horizons_h": [
+    4.0,
+    6.0
+  ],
+  "num_runs": 3,
+  "seed_start": 123,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 300.0,
+  "output_root": "results\\simplification\\horizon_sweep_capacity_selection",
+  "main_stage": "s5_current_thesis_profile",
+  "max_workers": 4,
+  "skip_existing": false,
+  "verbose_stage_logs": false,
+  "runtime_rows": [
+    {
+      "stage_key": "s1_risk_open_core",
+      "horizon_h": 4.0,
+      "output_name": "s1_risk_open_core__h_4",
+      "status": "ok",
+      "duration_s": 749.5888228416443,
+      "output_dir": "results\\simplification\\horizon_sweep_capacity_selection\\s1_risk_open_core__h_4",
+      "stdout_path": "results\\simplification\\horizon_sweep_capacity_selection\\s1_risk_open_core__h_4\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep_capacity_selection\\s1_risk_open_core__h_4\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s1_risk_open_core",
+      "horizon_h": 6.0,
+      "output_name": "s1_risk_open_core__h_6",
+      "status": "ok",
+      "duration_s": 1062.8542869091034,
+      "output_dir": "results\\simplification\\horizon_sweep_capacity_selection\\s1_risk_open_core__h_6",
+      "stdout_path": "results\\simplification\\horizon_sweep_capacity_selection\\s1_risk_open_core__h_6\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep_capacity_selection\\s1_risk_open_core__h_6\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s1_capacity_aware_selection_core",
+      "horizon_h": 4.0,
+      "output_name": "s1_capacity_aware_selection_core__h_4",
+      "status": "ok",
+      "duration_s": 1115.5683295726776,
+      "output_dir": "results\\simplification\\horizon_sweep_capacity_selection\\s1_capacity_aware_selection_core__h_4",
+      "stdout_path": "results\\simplification\\horizon_sweep_capacity_selection\\s1_capacity_aware_selection_core__h_4\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep_capacity_selection\\s1_capacity_aware_selection_core__h_4\\horizon_sweep_stderr.log"
+    },
+    {
+      "stage_key": "s1_capacity_aware_selection_core",
+      "horizon_h": 6.0,
+      "output_name": "s1_capacity_aware_selection_core__h_6",
+      "status": "ok",
+      "duration_s": 1414.8294444084167,
+      "output_dir": "results\\simplification\\horizon_sweep_capacity_selection\\s1_capacity_aware_selection_core__h_6",
+      "stdout_path": "results\\simplification\\horizon_sweep_capacity_selection\\s1_capacity_aware_selection_core__h_6\\horizon_sweep_stdout.log",
+      "stderr_path": "results\\simplification\\horizon_sweep_capacity_selection\\s1_capacity_aware_selection_core__h_6\\horizon_sweep_stderr.log"
+    }
+  ]
+}

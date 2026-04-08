@@ -20,6 +20,7 @@ from ZonePartitioner import ZonePartitioner, power_cells, build_neighbors, point
 from SESTPP import OnlineSESTPP
 from Robot import Robot, RobotProfile
 from TaskGenerator import TaskGenerator, TaskAssigner
+from tracking_export import export_named_tracking_state
 
 class EventBus:
     def __init__(self, robots: Dict[str, Robot], bytes_per_boundary_msg: int = 64, bytes_per_intervention_msg: int = 72):
@@ -97,6 +98,21 @@ class EventBus:
                     beta=ev.get('beta'),
                     action_id=ev.get('action_id'),
                 )
+
+    def to_tracking_dict(self, *, include_arrays: bool = False, max_items: int = 50):
+        return {
+            "robot_ids": [str(rid) for rid in self.robots.keys()],
+            "bytes_per_boundary_msg": int(self.bytes_per_boundary_msg),
+            "bytes_per_intervention_msg": int(self.bytes_per_intervention_msg),
+            "boundary_msg_count": int(self.boundary_msg_count),
+            "intervention_msg_count": int(self.intervention_msg_count),
+            "boundary_bytes": int(self.boundary_bytes),
+            "intervention_bytes": int(self.intervention_bytes),
+            "intervention_msg_dropped_debounce": int(self.intervention_msg_dropped_debounce),
+            "intervention_msg_dropped_low_weight": int(self.intervention_msg_dropped_low_weight),
+            "last_intervention_key_count": int(len(self._last_intervention_key_t)),
+            "last_intervention_key_preview": list(self._last_intervention_key_t.items())[: max(int(max_items), 0)],
+        }
 
 def make_robot_profiles(robots_def, rng, uav_fraction=0.4):
     """
@@ -220,6 +236,58 @@ class RecentTasks:
     def list(self):
         return list(self.buf)
 
+
+def _build_demo_tracking_links(
+    active_tasks: list[dict],
+    poses: dict[str, tuple[float, float]],
+    goals: dict[str, tuple[float, float] | None],
+    robot_states: dict[str, str],
+    *,
+    goal_match_radius_m: float = 25.0,
+) -> dict[str, dict[str, list[int]] | dict[str, int]]:
+    tasks_by_robot: dict[str, list[dict]] = {}
+    for task in active_tasks:
+        if str(task.get("state", "")).strip().lower() != "active":
+            continue
+        rid = task.get("assigned_primary")
+        if rid in (None, ""):
+            continue
+        tasks_by_robot.setdefault(str(rid), []).append(task)
+
+    active_task_ids_by_robot = {
+        rid: [int(task["id"]) for task in tasks if task.get("id") is not None]
+        for rid, tasks in tasks_by_robot.items()
+    }
+    current_task_ids_by_robot: dict[str, int] = {}
+    for rid, tasks in tasks_by_robot.items():
+        pose = poses.get(rid)
+        goal = goals.get(rid)
+        current_task = None
+        if goal is not None and tasks:
+            nearest = min(
+                tasks,
+                key=lambda task: math.hypot(float(task.get("x", 0.0)) - float(goal[0]), float(task.get("y", 0.0)) - float(goal[1])),
+            )
+            if math.hypot(float(nearest.get("x", 0.0)) - float(goal[0]), float(nearest.get("y", 0.0)) - float(goal[1])) <= float(goal_match_radius_m):
+                current_task = nearest
+        if current_task is None and pose is not None and robot_states.get(rid) == "moving" and tasks:
+            current_task = min(
+                tasks,
+                key=lambda task: math.hypot(float(task.get("x", 0.0)) - float(pose[0]), float(task.get("y", 0.0)) - float(pose[1])),
+            )
+        if current_task is not None and current_task.get("id") is not None:
+            current_task_ids_by_robot[rid] = int(current_task["id"])
+
+    queued_task_ids_by_robot = {
+        rid: [task_id for task_id in task_ids if task_id != current_task_ids_by_robot.get(rid)]
+        for rid, task_ids in active_task_ids_by_robot.items()
+    }
+    return {
+        "active_task_ids_by_robot": active_task_ids_by_robot,
+        "current_task_ids_by_robot": current_task_ids_by_robot,
+        "queued_task_ids_by_robot": queued_task_ids_by_robot,
+    }
+
 def run_simulation_frames_persistent(
     # Field / timing
     W=220.0, H=140.0, seed=123, dt=1.0, T_end=240.0, fps=10,
@@ -335,6 +403,10 @@ def run_simulation_frames_persistent(
     idle_roam_jitter_m=25.0,
     # Simplified task assignment/queueing ablation switch (kept in this file only).
     simple_task_management=True,
+    emit_tracking_state=False,
+    tracking_include_arrays=False,
+    tracking_preview_limit=50,
+    tracking_capture_frame_locals=False,
 ):
     rng = np.random.default_rng(seed)
     boundary = [(0,0),(W,0),(W,H),(0,H)]
@@ -501,6 +573,9 @@ def run_simulation_frames_persistent(
     suppression_effect_sum = 0.0
     suppression_effect_by_mode = {}
     suppression_effect_by_source = {"direct_detection": 0.0, "model_scored": 0.0}
+    truth_metrics_window_s = 3600.0
+    truth_candidate_event_times_last_hour = deque()
+    truth_suppressed_event_times_last_hour = deque()
     truth_event_detection_prob = min(max(float(bird_detection_prob), 0.0), 1.0)
     w_cdf = None
     w_shape = None
@@ -576,6 +651,37 @@ def run_simulation_frames_persistent(
             for src, c in contrib_by_source.items()
         }
         return p_keep, p_suppress, suppress_by_mode, suppress_by_source
+
+    def _prune_truth_event_window(now_t):
+        cutoff_t = float(now_t) - float(truth_metrics_window_s)
+        while truth_candidate_event_times_last_hour and truth_candidate_event_times_last_hour[0] < cutoff_t:
+            truth_candidate_event_times_last_hour.popleft()
+        while truth_suppressed_event_times_last_hour and truth_suppressed_event_times_last_hour[0] < cutoff_t:
+            truth_suppressed_event_times_last_hour.popleft()
+
+    def _record_truth_window_event(event_t, suppressed):
+        event_t = float(event_t)
+        truth_candidate_event_times_last_hour.append(event_t)
+        if suppressed:
+            truth_suppressed_event_times_last_hour.append(event_t)
+        _prune_truth_event_window(event_t)
+
+    def _current_truth_window_metrics(now_t):
+        _prune_truth_event_window(now_t)
+        candidate_last_hour = int(len(truth_candidate_event_times_last_hour))
+        suppressed_last_hour = int(len(truth_suppressed_event_times_last_hour))
+        suppression_rate_last_hour = (
+            float(suppressed_last_hour) / float(candidate_last_hour) if candidate_last_hour > 0 else float("nan")
+        )
+        birds_deterred_pct_last_hour = (
+            100.0 * float(suppressed_last_hour) / float(candidate_last_hour) if candidate_last_hour > 0 else float("nan")
+        )
+        return {
+            "truth_candidate_events_last_hour": candidate_last_hour,
+            "truth_suppressed_events_last_hour": suppressed_last_hour,
+            "truth_suppression_rate_last_hour": suppression_rate_last_hour,
+            "birds_deterred_pct_last_hour": birds_deterred_pct_last_hour,
+        }
 
     def _process_truth_event(x, y, t_now, enqueue_tasks=True, record_metrics=True):
         nonlocal value_weighted_exposure
@@ -1026,10 +1132,12 @@ def run_simulation_frames_persistent(
                         suppression_effect_by_source[sk] = float(suppression_effect_by_source.get(sk, 0.0) + sv)
                     if rng.random() <= p_keep:
                         truth_accepted_events += 1
+                        _record_truth_window_event(t_w, False)
                         _process_truth_event(x, y, t_w, enqueue_tasks=False, record_metrics=False)
                         _spawn_offspring(x, y, t_w)
                     else:
                         truth_suppressed_events += 1
+                        _record_truth_window_event(t_w, True)
 
                 truth_queue.sort(key=lambda z: z[2])
                 due = []
@@ -1045,10 +1153,12 @@ def run_simulation_frames_persistent(
                         suppression_effect_by_source[sk] = float(suppression_effect_by_source.get(sk, 0.0) + sv)
                     if rng.random() <= p_keep:
                         truth_accepted_events += 1
+                        _record_truth_window_event(te, False)
                         _process_truth_event(x, y, te, enqueue_tasks=False, record_metrics=False)
                         _spawn_offspring(x, y, te)
                     else:
                         truth_suppressed_events += 1
+                        _record_truth_window_event(te, True)
             t_w += dt
 
         # Reset public-facing/metrics buffers so the scored run starts clean at t=0.
@@ -1062,6 +1172,8 @@ def run_simulation_frames_persistent(
         truth_candidate_events = 0
         truth_accepted_events = 0
         truth_suppressed_events = 0
+        truth_candidate_event_times_last_hour.clear()
+        truth_suppressed_event_times_last_hour.clear()
         suppression_effect_sum = 0.0
         suppression_effect_by_mode.clear()
         suppression_effect_by_source = {"direct_detection": 0.0, "model_scored": 0.0}
@@ -1207,10 +1319,12 @@ def run_simulation_frames_persistent(
                         suppression_effect_by_source[sk] = float(suppression_effect_by_source.get(sk, 0.0) + sv)
                     if rng.random() <= p_keep:
                         truth_accepted_events += 1
+                        _record_truth_window_event(t, False)
                         _process_truth_event(x, y, t)
                         _spawn_offspring(x, y, t)
                     else:
                         truth_suppressed_events += 1
+                        _record_truth_window_event(t, True)
 
             # Process scheduled offspring up to current time
             if truth_queue:
@@ -1233,10 +1347,12 @@ def run_simulation_frames_persistent(
                         suppression_effect_by_source[sk] = float(suppression_effect_by_source.get(sk, 0.0) + sv)
                     if rng.random() <= p_keep:
                         truth_accepted_events += 1
+                        _record_truth_window_event(te, False)
                         _process_truth_event(x, y, te)
                         _spawn_offspring(x, y, te)
                     else:
                         truth_suppressed_events += 1
+                        _record_truth_window_event(te, True)
         else:
             # Legacy detections near robots (immediate deterring tasks added)
             for r in robots_def:
@@ -1776,6 +1892,8 @@ def run_simulation_frames_persistent(
             "truth_detections_missed_range": int(truth_detections_missed_range),
             "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
+            "birds_deterred_pct": (100.0 * float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
+            **_current_truth_window_metrics(t),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
             "truth_suppression_effect_by_mode": dict(suppression_effect_by_mode),
@@ -1836,6 +1954,8 @@ def run_simulation_frames_persistent(
             "truth_detections_missed_range": int(truth_detections_missed_range),
             "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
+            "birds_deterred_pct": (100.0 * float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
+            **_current_truth_window_metrics(t_end),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
             **deterring_quality_cache,
@@ -1843,6 +1963,79 @@ def run_simulation_frames_persistent(
             "forecast_precision_at_k": float(np.mean(forecast_precision_vals)) if forecast_precision_vals else float("nan"),
             "forecast_lead_time_s": float(np.mean(forecast_lead_times)) if forecast_lead_times else float("nan"),
         }
+        demo_tracking_links = _build_demo_tracking_links(
+            active_tasks=active_tasks,
+            poses={rid: tuple(pose[rid]) for rid in pose},
+            goals={rid: (None if goal[rid] is None else tuple(goal[rid])) for rid in goal},
+            robot_states=robot_states_now,
+        )
+        tracking_state = None
+        if bool(emit_tracking_state):
+            tracking_runtime_state = {
+                "robots": robots,
+                "profiles": profiles,
+                "pose": pose,
+                "goal": goal,
+                "cells": cells,
+                "active_tasks": active_tasks,
+                "completed_tasks": completed_tasks,
+                "recent_truth": recent_truth,
+                "recent_detections": recent_detections,
+                "recent_deterrences": recent_deterrences,
+                "truth_pts": truth_pts,
+                "det_pts": det_pts,
+                "taskgen": taskgen,
+                "assigner": assigner,
+                "bus": bus,
+                "travel_distance_by_robot": travel_distance_by_robot,
+                "energy_by_robot": energy_by_robot,
+                "robot_time_total": robot_time_total,
+                "robot_time_with_task": robot_time_with_task,
+                "robot_time_moving": robot_time_moving,
+                "robot_time_holding": robot_time_holding,
+                "robot_time_idle": robot_time_idle,
+                "robot_idle_streak": robot_idle_streak,
+                "robot_idle_streak_max": robot_idle_streak_max,
+                "fleet_task_engagement_time": fleet_task_engagement_time,
+                "fleet_moving_time": fleet_moving_time,
+                "fleet_idle_no_task_time": fleet_idle_no_task_time,
+                "completed_count_by_type": completed_count_by_type,
+                "response_times": response_times,
+                "truth_candidate_events": truth_candidate_events,
+                "truth_accepted_events": truth_accepted_events,
+                "truth_suppressed_events": truth_suppressed_events,
+                "truth_detection_opportunities": truth_detection_opportunities,
+                "truth_detections_observed": truth_detections_observed,
+                "truth_detections_missed_range": truth_detections_missed_range,
+                "truth_detections_missed_false_negative": truth_detections_missed_false_negative,
+                "suppression_effect_sum": suppression_effect_sum,
+                "forecast_recall_vals": forecast_recall_vals,
+                "forecast_precision_vals": forecast_precision_vals,
+                "forecast_lead_times": forecast_lead_times,
+                "model_diag": model_diag,
+                "metrics": metrics,
+                "metrics_compact": final_metrics,
+            }
+            raw_tracking_locals = dict(locals())
+            tracking_state = {
+                "demo_links": demo_tracking_links,
+                "runtime_state": export_named_tracking_state(
+                    tracking_runtime_state,
+                    include_arrays=bool(tracking_include_arrays),
+                    max_items=int(tracking_preview_limit),
+                ),
+            }
+            if bool(tracking_capture_frame_locals):
+                tracking_state["frame_locals"] = export_named_tracking_state(
+                    raw_tracking_locals,
+                    include_arrays=bool(tracking_include_arrays),
+                    max_items=int(tracking_preview_limit),
+                    skip_names={
+                        "raw_tracking_locals",
+                        "tracking_state",
+                        "tracking_runtime_state",
+                    },
+                )
         yield {
             "t": (t - t_report_offset),
             "W": W, "H": H, "boundary": boundary,
@@ -1857,7 +2050,8 @@ def run_simulation_frames_persistent(
             "metrics_compact": final_metrics,
             "model_diag": model_diag,
             "tasks_active": list(active_tasks),
-            "tasks_done": list(completed_tasks)
+            "tasks_done": list(completed_tasks),
+            "tracking_state": tracking_state,
         }
 
         t += dt
@@ -1878,6 +2072,7 @@ def run_simulation_frames_persistent(
             f"engage={float(fleet_task_engagement_time / max(sim_elapsed_s, 1e-9)):.3f} "
             f"idle_no_task={float(fleet_idle_no_task_time / max(sim_elapsed_s, 1e-9)):.3f} "
             f"truth_suppr={float(truth_suppressed_events) / float(max(truth_candidate_events, 1)):.3f} "
+            f"birds_deterred_pct_last_hour={float(final_metrics.get('birds_deterred_pct_last_hour', float('nan'))):.2f} "
             f"msgs={total_boundary_msgs} "
             f"bytes={total_boundary_bytes}"
         )
@@ -1909,6 +2104,9 @@ def run_metrics_experiments(
             "truth_candidate_events",
             "truth_suppressed_events",
             "truth_suppression_rate",
+            "truth_suppression_rate_last_hour",
+            "birds_deterred_pct",
+            "birds_deterred_pct_last_hour",
             "truth_suppression_effect_mean",
             "fleet_task_assigned_fraction",
             "fleet_moving_fraction",
@@ -2022,6 +2220,9 @@ def run_metrics_experiments(
         "truth_detections_missed_range": _safe_stats("truth_detections_missed_range"),
         "truth_detections_missed_false_negative": _safe_stats("truth_detections_missed_false_negative"),
         "truth_suppression_rate": _safe_stats("truth_suppression_rate"),
+        "truth_suppression_rate_last_hour": _safe_stats("truth_suppression_rate_last_hour"),
+        "birds_deterred_pct": _safe_stats("birds_deterred_pct"),
+        "birds_deterred_pct_last_hour": _safe_stats("birds_deterred_pct_last_hour"),
         "truth_suppression_effect_mean": _safe_stats("truth_suppression_effect_mean"),
         "truth_suppression_effect_sum": _safe_stats("truth_suppression_effect_sum"),
         "deterring_actions_completed_total": _safe_stats("deterring_actions_completed_total"),
@@ -2133,12 +2334,13 @@ def run_baseline_suite(
             bar_len = 30
             fill = int(round(bar_len * pct / 100.0))
             bar = "#" * fill + "-" * (bar_len - fill)
-            print(
-                f"[progress] [{bar}] {pct:6.2f}% "
-                f"({runs_done_all}/{total_runs_all}) "
-                f"baseline={name} run={run_idx}/{run_total}",
-                flush=True,
-            )
+            if report_each_run:
+                print(
+                    f"[progress] [{bar}] {pct:6.2f}% "
+                    f"({runs_done_all}/{total_runs_all}) "
+                    f"baseline={name} run={run_idx}/{run_total}",
+                    flush=True,
+                )
             if progress_cb is not None:
                 try:
                     progress_cb(runs_done_all, total_runs_all, name, run_idx, run_total, seed, metrics)

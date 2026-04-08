@@ -113,6 +113,9 @@ PRODUCTION_CONFIG_SECTIONS: Dict[str, tuple[str, ...]] = {
         "default_proposed_model_deterring_window_s",
     ),
     "planner": (
+        "use_split_task_extraction_selection_pipeline",
+        "preassignment_selection_policy",
+        "preassignment_selection_limit",
         "max_active_tasks_per_robot",
         "max_active_patrolling_per_robot",
         "max_active_model_deterring_per_robot",
@@ -179,6 +182,7 @@ PRODUCTION_CONFIG_SECTIONS: Dict[str, tuple[str, ...]] = {
         "debug_movement",
     ),
     "idle_behavior": ("idle_roam_enabled", "idle_roam_interval_s", "idle_roam_jitter_m"),
+    "tracking": ("emit_tracking_state", "tracking_include_arrays", "tracking_preview_limit", "tracking_capture_frame_locals"),
 }
 
 
@@ -200,6 +204,7 @@ class ProductionSystemConfig:
     metrics: Dict[str, Any]
     motion: Dict[str, Any]
     idle_behavior: Dict[str, Any]
+    tracking: Dict[str, Any]
     deterring_modes: Dict[str, Dict[str, Any]]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -214,6 +219,7 @@ class ProductionRuntimeSnapshot:
     perception: Dict[str, Any]
     communication: Dict[str, Any]
     outputs: Dict[str, Any]
+    tracking: Dict[str, Any] | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -225,6 +231,10 @@ class TaskGenerationStageResult:
     patrolling_enabled: bool
     busy_deterring_robots: list[str]
     candidate_tasks: list[dict]
+    extracted_candidate_count: int
+    selected_candidate_count: int
+    selection_policy: str
+    selection_rejected_counts: Dict[str, int]
     source_buffer_size: int
     seen_task_key_count: int
     active_load_before_dispatch: Dict[str, int]
@@ -257,6 +267,10 @@ class TaskGenerationStageResult:
             "now_t": float(self.now_t),
             "patrolling_enabled": bool(self.patrolling_enabled),
             "busy_deterring_robots": list(self.busy_deterring_robots),
+            "extracted_candidate_count": int(self.extracted_candidate_count),
+            "selected_candidate_count": int(self.selected_candidate_count),
+            "selection_policy": str(self.selection_policy),
+            "selection_rejected_counts": dict(self.selection_rejected_counts),
             "candidate_count": int(len(self.candidate_tasks)),
             "candidate_preview": preview,
             "source_buffer_size": int(self.source_buffer_size),
@@ -427,6 +441,9 @@ class MetricsStageResult:
     fleet_moving_fraction_so_far: float
     fleet_idle_no_task_fraction_so_far: float
     truth_suppression_rate: float
+    birds_deterred_pct: float
+    truth_suppression_rate_last_hour: float
+    birds_deterred_pct_last_hour: float
     forecast_recall_at_k: float
     forecast_precision_at_k: float
 
@@ -442,6 +459,9 @@ class MetricsStageResult:
             "fleet_moving_fraction_so_far": float(self.fleet_moving_fraction_so_far),
             "fleet_idle_no_task_fraction_so_far": float(self.fleet_idle_no_task_fraction_so_far),
             "truth_suppression_rate": float(self.truth_suppression_rate),
+            "birds_deterred_pct": float(self.birds_deterred_pct),
+            "truth_suppression_rate_last_hour": float(self.truth_suppression_rate_last_hour),
+            "birds_deterred_pct_last_hour": float(self.birds_deterred_pct_last_hour),
             "forecast_recall_at_k": float(self.forecast_recall_at_k),
             "forecast_precision_at_k": float(self.forecast_precision_at_k),
         }
@@ -562,6 +582,7 @@ def build_production_system_config(
         metrics=sections["metrics"],
         motion=sections["motion"],
         idle_behavior=sections["idle_behavior"],
+        tracking=sections["tracking"],
         deterring_modes={str(k): dict(v) for k, v in deterring_modes.items()},
     )
 
@@ -579,6 +600,7 @@ def build_production_runtime_snapshot(
     boundary_message_count: int,
     boundary_bytes_sent: int,
     metrics_compact: Mapping[str, Any],
+    tracking: Mapping[str, Any] | None = None,
 ) -> ProductionRuntimeSnapshot:
     active_patrolling = 0
     active_deterring_direct = 0
@@ -624,4 +646,5 @@ def build_production_runtime_snapshot(
         outputs={
             "metrics_compact": dict(metrics_compact),
         },
+        tracking=(None if tracking is None else dict(tracking)),
     )

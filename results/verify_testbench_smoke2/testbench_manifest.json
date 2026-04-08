@@ -1,0 +1,285 @@
+{
+  "config_path": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code\\testbench\\example_config.json",
+  "current_repo": {
+    "path": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code",
+    "branch": "snapshot/intervention-refactor-planner-diagnostics-20260401",
+    "commit": "cbfbfc898d83455806d72d9341830357a1e699c3",
+    "dirty": true
+  },
+  "main_repo": {
+    "path": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code-main",
+    "branch": "main",
+    "commit": "950adbabb055cc1e470c44efb3e0a165f16f3904",
+    "dirty": false
+  },
+  "resolved_config": {
+    "scenario": {
+      "num_runs": 3,
+      "seed_start": 123,
+      "duration_s": 3600.0,
+      "dt": 1.0,
+      "fps": 1,
+      "W": 500.0,
+      "H": 500.0,
+      "NX": 120,
+      "NY": 96,
+      "Nrobots": 6,
+      "uav_fraction": 0.0,
+      "task_replan_period_s": 45.0,
+      "arrival_radius_m": 3.0,
+      "hold_time_s": 20.0,
+      "sample_every_s": 300.0,
+      "warmup_s": 0.0
+    },
+    "outputs": {
+      "outdir": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code\\results\\verify_testbench_smoke2",
+      "reference_system": "outline_core",
+      "metrics": [
+        "native_value_weighted_exposure",
+        "native_mean_response_time_s",
+        "native_birds_deterred_pct_last_hour",
+        "completed_tasks_total",
+        "completed_deterring_total",
+        "tasks_per_km_travel",
+        "native_boundary_message_count"
+      ],
+      "scoreboard_metrics": [
+        "native_value_weighted_exposure",
+        "native_mean_response_time_s",
+        "native_birds_deterred_pct_last_hour",
+        "completed_tasks_total",
+        "native_boundary_message_count"
+      ]
+    },
+    "systems": [
+      {
+        "key": "outline_core",
+        "type": "simplification_stage",
+        "stage": "s1_risk_open_core",
+        "title": "Outline Core"
+      },
+      {
+        "key": "exploration_local_queue",
+        "type": "exploration_variant",
+        "variant": "row_local_priority_queue",
+        "title": "Exploration Local Queue"
+      },
+      {
+        "key": "current_prediction",
+        "type": "current_mode",
+        "mode": "prediction_only",
+        "title": "Current Prediction Only"
+      },
+      {
+        "key": "current_reactive",
+        "type": "current_mode",
+        "mode": "reactive",
+        "title": "Current Reactive"
+      }
+    ]
+  },
+  "targets": [
+    {
+      "key": "outline_core",
+      "title": "Outline Core",
+      "description": "Simplification stage s1_risk_open_core: Same stripped-down main runtime as stage 1, but with the heuristic preventive risk threshold fixed at 0.0 so the model-scored preventive branch is active and can be debugged before later protection layers are added back.",
+      "kind": "simplification_stage",
+      "repo": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code",
+      "module_name": "DeterrentSystem",
+      "params": {
+        "simulation_mode": "proposed",
+        "enable_patrolling": true,
+        "enable_intervention_feedback": true,
+        "include_fallback_patrol": true,
+        "enable_model_scored_deterring": true,
+        "planner_profile": "",
+        "preventive_policy": "heuristic",
+        "use_split_task_extraction_selection_pipeline": true,
+        "preassignment_selection_policy": "pass_through",
+        "preassignment_selection_limit": 0,
+        "model_deterring_window_s": 120.0,
+        "enable_predicted_deltaJ_gate": false,
+        "min_predicted_deltaJ_for_model_deterring": 0.0,
+        "model_deterring_gate_policy": "heuristic",
+        "model_deterring_chance_threshold": 0.0,
+        "model_deterring_min_deltaJ_per_cost": 0.0,
+        "model_deterring_min_selection_weight": 0.0,
+        "model_deterring_capacity_rho_max": 1.0,
+        "model_deterring_capacity_history_window_s": 3600.0,
+        "model_deterring_capacity_min_completed_tasks": 1000000,
+        "model_deterring_capacity_fallback_budget_per_hr": 1000000.0,
+        "model_deterring_budget_per_robot_per_hr": 1000000,
+        "model_deterring_budget_mode": "count_per_hour",
+        "model_deterring_budget_utility_per_robot_per_hr": 1000000000000.0,
+        "model_deterring_global_admission_cap_per_cycle": 1000000,
+        "model_deterring_require_idle_robot_for_admission": false,
+        "model_deterring_prefer_idle_robots_for_assignment": false,
+        "model_deterring_busy_fallback_p_event_min": 0.0,
+        "model_deterring_busy_fallback_deltaJ_per_cost_min": 0.0,
+        "model_deterring_busy_fallback_eta_s_max": 1000000000000.0,
+        "protect_direct_detection_from_model_deterring": false,
+        "protect_active_model_deterring_persistence": false,
+        "model_deterring_min_persistence_lifetime_s": 0.0,
+        "model_deterring_persistence_eta_multiplier": 0.0,
+        "model_deterring_persistence_buffer_s": 0.0,
+        "model_deterring_max_persistence_lifetime_s": 0.0,
+        "model_deterring_lock_near_goal_radius_m": 0.0,
+        "protect_active_model_deterring_goal_preemption": false,
+        "protect_locked_model_deterring_from_patrol_assignment": false,
+        "max_active_tasks_per_robot": 1,
+        "max_active_patrolling_per_robot": 1,
+        "max_active_model_deterring_per_robot": 1,
+        "assigner_w_load": 0.0,
+        "report_metrics_end": false,
+        "model_deterring_risk_threshold": 0.0,
+        "model_deterring_risk_scale": 0.0001
+      },
+      "source": {
+        "stage": {
+          "key": "s1_risk_open_core",
+          "title": "Main Core With Risk Gate Open",
+          "module_name": "DeterrentSystem",
+          "description": "Same stripped-down main runtime as stage 1, but with the heuristic preventive risk threshold fixed at 0.0 so the model-scored preventive branch is active and can be debugged before later protection layers are added back.",
+          "added_back": [
+            "Keep the main runtime core.",
+            "Force the heuristic preventive risk gate open (threshold 0.0, scale 1e-4)."
+          ],
+          "overrides": {
+            "planner_profile": "",
+            "preventive_policy": "heuristic",
+            "use_split_task_extraction_selection_pipeline": true,
+            "preassignment_selection_policy": "pass_through",
+            "preassignment_selection_limit": 0,
+            "model_deterring_window_s": 120.0,
+            "enable_predicted_deltaJ_gate": false,
+            "min_predicted_deltaJ_for_model_deterring": 0.0,
+            "model_deterring_gate_policy": "heuristic",
+            "model_deterring_chance_threshold": 0.0,
+            "model_deterring_min_deltaJ_per_cost": 0.0,
+            "model_deterring_min_selection_weight": 0.0,
+            "model_deterring_capacity_rho_max": 1.0,
+            "model_deterring_capacity_history_window_s": 3600.0,
+            "model_deterring_capacity_min_completed_tasks": 1000000,
+            "model_deterring_capacity_fallback_budget_per_hr": 1000000.0,
+            "model_deterring_budget_per_robot_per_hr": 1000000,
+            "model_deterring_budget_mode": "count_per_hour",
+            "model_deterring_budget_utility_per_robot_per_hr": 1000000000000.0,
+            "model_deterring_global_admission_cap_per_cycle": 1000000,
+            "model_deterring_require_idle_robot_for_admission": false,
+            "model_deterring_prefer_idle_robots_for_assignment": false,
+            "model_deterring_busy_fallback_p_event_min": 0.0,
+            "model_deterring_busy_fallback_deltaJ_per_cost_min": 0.0,
+            "model_deterring_busy_fallback_eta_s_max": 1000000000000.0,
+            "protect_direct_detection_from_model_deterring": false,
+            "protect_active_model_deterring_persistence": false,
+            "model_deterring_min_persistence_lifetime_s": 0.0,
+            "model_deterring_persistence_eta_multiplier": 0.0,
+            "model_deterring_persistence_buffer_s": 0.0,
+            "model_deterring_max_persistence_lifetime_s": 0.0,
+            "model_deterring_lock_near_goal_radius_m": 0.0,
+            "protect_active_model_deterring_goal_preemption": false,
+            "protect_locked_model_deterring_from_patrol_assignment": false,
+            "max_active_tasks_per_robot": 1,
+            "max_active_patrolling_per_robot": 1,
+            "max_active_model_deterring_per_robot": 1,
+            "assigner_w_load": 0.0,
+            "report_metrics_end": false,
+            "model_deterring_risk_threshold": 0.0,
+            "model_deterring_risk_scale": 0.0001
+          }
+        }
+      }
+    },
+    {
+      "key": "exploration_local_queue",
+      "title": "Exploration Local Queue",
+      "description": "Whole-row partitioning with live-pose row ownership and per-robot local priority queues instead of global assignment.",
+      "kind": "exploration_variant",
+      "repo": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code",
+      "module_name": "exploration.row_local_priority_system",
+      "params": {
+        "simple_task_management": false,
+        "use_row_block_partitioning": true,
+        "use_local_priority_queue": true,
+        "update_zone_anchors_from_pose": true,
+        "zone_repartition_period_s": 60.0,
+        "zone_repartition_on_health": true,
+        "local_queue_distance_weight": 0.05,
+        "local_queue_deterring_bonus": 8.0,
+        "local_queue_direct_detection_bonus": 10.0,
+        "local_queue_patrolling_bonus": 1.0,
+        "local_queue_age_weight": 0.01,
+        "local_queue_preempt_margin": 0.25,
+        "max_active_tasks_per_robot": 3,
+        "max_active_patrolling_per_robot": 2,
+        "max_active_model_deterring_per_robot": 1,
+        "task_replan_period_s": 30.0,
+        "task_max_age_s": 240.0,
+        "uav_fraction": 0.0
+      },
+      "source": {
+        "variant_key": "row_local_priority_queue",
+        "variant": {
+          "title": "Row-Block Local Priority Queue",
+          "description": "Whole-row partitioning with live-pose row ownership and per-robot local priority queues instead of global assignment.",
+          "overrides": {
+            "simple_task_management": false,
+            "use_row_block_partitioning": true,
+            "use_local_priority_queue": true,
+            "update_zone_anchors_from_pose": true,
+            "zone_repartition_period_s": 60.0,
+            "zone_repartition_on_health": true,
+            "local_queue_distance_weight": 0.05,
+            "local_queue_deterring_bonus": 8.0,
+            "local_queue_direct_detection_bonus": 10.0,
+            "local_queue_patrolling_bonus": 1.0,
+            "local_queue_age_weight": 0.01,
+            "local_queue_preempt_margin": 0.25,
+            "max_active_tasks_per_robot": 3,
+            "max_active_patrolling_per_robot": 2,
+            "max_active_model_deterring_per_robot": 1,
+            "task_replan_period_s": 30.0,
+            "task_max_age_s": 240.0,
+            "uav_fraction": 0.0
+          }
+        }
+      }
+    },
+    {
+      "key": "current_prediction",
+      "title": "Current Prediction Only",
+      "description": "Current workspace mode prediction_only.",
+      "kind": "current_mode",
+      "repo": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code",
+      "module_name": "DeterrentSystem",
+      "params": {
+        "simulation_mode": "prediction_only",
+        "enable_patrolling": true,
+        "enable_intervention_feedback": false,
+        "include_fallback_patrol": true,
+        "enable_model_scored_deterring": false
+      },
+      "source": {
+        "mode": "prediction_only"
+      }
+    },
+    {
+      "key": "current_reactive",
+      "title": "Current Reactive",
+      "description": "Current workspace mode reactive.",
+      "kind": "current_mode",
+      "repo": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code",
+      "module_name": "DeterrentSystem",
+      "params": {
+        "simulation_mode": "reactive",
+        "enable_patrolling": false,
+        "enable_intervention_feedback": false,
+        "include_fallback_patrol": false,
+        "enable_model_scored_deterring": false
+      },
+      "source": {
+        "mode": "reactive"
+      }
+    }
+  ]
+}

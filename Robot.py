@@ -3,6 +3,8 @@ from ZonePartitioner import point_in_polygon, point_to_poly_distance
 
 from dataclasses import dataclass
 
+from tracking_export import export_tracking_value
+
 @dataclass
 class RobotProfile:
     id: str
@@ -100,3 +102,19 @@ class Robot:
                     event['action_id'] = action_id
                 boundary_events.append(event)
         return boundary_events
+
+    def to_tracking_dict(self, *, include_arrays: bool = False, max_items: int = 50):
+        recent_preview = list(self.recent_events)[-max(int(max_items), 0):]
+        return {
+            "robot_id": str(self.robot_id),
+            "zone_polygon": [(float(x), float(y)) for (x, y) in self.zone_polygon],
+            "neighbors": [str(nbr) for nbr in self.neighbors],
+            "border_radius_m": float(self.border_radius_m),
+            "recent_events_total": int(len(self.recent_events)),
+            "recent_events_preview": recent_preview,
+            "model": export_tracking_value(
+                self.m,
+                include_arrays=include_arrays,
+                max_items=max_items,
+            ),
+        }

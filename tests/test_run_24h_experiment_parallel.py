@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-import run_24h_experiment_parallel as runner
+import experiments.run_24h_experiment_parallel as runner
 
 
 class _InlineFuture:
@@ -167,11 +167,11 @@ class Run24hExperimentParallelTests(unittest.TestCase):
             prev_cwd = os.getcwd()
             os.chdir(root)
             try:
-                with patch("run_24h_experiment_parallel.ProcessPoolExecutor", _InlineExecutor), patch(
-                    "run_24h_experiment_parallel.as_completed",
+                with patch("experiments.run_24h_experiment_parallel.ProcessPoolExecutor", _InlineExecutor), patch(
+                    "experiments.run_24h_experiment_parallel.as_completed",
                     side_effect=lambda futures: list(futures),
                 ), patch(
-                    "run_24h_experiment_parallel.ds.run_baseline_suite",
+                    "experiments.run_24h_experiment_parallel.ds.run_baseline_suite",
                     side_effect=fake_run_baseline_suite,
                 ), patch.object(
                     pd.DataFrame,

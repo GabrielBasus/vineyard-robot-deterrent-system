@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import ZonePartitioner as zp
 
+from tracking_export import summarize_ndarray
+
 
 DEFAULT_INTERVENTION_MODE = "default"
 
@@ -222,6 +224,44 @@ class OnlineSESTPP:
             if len(picks) >= top_k:
                 break
         return picks
+
+    def to_tracking_dict(self, *, include_arrays: bool = False, max_items: int = 50):
+        def _array_payload(arr: np.ndarray):
+            return np.array(arr, copy=True) if include_arrays else summarize_ndarray(arr)
+
+        channel_items = list(self.inhib_channels.items())[: max(int(max_items), 0)]
+        return {
+            "x_min": float(self.x_min),
+            "x_max": float(self.x_max),
+            "y_min": float(self.y_min),
+            "y_max": float(self.y_max),
+            "nx": int(self.nx),
+            "ny": int(self.ny),
+            "dx": float(self.dx),
+            "dy": float(self.dy),
+            "sigma": float(self.sigma),
+            "omega": float(self.omega),
+            "omega_inhib": float(self.omega_inhib),
+            "alpha_in": float(self.alpha_in),
+            "alpha_cross": float(self.alpha_cross),
+            "alpha_inhib": float(self.alpha_inhib),
+            "bg_ema": float(self.bg_ema),
+            "t_now": float(self.t_now),
+            "default_intervention_mode": str(self.default_intervention_mode),
+            "inhib_channel_modes": [str(mode) for mode in self.inhib_channels.keys()],
+            "inhib_channel_omegas": {str(k): float(v) for k, v in self.inhib_channel_omegas.items()},
+            "mu": _array_payload(self.mu),
+            "trigger_mass": _array_payload(self.trigger_mass),
+            "inhib_mass": _array_payload(self.inhib_mass),
+            "lam": _array_payload(self.lam),
+            "xs": _array_payload(self.xs),
+            "ys": _array_payload(self.ys),
+            "inhib_channels": {
+                str(mode): _array_payload(grid)
+                for mode, grid in channel_items
+            },
+            "inhib_channel_count": int(len(self.inhib_channels)),
+        }
 
     def plot_intensity(self):
         plt.imshow(

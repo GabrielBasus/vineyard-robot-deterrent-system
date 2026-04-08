@@ -1,0 +1,43 @@
+{
+  "summary": {
+    "frame_count": 14401,
+    "duration_s": 14400.0,
+    "robot_count": 6,
+    "completed_tasks_total": 4947,
+    "completed_deterring_total": 4007,
+    "completed_patrolling_total": 940,
+    "completed_tasks_per_hour": 1236.75,
+    "mean_completion_latency_s": 1598.5114210632707,
+    "mean_deterring_latency_s": 1636.1784377339657,
+    "mean_patrolling_latency_s": 1437.945744680851,
+    "total_robot_distance_m": 7495.080328279925,
+    "mean_robot_distance_m": 1249.180054713321,
+    "tasks_per_km_travel": 660.0329527269131,
+    "mean_active_tasks": 3861.3594889243805,
+    "mean_active_deterring": 3325.3436566905075,
+    "mean_active_patrolling": 536.0158322338726,
+    "max_active_tasks": 7546,
+    "final_active_tasks": 7546,
+    "robot_moving_fraction": 0.04482638888888889,
+    "system": "main_native",
+    "seed": 124,
+    "repo": "C:\\Users\\gabri\\Documents\\CalPoly\\Thesis\\Code-main",
+    "module_name": "DeterrentSystem",
+    "supported_call_kwargs": {
+      "W": 500.0,
+      "H": 500.0,
+      "T_end": 14400.0,
+      "dt": 1.0,
+      "fps": 1,
+      "NX": 120,
+      "NY": 96,
+      "Nrobots": 6,
+      "uav_fraction": 0.0,
+      "task_replan_period_s": 45.0,
+      "arrival_radius_m": 3.0,
+      "hold_time_s": 20.0,
+      "seed": 124
+    },
+    "sample_every_s": 300.0
+  }
+}

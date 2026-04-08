@@ -1,0 +1,106 @@
+{
+  "base_stage": "s1_main_core",
+  "current_risk_threshold": 0.35,
+  "current_risk_scale": 0.0001,
+  "threshold_values": [
+    0.0,
+    0.05,
+    0.1,
+    0.2,
+    0.35
+  ],
+  "scale_values": [
+    0.0001,
+    0.0002,
+    0.0005,
+    0.001
+  ],
+  "cross_product": false,
+  "include_current": true,
+  "num_runs": 3,
+  "seed_start": 123,
+  "t_end": 3600.0,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 300.0,
+  "output_root": "results/simplification/risk_gate_sweep",
+  "max_workers": 8,
+  "elapsed_wall_s": 539.1116919517517,
+  "successful_variants": [
+    "s1_main_core__thr_0__scale_0p0001",
+    "s1_main_core__thr_0p1__scale_0p0001",
+    "s1_main_core__thr_0p35__scale_0p001",
+    "s1_main_core__thr_0p35__scale_0p0005",
+    "s1_main_core__thr_0p35__scale_0p0002",
+    "s1_main_core__thr_0p05__scale_0p0001",
+    "s1_main_core__thr_0p35__scale_0p0001",
+    "s1_main_core__thr_0p2__scale_0p0001"
+  ],
+  "results": [
+    {
+      "output_name": "s1_main_core__thr_0__scale_0p0001",
+      "status": "ok",
+      "duration_s": 264.00634360313416,
+      "output_dir": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0__scale_0p0001",
+      "stdout_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0__scale_0p0001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0__scale_0p0001\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p1__scale_0p0001",
+      "status": "ok",
+      "duration_s": 515.0738010406494,
+      "output_dir": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p1__scale_0p0001",
+      "stdout_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p1__scale_0p0001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p1__scale_0p0001\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p35__scale_0p001",
+      "status": "ok",
+      "duration_s": 516.6028869152069,
+      "output_dir": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p001",
+      "stdout_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p001\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p35__scale_0p0005",
+      "status": "ok",
+      "duration_s": 517.2914555072784,
+      "output_dir": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0005",
+      "stdout_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0005\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0005\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p35__scale_0p0002",
+      "status": "ok",
+      "duration_s": 517.8872647285461,
+      "output_dir": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0002",
+      "stdout_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0002\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0002\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p05__scale_0p0001",
+      "status": "ok",
+      "duration_s": 519.6244232654572,
+      "output_dir": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p05__scale_0p0001",
+      "stdout_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p05__scale_0p0001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p05__scale_0p0001\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p35__scale_0p0001",
+      "status": "ok",
+      "duration_s": 522.9535529613495,
+      "output_dir": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0001",
+      "stdout_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p35__scale_0p0001\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p2__scale_0p0001",
+      "status": "ok",
+      "duration_s": 538.7498171329498,
+      "output_dir": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p2__scale_0p0001",
+      "stdout_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p2__scale_0p0001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep\\s1_main_core__thr_0p2__scale_0p0001\\risk_gate_worker_stderr.log"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "stage": {
+    "key": "s0_simple_tasks_core",
+    "title": "Simple Tasks Core",
+    "module_name": "DeterrentSystem_simple_tasks",
+    "description": "Smallest end-to-end thesis-consistent branch already present in the repo: zone partitioning, SESTPP feedback, hotspot tasks, preventive tasks, and simple one-task-per-robot management.",
+    "added_back": [],
+    "overrides": {
+      "simple_task_management": true,
+      "task_replan_period_s": 45.0,
+      "task_max_age_s": 300.0,
+      "max_active_tasks_per_robot": 1,
+      "max_active_patrolling_per_robot": 1,
+      "max_active_model_deterring_per_robot": 1,
+      "assigner_w_load": 0.0,
+      "report_metrics_end": false
+    }
+  },
+  "output_name": "s0_simple_tasks_core",
+  "runner_args": {
+    "num_runs": 1,
+    "seed_start": 321,
+    "t_end": 60.0,
+    "dt": 2.0,
+    "nx": 60,
+    "ny": 48,
+    "time_metrics_period_s": 30.0,
+    "output_root": "results\\exploration_compare_seed_dt"
+  },
+  "extra_overrides": {},
+  "sim_kwargs": {
+    "T_end": 60.0,
+    "dt": 2.0,
+    "NX": 60,
+    "NY": 48,
+    "report_metrics_end": false,
+    "telemetry_dir": "results\\exploration_compare_seed_dt\\s0_simple_tasks_core\\telemetry",
+    "telemetry_prompt_save": false,
+    "simple_task_management": true,
+    "task_replan_period_s": 45.0,
+    "task_max_age_s": 300.0,
+    "max_active_tasks_per_robot": 1,
+    "max_active_patrolling_per_robot": 1,
+    "max_active_model_deterring_per_robot": 1,
+    "assigner_w_load": 0.0
+  }
+}

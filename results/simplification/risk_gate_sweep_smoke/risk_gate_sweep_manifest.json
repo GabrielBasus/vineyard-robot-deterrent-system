@@ -1,0 +1,56 @@
+{
+  "base_stage": "s1_main_core",
+  "current_risk_threshold": 0.35,
+  "current_risk_scale": 0.0001,
+  "threshold_values": [
+    0.0,
+    0.35
+  ],
+  "scale_values": [
+    0.0001,
+    0.0005
+  ],
+  "cross_product": false,
+  "include_current": true,
+  "num_runs": 1,
+  "seed_start": 123,
+  "t_end": 60.0,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 30.0,
+  "output_root": "results/simplification/risk_gate_sweep_smoke",
+  "max_workers": 2,
+  "elapsed_wall_s": 4.997891902923584,
+  "successful_variants": [
+    "s1_main_core__thr_0__scale_0p0001",
+    "s1_main_core__thr_0p35__scale_0p0001",
+    "s1_main_core__thr_0p35__scale_0p0005"
+  ],
+  "results": [
+    {
+      "output_name": "s1_main_core__thr_0__scale_0p0001",
+      "status": "ok",
+      "duration_s": 2.514248847961426,
+      "output_dir": "results\\simplification\\risk_gate_sweep_smoke\\s1_main_core__thr_0__scale_0p0001",
+      "stdout_path": "results\\simplification\\risk_gate_sweep_smoke\\s1_main_core__thr_0__scale_0p0001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep_smoke\\s1_main_core__thr_0__scale_0p0001\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p35__scale_0p0001",
+      "status": "ok",
+      "duration_s": 2.577676296234131,
+      "output_dir": "results\\simplification\\risk_gate_sweep_smoke\\s1_main_core__thr_0p35__scale_0p0001",
+      "stdout_path": "results\\simplification\\risk_gate_sweep_smoke\\s1_main_core__thr_0p35__scale_0p0001\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep_smoke\\s1_main_core__thr_0p35__scale_0p0001\\risk_gate_worker_stderr.log"
+    },
+    {
+      "output_name": "s1_main_core__thr_0p35__scale_0p0005",
+      "status": "ok",
+      "duration_s": 2.3560609817504883,
+      "output_dir": "results\\simplification\\risk_gate_sweep_smoke\\s1_main_core__thr_0p35__scale_0p0005",
+      "stdout_path": "results\\simplification\\risk_gate_sweep_smoke\\s1_main_core__thr_0p35__scale_0p0005\\risk_gate_worker_stdout.log",
+      "stderr_path": "results\\simplification\\risk_gate_sweep_smoke\\s1_main_core__thr_0p35__scale_0p0005\\risk_gate_worker_stderr.log"
+    }
+  ]
+}

@@ -184,6 +184,7 @@ def run_truth_generation_stage(
     taskgen: Any,
     pending_event_onsets: MutableSequence[dict],
     mon: Any,
+    record_truth_window_event_fn: Callable[[float, bool], None] | None = None,
 ) -> TruthGenerationCounters:
     if use_ground_truth:
         if w_cdf is not None:
@@ -204,10 +205,14 @@ def run_truth_generation_stage(
                     )
                 if rng.random() <= p_keep:
                     truth_accepted_events += 1
+                    if record_truth_window_event_fn is not None:
+                        record_truth_window_event_fn(float(now_t), False)
                     process_truth_event_fn(x, y, now_t)
                     spawn_offspring_fn(x, y, now_t)
                 else:
                     truth_suppressed_events += 1
+                    if record_truth_window_event_fn is not None:
+                        record_truth_window_event_fn(float(now_t), True)
 
         if truth_queue:
             due: list[tuple[float, float, float]] = []
@@ -231,10 +236,14 @@ def run_truth_generation_stage(
                     )
                 if rng.random() <= p_keep:
                     truth_accepted_events += 1
+                    if record_truth_window_event_fn is not None:
+                        record_truth_window_event_fn(float(event_t), False)
                     process_truth_event_fn(x, y, event_t)
                     spawn_offspring_fn(x, y, event_t)
                 else:
                     truth_suppressed_events += 1
+                    if record_truth_window_event_fn is not None:
+                        record_truth_window_event_fn(float(event_t), True)
     else:
         for robot in robots_def:
             robot_id = robot["id"]

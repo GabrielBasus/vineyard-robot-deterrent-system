@@ -1,0 +1,16 @@
+[
+  {
+    "system_key": "s0_simple_tasks_core",
+    "system_kind": "simplification_stage",
+    "title": "Simple Tasks Core",
+    "output_dir": "results\\exploration_compare_smoke\\s0_simple_tasks_core",
+    "comparison_csv": "results\\exploration_compare_smoke\\s0_simple_tasks_core\\comparison.csv"
+  },
+  {
+    "system_key": "row_local_priority_queue",
+    "system_kind": "exploration_variant",
+    "title": "Row-Block Local Priority Queue",
+    "output_dir": "results\\exploration_compare_smoke\\row_local_priority_queue",
+    "comparison_csv": "results\\exploration_compare_smoke\\row_local_priority_queue\\comparison.csv"
+  }
+]

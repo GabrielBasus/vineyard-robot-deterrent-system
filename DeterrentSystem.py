@@ -1,14 +1,15 @@
-import random
-import numpy as np
-from typing import Dict, List
-import pandas as pd
-import math, numpy as np
 import bisect
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-from matplotlib.patches import Polygon as MplPolygon
-from matplotlib.collections import LineCollection
+import math
+import random
 from collections import deque
+from typing import Any, Dict, List
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.animation import FuncAnimation
+from matplotlib.collections import LineCollection
+from matplotlib.patches import Polygon as MplPolygon
 
 try:
     from telemetry_sim import TelemetrySim
@@ -16,7 +17,14 @@ try:
 except Exception:
     mon = None  # telemetry disabled if import fails
 
-from ZonePartitioner import ZonePartitioner, power_cells, build_neighbors, point_in_polygon, point_to_poly_distance, health_to_weight
+from ZonePartitioner import (
+    ZonePartitioner,
+    build_neighbors,
+    health_to_weight,
+    point_in_polygon,
+    point_to_poly_distance,
+    power_cells,
+)
 from SESTPP import OnlineSESTPP
 from Robot import Robot, RobotProfile
 from TaskGenerator import TaskGenerator, TaskAssigner
@@ -25,6 +33,7 @@ from system_structure import (
     FeedbackCommunicationStageResult,
     ForecastModelStageResult,
     MetricsStageResult,
+    MotionCommand,
     MotionExecutionStageResult,
     TelemetryStageResult,
     TaskGenerationStageResult,
@@ -44,7 +53,30 @@ from system_stage_helpers import (
     run_truth_generation_stage,
 )
 from planner_profiles import canonicalize_planner_profile_name, get_planner_profile_values
+from planner_dispatch import (
+    evaluate_model_deterring_dispatch_gating,
+    has_direct_detection_conflict,
+    passes_busy_fallback_quality,
+    select_assignment,
+)
+from planner_task_extraction import (
+    build_task_dispatch_candidate_buffer,
+    extract_task_candidates_from_sestpp,
+    run_task_location_estimation,
+)
+from planner_task_generation import (
+    compute_preventive_capacity_state,
+    current_busy_deterring_robots,
+    prune_preventive_histories,
+)
+from planner_task_selection import select_preassignment_task_candidates
 from calibration_config import load_frozen_sestpp_calibration
+from tracking_export import export_named_tracking_state
+
+
+# ============================================================================
+# Communication and shared dispatch utilities
+# ============================================================================
 
 class EventBus:
     def __init__(self, robots: Dict[str, Robot], bytes_per_boundary_msg: int = 64, bytes_per_intervention_msg: int = 72):
@@ -122,6 +154,26 @@ class EventBus:
                     beta=ev.get('beta'),
                     action_id=ev.get('action_id'),
                 )
+
+    def to_tracking_dict(self, *, include_arrays: bool = False, max_items: int = 50):
+        return {
+            "robot_ids": [str(rid) for rid in self.robots.keys()],
+            "bytes_per_boundary_msg": int(self.bytes_per_boundary_msg),
+            "bytes_per_intervention_msg": int(self.bytes_per_intervention_msg),
+            "boundary_msg_count": int(self.boundary_msg_count),
+            "intervention_msg_count": int(self.intervention_msg_count),
+            "boundary_bytes": int(self.boundary_bytes),
+            "intervention_bytes": int(self.intervention_bytes),
+            "intervention_msg_dropped_debounce": int(self.intervention_msg_dropped_debounce),
+            "intervention_msg_dropped_low_weight": int(self.intervention_msg_dropped_low_weight),
+            "last_intervention_key_count": int(len(self._last_intervention_key_t)),
+            "last_intervention_key_preview": list(self._last_intervention_key_t.items())[: max(int(max_items), 0)],
+        }
+
+
+# ============================================================================
+# Task ordering and policy resolution helpers
+# ============================================================================
 
 def _is_model_deterring_candidate(task_row: dict) -> bool:
     return (
@@ -259,6 +311,10 @@ def _select_patrol_replacement_task(active_tasks: list[dict], assigned_primary: 
     return worst_patrol
 
 
+# ============================================================================
+# Runtime configuration helpers
+# ============================================================================
+
 def _resolve_preventive_policy_settings(
     *,
     simulation_mode: str,
@@ -372,6 +428,10 @@ def _resolve_calibration_runtime_overrides(
         "bg_ema": float(bg_ema),
     }
 
+
+# ============================================================================
+# Fleet and zone construction helpers
+# ============================================================================
 
 def make_robot_profiles(robots_def, rng, uav_fraction=0.4):
     """
@@ -487,7 +547,11 @@ Outputs:
 - Visualization of the zone partitioning, robot anchors, detections, and predictive hotspots.
 """
 
-# --- A very light “recent tasks” buffer for the plot ---
+# A very light recent-tasks buffer for the plot.
+
+# ============================================================================
+# Lightweight runtime buffers and the core simulation entrypoint
+# ============================================================================
 
 class RecentTasks:
     def __init__(self, maxlen=60):
@@ -496,6 +560,37 @@ class RecentTasks:
         self.buf.extend(tasks)
     def list(self):
         return list(self.buf)
+
+
+def _build_demo_tracking_links(active_tasks: list[dict], motion_commands: list[MotionCommand]) -> dict[str, Any]:
+    active_task_ids_by_robot: dict[str, list[int]] = {}
+    for task in active_tasks:
+        if str(task.get("state", "")).strip().lower() != "active":
+            continue
+        rid = task.get("assigned_primary")
+        task_id = task.get("id")
+        if rid in (None, "") or task_id is None:
+            continue
+        active_task_ids_by_robot.setdefault(str(rid), []).append(int(task_id))
+
+    current_task_ids_by_robot: dict[str, int] = {}
+    for command in motion_commands:
+        if command.assigned_task_id is None:
+            continue
+        if str(command.command_type).strip().lower() not in {"move", "hold"}:
+            continue
+        current_task_ids_by_robot[str(command.robot_id)] = int(command.assigned_task_id)
+
+    queued_task_ids_by_robot: dict[str, list[int]] = {}
+    for rid, task_ids in active_task_ids_by_robot.items():
+        current_id = current_task_ids_by_robot.get(rid)
+        queued_task_ids_by_robot[rid] = [task_id for task_id in task_ids if task_id != current_id]
+
+    return {
+        "active_task_ids_by_robot": active_task_ids_by_robot,
+        "current_task_ids_by_robot": current_task_ids_by_robot,
+        "queued_task_ids_by_robot": queued_task_ids_by_robot,
+    }
 
 def run_simulation_frames_persistent(
     # Field / timing
@@ -585,6 +680,9 @@ def run_simulation_frames_persistent(
     # Winner profile toggle: explicit opt-in only.
     enable_winner_profile=False,
     # Planner/dispatch admission controls
+    use_split_task_extraction_selection_pipeline=False,
+    preassignment_selection_policy="pass_through",
+    preassignment_selection_limit=0,
     max_active_tasks_per_robot=4,
     max_active_patrolling_per_robot=2,
     max_active_model_deterring_per_robot=1,
@@ -680,7 +778,16 @@ def run_simulation_frames_persistent(
     motion_orchestration_mode="local",
     motion_command_callback=None,
     motion_state_callback=None,
+    emit_tracking_state=False,
+    tracking_include_arrays=False,
+    tracking_preview_limit=50,
+    tracking_capture_frame_locals=False,
 ):
+    """Run the reference simulation and emit per-frame runtime snapshots."""
+
+    # ------------------------------------------------------------------------
+    # Runtime configuration resolution and validation
+    # ------------------------------------------------------------------------
     rng = np.random.default_rng(seed)
     boundary = [(0,0),(W,0),(W,H),(0,H)]
     motion_orchestration_mode = str(motion_orchestration_mode).strip().lower()
@@ -1006,6 +1113,14 @@ def run_simulation_frames_persistent(
         )
     if model_deterring_capacity_fallback_budget_per_hr is None:
         model_deterring_capacity_fallback_budget_per_hr = model_deterring_budget_per_robot_per_hr
+    use_split_task_extraction_selection_pipeline = bool(use_split_task_extraction_selection_pipeline)
+    preassignment_selection_policy = str(preassignment_selection_policy).strip().lower()
+    if preassignment_selection_policy not in {"pass_through", "priority_top_k", "capacity_aware_greedy"}:
+        raise ValueError(
+            "preassignment_selection_policy must be one of ['pass_through', 'priority_top_k', 'capacity_aware_greedy'], "
+            f"got: {preassignment_selection_policy!r}"
+        )
+    preassignment_selection_limit = max(0, int(preassignment_selection_limit))
     model_deterring_global_admission_cap_per_cycle = max(0, int(model_deterring_global_admission_cap_per_cycle))
     model_deterring_prefer_idle_robots_for_assignment = bool(model_deterring_prefer_idle_robots_for_assignment)
     model_deterring_busy_fallback_p_event_min = min(1.0, max(0.0, float(model_deterring_busy_fallback_p_event_min)))
@@ -1027,6 +1142,9 @@ def run_simulation_frames_persistent(
     protect_active_model_deterring_goal_preemption = bool(protect_active_model_deterring_goal_preemption)
     protect_locked_model_deterring_from_patrol_assignment = bool(protect_locked_model_deterring_from_patrol_assignment)
 
+    # ------------------------------------------------------------------------
+    # Runtime state initialization: fleet, zones, models, and metrics
+    # ------------------------------------------------------------------------
     # --- Seed robots & profiles (types/kinematics) ---
     robots_def = []
     if Nrobots is None:
@@ -1145,6 +1263,9 @@ def run_simulation_frames_persistent(
     fleet_moving_time = 0.0
     fleet_idle_no_task_time = 0.0
 
+    # ------------------------------------------------------------------------
+    # Local helper closures: value map, truth generation, and perception
+    # ------------------------------------------------------------------------
     # --- Vineyard value map: rows + edges (static w(x)) ---
     def value_weight(x, y):
         # Rows run along x-axis, so row centers are spaced along y.
@@ -1176,6 +1297,9 @@ def run_simulation_frames_persistent(
     suppression_effect_sum = 0.0
     suppression_effect_by_mode = {}
     suppression_effect_by_source = {"direct_detection": 0.0, "model_scored": 0.0}
+    truth_metrics_window_s = 3600.0
+    truth_candidate_event_times_last_hour = deque()
+    truth_suppressed_event_times_last_hour = deque()
     truth_event_detection_prob = min(max(float(bird_detection_prob), 0.0), 1.0)
     w_cdf = None
     w_shape = None
@@ -1251,6 +1375,37 @@ def run_simulation_frames_persistent(
             for src, c in contrib_by_source.items()
         }
         return p_keep, p_suppress, suppress_by_mode, suppress_by_source
+
+    def _prune_truth_event_window(now_t):
+        cutoff_t = float(now_t) - float(truth_metrics_window_s)
+        while truth_candidate_event_times_last_hour and truth_candidate_event_times_last_hour[0] < cutoff_t:
+            truth_candidate_event_times_last_hour.popleft()
+        while truth_suppressed_event_times_last_hour and truth_suppressed_event_times_last_hour[0] < cutoff_t:
+            truth_suppressed_event_times_last_hour.popleft()
+
+    def _record_truth_window_event(event_t, suppressed):
+        event_t = float(event_t)
+        truth_candidate_event_times_last_hour.append(event_t)
+        if suppressed:
+            truth_suppressed_event_times_last_hour.append(event_t)
+        _prune_truth_event_window(event_t)
+
+    def _current_truth_window_metrics(now_t):
+        _prune_truth_event_window(now_t)
+        candidate_last_hour = int(len(truth_candidate_event_times_last_hour))
+        suppressed_last_hour = int(len(truth_suppressed_event_times_last_hour))
+        suppression_rate_last_hour = (
+            float(suppressed_last_hour) / float(candidate_last_hour) if candidate_last_hour > 0 else float("nan")
+        )
+        birds_deterred_pct_last_hour = (
+            100.0 * float(suppressed_last_hour) / float(candidate_last_hour) if candidate_last_hour > 0 else float("nan")
+        )
+        return {
+            "truth_candidate_events_last_hour": candidate_last_hour,
+            "truth_suppressed_events_last_hour": suppressed_last_hour,
+            "truth_suppression_rate_last_hour": suppression_rate_last_hour,
+            "birds_deterred_pct_last_hour": birds_deterred_pct_last_hour,
+        }
 
     def _process_truth_event(x, y, t_now, enqueue_tasks=True, record_metrics=True):
         nonlocal value_weighted_exposure
@@ -1513,6 +1668,9 @@ def run_simulation_frames_persistent(
             counts[origin] = int(counts.get(origin, 0) + 1)
         return counts
 
+    # ------------------------------------------------------------------------
+    # Local helper closures: task generation, dispatch, and planner bookkeeping
+    # ------------------------------------------------------------------------
     # --- Task system: persistent tasks (active + completed) ---
     taskgen  = TaskGenerator(merge_radius_m=max(8.0, 0.5*sigma))
     assigner = TaskAssigner(
@@ -1602,6 +1760,10 @@ def run_simulation_frames_persistent(
         patrolling_enabled=bool(enable_patrolling),
         busy_deterring_robots=[],
         candidate_tasks=[],
+        extracted_candidate_count=0,
+        selected_candidate_count=0,
+        selection_policy="",
+        selection_rejected_counts={},
         source_buffer_size=0,
         seen_task_key_count=0,
         active_load_before_dispatch={rid: 0 for rid in robots},
@@ -1675,6 +1837,9 @@ def run_simulation_frames_persistent(
         fleet_moving_fraction_so_far=0.0,
         fleet_idle_no_task_fraction_so_far=0.0,
         truth_suppression_rate=float("nan"),
+        birds_deterred_pct=float("nan"),
+        truth_suppression_rate_last_hour=float("nan"),
+        birds_deterred_pct_last_hour=float("nan"),
         forecast_recall_at_k=float("nan"),
         forecast_precision_at_k=float("nan"),
     )
@@ -1717,75 +1882,125 @@ def run_simulation_frames_persistent(
         telemetry_dir=str(telemetry_dir),
     )
 
+    def _run_zone_partitioning_algorithm(now_t):
+        """Health-aware zone partitioning and neighbor refresh."""
+        nonlocal cells, id_to_cell
+        if not any(profiles[rid].health <= health_threshold for rid in profiles):
+            return False
+
+        partitioner.recompute(force=True)
+        cells = partitioner.cells_for_ids()
+        id_to_cell = {rid: cells[i] for i, rid in enumerate(partitioner.ids)}
+        if debug_zone_areas:
+            def _poly_area(poly):
+                if not poly:
+                    return 0.0
+                s = 0.0
+                n = len(poly)
+                for k in range(n):
+                    x1, y1 = poly[k]
+                    x2, y2 = poly[(k + 1) % n]
+                    s += x1 * y2 - x2 * y1
+                return abs(0.5 * s)
+
+            for rid0 in [rr["id"] for rr in robots_def]:
+                area = _poly_area(id_to_cell.get(rid0, []))
+                print(f"[zone@t={now_t:.1f}] {rid0} area={area:.2f}")
+        for r in robots_def:
+            rid = r["id"]
+            robots[rid].update_zone(id_to_cell.get(rid, []))   # UAVs: []
+            robots[rid].update_neighbors(partitioner.neighbors_for_id(rid))
+            if mon is not None and getattr(mon, "enabled", False):
+                mon.set_zone(rid, id_to_cell.get(rid, []), t=now_t)
+        return True
+
+    def _run_truth_generation_algorithm(now_t):
+        """Ground-truth event generation and local/boundary detection ingestion."""
+        nonlocal truth_candidate_events, truth_accepted_events, truth_suppressed_events
+        nonlocal suppression_effect_sum
+
+        truth_step = run_truth_generation_stage(
+            use_ground_truth=use_ground_truth,
+            now_t=now_t,
+            dt=dt,
+            rng=rng,
+            W=W,
+            H=H,
+            w_cdf=w_cdf,
+            w_shape=w_shape,
+            mu_true=mu_true,
+            sample_from_value_map_fn=_sample_from_value_map,
+            suppression_eval_fn=_suppression_eval,
+            process_truth_event_fn=_process_truth_event,
+            spawn_offspring_fn=_spawn_offspring,
+            truth_queue=truth_queue,
+            suppression_effect_by_mode=suppression_effect_by_mode,
+            suppression_effect_by_source=suppression_effect_by_source,
+            truth_candidate_events=truth_candidate_events,
+            truth_accepted_events=truth_accepted_events,
+            truth_suppressed_events=truth_suppressed_events,
+            suppression_effect_sum=suppression_effect_sum,
+            robots_def=robots_def,
+            pose=pose,
+            bird_present_until=bird_present_until,
+            last_detection_time=last_detection_time,
+            detect_rate_per_robot=detect_rate_per_robot,
+            bird_stay_mean_s=bird_stay_mean_s,
+            bird_detection_prob=bird_detection_prob,
+            per_robot_cooldown_s=per_robot_cooldown_s,
+            max_detections_per_step=max_detections_per_step,
+            detect_sigma_m=detect_sigma_m,
+            id_to_cell=id_to_cell,
+            point_in_polygon_fn=point_in_polygon,
+            robots=robots,
+            bus=bus,
+            taskgen=taskgen,
+            pending_event_onsets=pending_event_onsets,
+            mon=mon,
+            record_truth_window_event_fn=_record_truth_window_event,
+        )
+        truth_candidate_events = int(truth_step.truth_candidate_events)
+        truth_accepted_events = int(truth_step.truth_accepted_events)
+        truth_suppressed_events = int(truth_step.truth_suppressed_events)
+        suppression_effect_sum = float(truth_step.suppression_effect_sum)
+        return truth_step
+
     def _prune_preventive_histories(now_t):
-        hist_window = max(float(model_deterring_capacity_history_window_s), 1.0)
-        cutoff = float(now_t) - hist_window
-        for rid in robots:
-            q_budget = model_deterring_by_robot.get(rid, deque())
-            while q_budget and float(q_budget[0][0]) < (float(now_t) - 3600.0):
-                q_budget.popleft()
-            model_deterring_by_robot[rid] = q_budget
-
-            q_service = service_history_by_robot.get(rid, deque())
-            while q_service and float(q_service[0][0]) < cutoff:
-                q_service.popleft()
-            service_history_by_robot[rid] = q_service
-
-            q_direct = direct_deterring_arrivals_by_robot.get(rid, deque())
-            while q_direct and float(q_direct[0]) < cutoff:
-                q_direct.popleft()
-            direct_deterring_arrivals_by_robot[rid] = q_direct
-
-            q_model = model_deterring_admissions_by_robot.get(rid, deque())
-            while q_model and float(q_model[0]) < cutoff:
-                q_model.popleft()
-            model_deterring_admissions_by_robot[rid] = q_model
+        prune_preventive_histories(
+            now_t=now_t,
+            robot_ids=robots.keys(),
+            history_window_s=float(model_deterring_capacity_history_window_s),
+            model_deterring_by_robot=model_deterring_by_robot,
+            service_history_by_robot=service_history_by_robot,
+            direct_deterring_arrivals_by_robot=direct_deterring_arrivals_by_robot,
+            model_deterring_admissions_by_robot=model_deterring_admissions_by_robot,
+        )
 
     def _preventive_capacity_state(now_t):
         nonlocal preventive_service_rate_mean_accum, preventive_direct_arrival_rate_mean_accum
         nonlocal preventive_capacity_remaining_mean_accum, preventive_capacity_sample_count
-        _prune_preventive_histories(now_t)
-        hist_window = max(float(model_deterring_capacity_history_window_s), 1.0)
-        rho_max = max(0.0, float(model_deterring_capacity_rho_max))
-        min_completed = max(1, int(model_deterring_capacity_min_completed_tasks))
-        remaining = {}
-        ready = {}
-        remain_vals = []
-        service_vals = []
-        direct_vals = []
-        for rid in robots:
-            q_service = service_history_by_robot.get(rid, deque())
-            service_times = [float(st) for (_td, st) in q_service if float(st) > 1e-9]
-            if len(service_times) >= min_completed:
-                mean_service = float(np.mean(service_times))
-                mu_r = 3600.0 / max(mean_service, 1e-9)
-                lam_direct = 3600.0 * float(len(direct_deterring_arrivals_by_robot.get(rid, deque()))) / hist_window
-                lam_model = 3600.0 * float(len(model_deterring_admissions_by_robot.get(rid, deque()))) / hist_window
-                lam_prev_max = max(0.0, rho_max * mu_r - lam_direct)
-                rem = max(0.0, lam_prev_max - lam_model)
-                ready[rid] = True
-                remaining[rid] = float(rem)
-                preventive_service_rate_snapshot[rid] = float(mu_r)
-                preventive_direct_arrival_rate_snapshot[rid] = float(lam_direct)
-                preventive_capacity_remaining_snapshot[rid] = float(rem)
-                preventive_capacity_ready_snapshot[rid] = True
-                remain_vals.append(float(rem))
-                service_vals.append(float(mu_r))
-                direct_vals.append(float(lam_direct))
-            else:
-                ready[rid] = False
-                preventive_service_rate_snapshot[rid] = float("nan")
-                preventive_direct_arrival_rate_snapshot[rid] = float("nan")
-                if str(model_deterring_budget_mode).strip().lower() == "count_per_hour":
-                    q_budget = model_deterring_by_robot.get(rid, deque())
-                    rem = max(0.0, float(model_deterring_capacity_fallback_budget_per_hr) - float(len(q_budget)))
-                else:
-                    rem = float("nan")
-                remaining[rid] = float(rem)
-                preventive_capacity_remaining_snapshot[rid] = float(rem)
-                preventive_capacity_ready_snapshot[rid] = False
-                if np.isfinite(rem):
-                    remain_vals.append(float(rem))
+        result = compute_preventive_capacity_state(
+            now_t=now_t,
+            robot_ids=robots.keys(),
+            history_window_s=float(model_deterring_capacity_history_window_s),
+            rho_max=float(model_deterring_capacity_rho_max),
+            min_completed=int(model_deterring_capacity_min_completed_tasks),
+            budget_mode=str(model_deterring_budget_mode),
+            fallback_budget_per_hr=float(model_deterring_capacity_fallback_budget_per_hr),
+            model_deterring_by_robot=model_deterring_by_robot,
+            service_history_by_robot=service_history_by_robot,
+            direct_deterring_arrivals_by_robot=direct_deterring_arrivals_by_robot,
+            model_deterring_admissions_by_robot=model_deterring_admissions_by_robot,
+            preventive_service_rate_snapshot=preventive_service_rate_snapshot,
+            preventive_direct_arrival_rate_snapshot=preventive_direct_arrival_rate_snapshot,
+            preventive_capacity_remaining_snapshot=preventive_capacity_remaining_snapshot,
+            preventive_capacity_ready_snapshot=preventive_capacity_ready_snapshot,
+        )
+        remaining = result["remaining"]
+        ready = result["ready"]
+        remain_vals = result["remain_vals"]
+        service_vals = result["service_vals"]
+        direct_vals = result["direct_vals"]
         if remain_vals or service_vals or direct_vals:
             preventive_capacity_sample_count += 1
             preventive_capacity_remaining_mean_accum += float(np.mean(remain_vals)) if remain_vals else 0.0
@@ -1793,116 +2008,218 @@ def run_simulation_frames_persistent(
             preventive_direct_arrival_rate_mean_accum += float(np.mean(direct_vals)) if direct_vals else 0.0
         return remaining, ready
 
+    def _current_busy_deterring_robots_algorithm():
+        """Robots currently occupied by active deterring tasks."""
+        return current_busy_deterring_robots(active_tasks)
+
+    def _run_preventive_capacity_gating_algorithm(now_t):
+        """Preventive-capacity estimate used to gate model-scored deterring generation."""
+        if not enable_patrolling:
+            return {rid: float("nan") for rid in robots}, {rid: False for rid in robots}
+        return _preventive_capacity_state(now_t)
+
+    def _run_task_location_estimation_algorithm(
+        now_t,
+        *,
+        busy_deterring_robots,
+        preventive_capacity_remaining,
+        preventive_capacity_ready,
+    ):
+        """Estimate patrol and preventive task locations from the field and recent events."""
+        run_task_location_estimation(
+            taskgen=taskgen,
+            robots=robots,
+            now_t=now_t,
+            enable_patrolling=bool(enable_patrolling),
+            include_fallback_patrol=bool(include_fallback_patrol),
+            enable_model_scored_deterring=bool(enable_model_scored_deterring),
+            model_deterring_window_s=float(model_deterring_window_s),
+            model_deterring_risk_threshold=float(model_deterring_risk_threshold),
+            model_deterring_risk_scale=float(model_deterring_risk_scale),
+            model_deterring_min_recent_points=int(model_deterring_min_recent_points),
+            model_deterring_field_threshold=model_deterring_field_threshold,
+            model_deterring_min_persistence_replans=int(model_deterring_min_persistence_replans),
+            model_deterring_persistence_max_gap_s=float(model_deterring_persistence_max_gap_s),
+            model_deterring_score_margin=float(model_deterring_score_margin),
+            model_deterring_repeat_block_window_s=float(model_deterring_repeat_block_window_s),
+            model_deterring_repeat_block_radius_m=float(model_deterring_repeat_block_radius_m),
+            model_deterring_max_eta_s=float(model_deterring_max_eta_s),
+            model_deterring_busy_min_support_override=int(model_deterring_busy_min_support_override),
+            model_deterring_busy_risk_override=float(model_deterring_busy_risk_override),
+            enable_predicted_deltaJ_gate=bool(enable_predicted_deltaJ_gate),
+            min_predicted_deltaJ_for_model_deterring=float(min_predicted_deltaJ_for_model_deterring),
+            model_deterring_gate_policy=str(model_deterring_gate_policy),
+            model_deterring_sprt_alpha=float(model_deterring_sprt_alpha),
+            model_deterring_sprt_beta=float(model_deterring_sprt_beta),
+            model_deterring_sprt_patch_radius_m=model_deterring_sprt_patch_radius_m,
+            model_deterring_min_sprt_margin=float(model_deterring_min_sprt_margin),
+            model_deterring_chance_threshold=float(model_deterring_chance_threshold),
+            model_deterring_min_deltaJ_per_cost=float(model_deterring_min_deltaJ_per_cost),
+            model_deterring_min_selection_weight=float(model_deterring_min_selection_weight),
+            preventive_capacity_remaining_by_robot=preventive_capacity_remaining,
+            preventive_capacity_ready_by_robot=preventive_capacity_ready,
+            task_replan_period_s=float(task_replan_period_s),
+            busy_deterring_robots=busy_deterring_robots,
+            recent_deterrences=list(recent_deterrences),
+            profiles=profiles,
+            use_live_robot_pose_for_task_planning=bool(use_live_robot_pose_for_task_planning),
+            pose=pose,
+            rng=rng,
+            patrol_hotspot_filter_mode=patrol_hotspot_filter_mode,
+            patrol_hotspot_score_percentile=float(patrol_hotspot_score_percentile),
+            patrol_hotspot_keep_top_k=patrol_hotspot_keep_top_k,
+            patrol_feedback_inhibition_retention=float(patrol_feedback_inhibition_retention),
+            value_weight_fn=value_weight,
+            deterring_modes=deterring_modes,
+        )
+
+    def _build_task_dispatch_candidate_buffer_algorithm(now_t):
+        """Assemble the candidate task buffer passed from estimation into dispatch."""
+        return build_task_dispatch_candidate_buffer(
+            now_t=now_t,
+            active_tasks=active_tasks,
+            completed_tasks=completed_tasks,
+            consumed_task_keys=consumed_task_keys,
+            taskgen=taskgen,
+            robot_ids=robots.keys(),
+            task_buffer_key_fn=_task_buffer_key,
+            is_direct_detection_task_fn=_is_direct_detection_task,
+            cluster_direct_detection_candidate_tasks_fn=_cluster_direct_detection_candidate_tasks,
+        )
+
+    def _run_task_extraction_algorithm(
+        now_t,
+        *,
+        busy_deterring_robots,
+        preventive_capacity_remaining,
+        preventive_capacity_ready,
+    ):
+        """SESTPP-driven task extraction before any pre-assignment selection."""
+        if not bool(use_split_task_extraction_selection_pipeline):
+            _run_task_location_estimation_algorithm(
+                now_t,
+                busy_deterring_robots=busy_deterring_robots,
+                preventive_capacity_remaining=preventive_capacity_remaining,
+                preventive_capacity_ready=preventive_capacity_ready,
+            )
+            return _build_task_dispatch_candidate_buffer_algorithm(now_t)
+
+        return extract_task_candidates_from_sestpp(
+            estimation_kwargs={
+                "taskgen": taskgen,
+                "robots": robots,
+                "now_t": now_t,
+                "enable_patrolling": bool(enable_patrolling),
+                "include_fallback_patrol": bool(include_fallback_patrol),
+                "enable_model_scored_deterring": bool(enable_model_scored_deterring),
+                "model_deterring_window_s": float(model_deterring_window_s),
+                "model_deterring_risk_threshold": float(model_deterring_risk_threshold),
+                "model_deterring_risk_scale": float(model_deterring_risk_scale),
+                "model_deterring_min_recent_points": int(model_deterring_min_recent_points),
+                "model_deterring_field_threshold": model_deterring_field_threshold,
+                "model_deterring_min_persistence_replans": int(model_deterring_min_persistence_replans),
+                "model_deterring_persistence_max_gap_s": float(model_deterring_persistence_max_gap_s),
+                "model_deterring_score_margin": float(model_deterring_score_margin),
+                "model_deterring_repeat_block_window_s": float(model_deterring_repeat_block_window_s),
+                "model_deterring_repeat_block_radius_m": float(model_deterring_repeat_block_radius_m),
+                "model_deterring_max_eta_s": float(model_deterring_max_eta_s),
+                "model_deterring_busy_min_support_override": int(model_deterring_busy_min_support_override),
+                "model_deterring_busy_risk_override": float(model_deterring_busy_risk_override),
+                "enable_predicted_deltaJ_gate": bool(enable_predicted_deltaJ_gate),
+                "min_predicted_deltaJ_for_model_deterring": float(min_predicted_deltaJ_for_model_deterring),
+                "model_deterring_gate_policy": str(model_deterring_gate_policy),
+                "model_deterring_sprt_alpha": float(model_deterring_sprt_alpha),
+                "model_deterring_sprt_beta": float(model_deterring_sprt_beta),
+                "model_deterring_sprt_patch_radius_m": model_deterring_sprt_patch_radius_m,
+                "model_deterring_min_sprt_margin": float(model_deterring_min_sprt_margin),
+                "model_deterring_chance_threshold": float(model_deterring_chance_threshold),
+                "model_deterring_min_deltaJ_per_cost": float(model_deterring_min_deltaJ_per_cost),
+                "model_deterring_min_selection_weight": float(model_deterring_min_selection_weight),
+                "preventive_capacity_remaining_by_robot": preventive_capacity_remaining,
+                "preventive_capacity_ready_by_robot": preventive_capacity_ready,
+                "task_replan_period_s": float(task_replan_period_s),
+                "busy_deterring_robots": busy_deterring_robots,
+                "recent_deterrences": list(recent_deterrences),
+                "profiles": profiles,
+                "use_live_robot_pose_for_task_planning": bool(use_live_robot_pose_for_task_planning),
+                "pose": pose,
+                "rng": rng,
+                "patrol_hotspot_filter_mode": patrol_hotspot_filter_mode,
+                "patrol_hotspot_score_percentile": float(patrol_hotspot_score_percentile),
+                "patrol_hotspot_keep_top_k": patrol_hotspot_keep_top_k,
+                "patrol_feedback_inhibition_retention": float(patrol_feedback_inhibition_retention),
+                "value_weight_fn": value_weight,
+                "deterring_modes": deterring_modes,
+            },
+            buffer_kwargs={
+                "now_t": now_t,
+                "active_tasks": active_tasks,
+                "completed_tasks": completed_tasks,
+                "consumed_task_keys": consumed_task_keys,
+                "taskgen": taskgen,
+                "robot_ids": robots.keys(),
+                "task_buffer_key_fn": _task_buffer_key,
+                "is_direct_detection_task_fn": _is_direct_detection_task,
+                "cluster_direct_detection_candidate_tasks_fn": _cluster_direct_detection_candidate_tasks,
+            },
+        )
+
+    def _run_task_selection_algorithm(now_t, extraction_buffer):
+        """Pre-assignment gating/selection over extracted task candidates."""
+        if not bool(use_split_task_extraction_selection_pipeline):
+            candidate_tasks = [dict(task) for task in extraction_buffer["candidate_tasks"]]
+            return {
+                "selection_policy": "legacy_inline_dispatch",
+                "selected_candidate_tasks": candidate_tasks,
+                "rejected_candidate_tasks": [],
+                "rejected_counts": {},
+                "extracted_candidate_count": int(len(candidate_tasks)),
+                "selected_candidate_count": int(len(candidate_tasks)),
+            }
+
+        return select_preassignment_task_candidates(
+            candidate_tasks=extraction_buffer["candidate_tasks"],
+            selection_policy=str(preassignment_selection_policy),
+            selection_limit=int(preassignment_selection_limit),
+            is_direct_detection_task_fn=_is_direct_detection_task_row,
+            priority_sort_key_fn=_dispatch_priority_sort_key,
+            now_t=float(now_t),
+            active_load_by_robot=extraction_buffer["active_load"],
+            active_patrol_load_by_robot=extraction_buffer["active_patrol_load"],
+            active_model_det_load_by_robot=extraction_buffer["active_model_det_load"],
+            max_active_tasks_per_robot=int(max_active_tasks_per_robot),
+            max_active_patrolling_per_robot=int(max_active_patrolling_per_robot),
+            max_active_model_deterring_per_robot=int(max_active_model_deterring_per_robot),
+            preserve_direct_detection_priority=True,
+        )
+
     def _run_task_generation_stage(now_t, patrolling_only=False):
         if not patrolling_only:
             pass  # direct-detection deterring tasks are still enqueued elsewhere
-        busy_deterring_robots = set()
-        preventive_capacity_remaining = {rid: float("nan") for rid in robots}
-        preventive_capacity_ready = {rid: False for rid in robots}
-        if enable_patrolling:
-            busy_deterring_robots = {
-                str(tr.get("assigned_primary"))
-                for tr in active_tasks
-                if (
-                    str(tr.get("state", "")).strip().lower() == "active"
-                    and str(tr.get("type", "")).strip().lower() == "deterring"
-                    and tr.get("assigned_primary") is not None
-                )
-            }
-            preventive_capacity_remaining, preventive_capacity_ready = _preventive_capacity_state(now_t)
-            taskgen.periodic_patrolling(
-                robots=robots,
-                now_t=now_t,
-                hotspot_top_k=5,
-                include_fallback_patrol=include_fallback_patrol,
-                enable_model_scored_deterring=bool(enable_model_scored_deterring),
-                deterring_window_s=float(model_deterring_window_s),
-                deterring_risk_threshold=float(model_deterring_risk_threshold),
-                deterring_risk_scale=float(model_deterring_risk_scale),
-                deterring_min_recent_points=int(model_deterring_min_recent_points),
-                deterring_field_threshold=model_deterring_field_threshold,
-                deterring_min_persistence_replans=int(model_deterring_min_persistence_replans),
-                deterring_persistence_max_gap_s=float(model_deterring_persistence_max_gap_s),
-                deterring_score_margin=float(model_deterring_score_margin),
-                deterring_repeat_block_window_s=float(model_deterring_repeat_block_window_s),
-                deterring_repeat_block_radius_m=float(model_deterring_repeat_block_radius_m),
-                deterring_max_eta_s=float(model_deterring_max_eta_s),
-                deterring_busy_min_support_override=int(model_deterring_busy_min_support_override),
-                deterring_busy_risk_override=float(model_deterring_busy_risk_override),
-                enable_predicted_deltaJ_gate=bool(enable_predicted_deltaJ_gate),
-                min_predicted_deltaJ_for_model_deterring=float(min_predicted_deltaJ_for_model_deterring),
-                model_deterring_gate_policy=str(model_deterring_gate_policy),
-                model_deterring_sprt_alpha=float(model_deterring_sprt_alpha),
-                model_deterring_sprt_beta=float(model_deterring_sprt_beta),
-                model_deterring_sprt_patch_radius_m=model_deterring_sprt_patch_radius_m,
-                model_deterring_min_sprt_margin=float(model_deterring_min_sprt_margin),
-                model_deterring_chance_threshold=float(model_deterring_chance_threshold),
-                model_deterring_min_deltaJ_per_cost=float(model_deterring_min_deltaJ_per_cost),
-                model_deterring_min_selection_weight=float(model_deterring_min_selection_weight),
-                preventive_capacity_remaining_by_robot=preventive_capacity_remaining,
-                preventive_capacity_ready_by_robot=preventive_capacity_ready,
-                replan_interval_s=float(task_replan_period_s),
-                busy_deterring_robots=busy_deterring_robots,
-                recent_deterrence_events=list(recent_deterrences),
-                profiles=profiles,
-                robot_poses=(pose if bool(use_live_robot_pose_for_task_planning) else None),
-                rng=rng,
-                patrol_hotspot_filter_mode=patrol_hotspot_filter_mode,
-                patrol_hotspot_score_percentile=float(patrol_hotspot_score_percentile),
-                patrol_hotspot_keep_top_k=patrol_hotspot_keep_top_k,
-                patrol_feedback_inhibition_retention=float(patrol_feedback_inhibition_retention),
-                spinup_by_type={"UAV": 8.0, "UGV": 0.0},
-                weight_fn=value_weight,
-                deterring_modes=deterring_modes,
-            )
-
-        seen_keys = {_task_buffer_key(t) for t in active_tasks}
-        seen_keys |= {_task_buffer_key(t) for t in completed_tasks}
-        seen_keys |= set(consumed_task_keys)
-        active_load = {rid: 0 for rid in robots}
-        active_patrol_load = {rid: 0 for rid in robots}
-        active_model_det_load = {rid: 0 for rid in robots}
-        for tr in active_tasks:
-            if str(tr.get("state", "")).strip().lower() != "active":
-                continue
-            ridp = tr.get("assigned_primary")
-            if ridp not in active_load:
-                continue
-            active_load[ridp] += 1
-            if str(tr.get("type", "")).strip().lower() == "patrolling":
-                active_patrol_load[ridp] += 1
-            if (
-                str(tr.get("type", "")).strip().lower() == "deterring"
-                and tr.get("mode") not in (None, "", "none")
-            ):
-                active_model_det_load[ridp] += 1
-
-        candidate_tasks = []
-        recent_rows = taskgen.rows()[-200:]
-        for task in recent_rows:
-            if (not np.isfinite(task.get("x", float("nan")))) or (not np.isfinite(task.get("y", float("nan")))):
-                continue
-            key = _task_buffer_key(task)
-            if key in seen_keys:
-                continue
-            row = dict(task)
-            if _is_direct_detection_task(row):
-                row["last_detection_t"] = float(row.get("last_detection_t", row.get("time", now_t)))
-                row["merged_detection_count"] = int(row.get("merged_detection_count", 1))
-                row["cluster_refresh_count"] = int(row.get("cluster_refresh_count", 0))
-            candidate_tasks.append(row)
-        candidate_tasks = _cluster_direct_detection_candidate_tasks(candidate_tasks)
+        busy_deterring_robots = _current_busy_deterring_robots_algorithm()
+        preventive_capacity_remaining, preventive_capacity_ready = _run_preventive_capacity_gating_algorithm(now_t)
+        extraction_buffer = _run_task_extraction_algorithm(
+            now_t,
+            busy_deterring_robots=busy_deterring_robots,
+            preventive_capacity_remaining=preventive_capacity_remaining,
+            preventive_capacity_ready=preventive_capacity_ready,
+        )
+        selection_buffer = _run_task_selection_algorithm(now_t, extraction_buffer)
 
         return TaskGenerationStageResult(
             now_t=float(now_t),
             patrolling_enabled=bool(enable_patrolling),
             busy_deterring_robots=sorted(str(rid) for rid in busy_deterring_robots),
-            candidate_tasks=candidate_tasks,
-            source_buffer_size=int(len(recent_rows)),
-            seen_task_key_count=int(len(seen_keys)),
-            active_load_before_dispatch=dict(active_load),
-            active_patrol_load_before_dispatch=dict(active_patrol_load),
-            active_model_det_load_before_dispatch=dict(active_model_det_load),
+            candidate_tasks=list(selection_buffer["selected_candidate_tasks"]),
+            extracted_candidate_count=int(selection_buffer["extracted_candidate_count"]),
+            selected_candidate_count=int(selection_buffer["selected_candidate_count"]),
+            selection_policy=str(selection_buffer["selection_policy"]),
+            selection_rejected_counts=dict(selection_buffer["rejected_counts"]),
+            source_buffer_size=int(len(extraction_buffer["recent_rows"])),
+            seen_task_key_count=int(len(extraction_buffer["seen_keys"])),
+            active_load_before_dispatch=dict(extraction_buffer["active_load"]),
+            active_patrol_load_before_dispatch=dict(extraction_buffer["active_patrol_load"]),
+            active_model_det_load_before_dispatch=dict(extraction_buffer["active_model_det_load"]),
             diag_counts=dict(getattr(taskgen, "diag_counts", {})),
         )
 
@@ -1946,40 +2263,17 @@ def run_simulation_frames_persistent(
         ordered_candidate_preview = _build_dispatch_order_preview(task_stage.candidate_tasks)
 
         def _has_direct_detection_conflict(task_row, assigned_primary):
-            if not bool(protect_direct_detection_from_model_deterring):
-                return False
-            tx = float(task_row.get("x", 0.0))
-            ty = float(task_row.get("y", 0.0))
-            direct_r2 = float(model_deterring_direct_conflict_radius_m) ** 2
-            direct_window = float(model_deterring_direct_conflict_window_s)
-            for tr in active_tasks:
-                if str(tr.get("state", "")).strip().lower() != "active":
-                    continue
-                if str(tr.get("type", "")).strip().lower() != "deterring":
-                    continue
-                if _deterring_source(tr) != "direct_detection":
-                    continue
-                if str(tr.get("assigned_primary")) == str(assigned_primary):
-                    return True
-                dx = tx - float(tr.get("x", 0.0))
-                dy = ty - float(tr.get("y", 0.0))
-                if (dx * dx + dy * dy) <= direct_r2:
-                    return True
-            if direct_window <= 0.0:
-                return False
-            for tr in reversed(completed_tasks):
-                if str(tr.get("type", "")).strip().lower() != "deterring":
-                    continue
-                if _deterring_source(tr) != "direct_detection":
-                    continue
-                t_done = float(tr.get("t_done", -1e18))
-                if (float(now_t) - t_done) > direct_window:
-                    break
-                dx = tx - float(tr.get("x", 0.0))
-                dy = ty - float(tr.get("y", 0.0))
-                if (dx * dx + dy * dy) <= direct_r2:
-                    return True
-            return False
+            return has_direct_detection_conflict(
+                task_row=task_row,
+                assigned_primary=assigned_primary,
+                active_tasks=active_tasks,
+                completed_tasks=completed_tasks,
+                now_t=now_t,
+                protect_direct_detection_from_model_deterring=bool(protect_direct_detection_from_model_deterring),
+                direct_conflict_radius_m=float(model_deterring_direct_conflict_radius_m),
+                direct_conflict_window_s=float(model_deterring_direct_conflict_window_s),
+                deterring_source_fn=_deterring_source,
+            )
 
         def _record_model_det_rejection(reason, task_row, assigned_primary=None, assigned_secondary=None):
             if (not bool(emit_rejected_model_det_debug)) or (not _is_model_deterring_candidate(task_row)):
@@ -2008,13 +2302,11 @@ def run_simulation_frames_persistent(
             )
 
         def _passes_busy_fallback_quality(task_row):
-            p_event = float(task_row.get("p_event", 0.0))
-            deltaJ_per_cost = float(task_row.get("deltaJ_per_cost", 0.0))
-            eta_s = float(task_row.get("eta_s", float("inf")))
-            return (
-                p_event >= float(model_deterring_busy_fallback_p_event_min)
-                and deltaJ_per_cost >= float(model_deterring_busy_fallback_deltaJ_per_cost_min)
-                and eta_s <= float(model_deterring_busy_fallback_eta_s_max)
+            return passes_busy_fallback_quality(
+                task_row=task_row,
+                p_event_min=float(model_deterring_busy_fallback_p_event_min),
+                deltaJ_per_cost_min=float(model_deterring_busy_fallback_deltaJ_per_cost_min),
+                eta_s_max=float(model_deterring_busy_fallback_eta_s_max),
             )
 
         def _evict_active_patrol_task(evict_tr):
@@ -2030,23 +2322,105 @@ def run_simulation_frames_persistent(
                     goal[rid_e] = None
             planner_replaced_patrol += 1
 
+        def _select_assignment_algorithm(task_row):
+            """Assignment scoring and robot selection before dispatch admission gates."""
+            selection = select_assignment(
+                task_row=task_row,
+                active_load=active_load,
+                assigner=assigner,
+                prefer_idle_for_model_deterring=bool(model_deterring_prefer_idle_robots_for_assignment),
+                is_model_deterring_candidate_fn=_is_model_deterring_candidate,
+            )
+            return {
+                "task_type": str(selection.task_type),
+                "is_model_det": bool(selection.is_model_det),
+                "assigned_primary": selection.assigned_primary,
+                "assigned_secondary": selection.assigned_secondary,
+            }
+
+        def _apply_patrol_lock_gating_algorithm(task_type, assigned_primary, now_t):
+            """Protect robots already committed to locked preventive deterring work."""
+            nonlocal planner_rejected_patrol_locked_model_det
+            if (
+                task_type == "patrolling"
+                and bool(protect_locked_model_deterring_from_patrol_assignment)
+                and _has_locked_model_deterring_on_robot(assigned_primary, now_t)
+            ):
+                planner_rejected_patrol_locked_model_det += 1
+                rejected_counts["patrol_locked_model_det"] += 1
+                return False
+            return True
+
+        def _evaluate_model_deterring_dispatch_gating_algorithm(
+            task_row,
+            assigned_primary,
+            assigned_primary_busy,
+            accepted_this_cycle,
+            active_model_det_load_map,
+            now_t,
+        ):
+            """Admission gates for model-scored deterring after assignment selection."""
+            result = evaluate_model_deterring_dispatch_gating(
+                task_row=task_row,
+                assigned_primary=assigned_primary,
+                assigned_primary_busy=bool(assigned_primary_busy),
+                accepted_this_cycle=int(accepted_this_cycle),
+                active_model_det_load_map=active_model_det_load_map,
+                now_t=now_t,
+                model_deterring_global_admission_cap_per_cycle=int(model_deterring_global_admission_cap_per_cycle),
+                model_deterring_require_idle_robot_for_admission=bool(model_deterring_require_idle_robot_for_admission),
+                model_deterring_budget_mode=str(model_deterring_budget_mode),
+                model_deterring_budget_per_robot_per_hr=int(model_deterring_budget_per_robot_per_hr),
+                model_deterring_budget_utility_per_robot_per_hr=float(model_deterring_budget_utility_per_robot_per_hr),
+                max_active_model_deterring_per_robot=int(max_active_model_deterring_per_robot),
+                model_deterring_by_robot=model_deterring_by_robot,
+                dispatch_task_value_fn=_dispatch_task_value,
+                is_model_deterring_candidate_fn=_is_model_deterring_candidate,
+                direct_conflict_fn=_has_direct_detection_conflict,
+                busy_fallback_quality_fn=_passes_busy_fallback_quality,
+            )
+            return {
+                "reason": result.reason,
+                "task_utility": float(result.task_utility),
+                "budget_mode": str(result.budget_mode),
+                "budget_queue": result.budget_queue,
+            }
+
+        def _apply_model_deterring_dispatch_rejection_accounting(reason):
+            """Central accounting for preventive dispatch rejections."""
+            nonlocal model_deterring_rejected_budget
+            nonlocal model_deterring_rejected_budget_count_mode, model_deterring_rejected_budget_utility_mode
+            nonlocal planner_rejected_model_det_cycle_cap, planner_rejected_model_det_busy_primary
+            nonlocal planner_rejected_model_det_busy_fallback_quality, planner_rejected_model_det_direct_conflict
+            nonlocal planner_rejected_model_det_cap
+
+            if reason == "cycle_cap":
+                planner_rejected_model_det_cycle_cap += 1
+                rejected_counts["model_det_cycle_cap"] += 1
+            elif reason == "busy_primary":
+                planner_rejected_model_det_busy_primary += 1
+                rejected_counts["model_det_busy_primary"] += 1
+            elif reason == "busy_fallback_quality":
+                planner_rejected_model_det_busy_fallback_quality += 1
+                rejected_counts["model_det_busy_fallback_quality"] += 1
+            elif reason == "direct_conflict":
+                planner_rejected_model_det_direct_conflict += 1
+                rejected_counts["model_det_direct_conflict"] += 1
+            elif reason == "model_det_cap":
+                planner_rejected_model_det_cap += 1
+                rejected_counts["model_det_cap"] += 1
+            elif reason == "budget":
+                model_deterring_rejected_budget += 1
+                rejected_counts["budget"] += 1
+            else:
+                return
+
         for t in ordered_candidates:
-            assigner.set_load(active_load)
-            ttype = str(t.get("type", "")).strip().lower()
-            is_model_det = _is_model_deterring_candidate(t)
-            res = None
-            if is_model_det and bool(model_deterring_prefer_idle_robots_for_assignment):
-                idle_robot_ids = [
-                    str(rid)
-                    for rid, load in active_load.items()
-                    if int(load) <= 0
-                ]
-                if idle_robot_ids:
-                    res = assigner.assign_task(t, eligible_ids=idle_robot_ids)
-            if res is None:
-                res = assigner.assign_task(t)
-            assigned_primary = res and res["primary"]
-            assigned_secondary = res and res["secondary"]
+            assignment = _select_assignment_algorithm(t)
+            ttype = assignment["task_type"]
+            is_model_det = bool(assignment["is_model_det"])
+            assigned_primary = assignment["assigned_primary"]
+            assigned_secondary = assignment["assigned_secondary"]
             if assigned_primary is None:
                 _record_model_det_rejection("unassigned", t, assigned_primary, assigned_secondary)
                 planner_rejected_unassigned += 1
@@ -2055,72 +2429,29 @@ def run_simulation_frames_persistent(
 
             assigned_primary_busy = active_load.get(assigned_primary, 0) > 0
 
-            if (
-                ttype == "patrolling"
-                and bool(protect_locked_model_deterring_from_patrol_assignment)
-                and _has_locked_model_deterring_on_robot(assigned_primary, now_t)
-            ):
-                planner_rejected_patrol_locked_model_det += 1
-                rejected_counts["patrol_locked_model_det"] += 1
+            if not _apply_patrol_lock_gating_algorithm(ttype, assigned_primary, now_t):
                 continue
 
-            budget_queue = None
-            budget_mode = "count_per_hour"
-            t_utility = max(0.0, _dispatch_task_value(t))
-            if is_model_det:
-                if (
-                    model_deterring_global_admission_cap_per_cycle > 0
-                    and model_deterring_accepted_this_cycle >= int(model_deterring_global_admission_cap_per_cycle)
-                ):
-                    _record_model_det_rejection("cycle_cap", t, assigned_primary, assigned_secondary)
-                    planner_rejected_model_det_cycle_cap += 1
-                    rejected_counts["model_det_cycle_cap"] += 1
-                    continue
-                if bool(model_deterring_require_idle_robot_for_admission) and assigned_primary_busy:
-                    _record_model_det_rejection("busy_primary", t, assigned_primary, assigned_secondary)
-                    planner_rejected_model_det_busy_primary += 1
-                    rejected_counts["model_det_busy_primary"] += 1
-                    continue
-                if assigned_primary_busy and (not bool(model_deterring_require_idle_robot_for_admission)):
-                    if not _passes_busy_fallback_quality(t):
-                        _record_model_det_rejection("busy_fallback_quality", t, assigned_primary, assigned_secondary)
-                        planner_rejected_model_det_busy_fallback_quality += 1
-                        rejected_counts["model_det_busy_fallback_quality"] += 1
-                        continue
-                if _has_direct_detection_conflict(t, assigned_primary):
-                    _record_model_det_rejection("direct_conflict", t, assigned_primary, assigned_secondary)
-                    planner_rejected_model_det_direct_conflict += 1
-                    rejected_counts["model_det_direct_conflict"] += 1
-                    continue
-                if active_model_det_load.get(assigned_primary, 0) >= int(max_active_model_deterring_per_robot):
-                    _record_model_det_rejection("model_det_cap", t, assigned_primary, assigned_secondary)
-                    planner_rejected_model_det_cap += 1
-                    rejected_counts["model_det_cap"] += 1
-                    continue
-                q = deque(model_deterring_by_robot.get(assigned_primary, deque()))
-                while q and float(q[0][0]) < (now_t - 3600.0):
-                    q.popleft()
-                budget_mode = str(model_deterring_budget_mode).strip().lower()
-                if budget_mode not in ("count_per_hour", "utility_per_hour"):
-                    budget_mode = "count_per_hour"
-                over_budget = False
-                if budget_mode == "utility_per_hour":
-                    util_budget = max(0.0, float(model_deterring_budget_utility_per_robot_per_hr))
-                    spent_utility = float(sum(float(u) for (_ts, u) in q))
-                    over_budget = (spent_utility + t_utility) > util_budget
-                else:
-                    over_budget = len(q) >= int(model_deterring_budget_per_robot_per_hr)
-                if over_budget:
-                    _record_model_det_rejection("budget", t, assigned_primary, assigned_secondary)
-                    model_deterring_rejected_budget += 1
-                    rejected_counts["budget"] += 1
+            gating = _evaluate_model_deterring_dispatch_gating_algorithm(
+                t,
+                assigned_primary,
+                assigned_primary_busy,
+                model_deterring_accepted_this_cycle,
+                active_model_det_load,
+                now_t,
+            )
+            budget_queue = gating["budget_queue"]
+            budget_mode = gating["budget_mode"]
+            t_utility = float(gating["task_utility"])
+            if gating["reason"] is not None:
+                _record_model_det_rejection(gating["reason"], t, assigned_primary, assigned_secondary)
+                _apply_model_deterring_dispatch_rejection_accounting(gating["reason"])
+                if gating["reason"] == "budget":
                     if budget_mode == "utility_per_hour":
                         model_deterring_rejected_budget_utility_mode += 1
                     else:
                         model_deterring_rejected_budget_count_mode += 1
-                    continue
-
-                budget_queue = q
+                continue
 
             if active_load.get(assigned_primary, 0) >= int(max_active_tasks_per_robot):
                 if (ttype == "patrolling") or is_model_det:
@@ -2223,6 +2554,9 @@ def run_simulation_frames_persistent(
         last_task_generation_structured = _run_task_generation_stage(now_t, patrolling_only=patrolling_only)
         last_dispatch_structured = _run_dispatch_stage(now_t, last_task_generation_structured)
 
+    # ------------------------------------------------------------------------
+    # Local helper closures: motion projection and task lifecycle completion
+    # ------------------------------------------------------------------------
     # Motion helpers (row-constrained movement with headland lane switching)
     def _row_bands():
         if row_spacing_m <= 0:
@@ -2581,6 +2915,9 @@ def run_simulation_frames_persistent(
                 break
         return int(protected_count)
 
+    # ------------------------------------------------------------------------
+    # Simulation clocking, warmup, and end-of-run summaries
+    # ------------------------------------------------------------------------
     # Sim clocks / cadence
     warmup_s = max(0.0, float(warmup_s))
     t_start = 0.0
@@ -2604,10 +2941,12 @@ def run_simulation_frames_persistent(
                         suppression_effect_by_source[sk] = float(suppression_effect_by_source.get(sk, 0.0) + sv)
                     if rng.random() <= p_keep:
                         truth_accepted_events += 1
+                        _record_truth_window_event(t_w, False)
                         _process_truth_event(x, y, t_w, enqueue_tasks=False, record_metrics=False)
                         _spawn_offspring(x, y, t_w)
                     else:
                         truth_suppressed_events += 1
+                        _record_truth_window_event(t_w, True)
 
                 truth_queue.sort(key=lambda z: z[2])
                 due = []
@@ -2623,10 +2962,12 @@ def run_simulation_frames_persistent(
                         suppression_effect_by_source[sk] = float(suppression_effect_by_source.get(sk, 0.0) + sv)
                     if rng.random() <= p_keep:
                         truth_accepted_events += 1
+                        _record_truth_window_event(te, False)
                         _process_truth_event(x, y, te, enqueue_tasks=False, record_metrics=False)
                         _spawn_offspring(x, y, te)
                     else:
                         truth_suppressed_events += 1
+                        _record_truth_window_event(te, True)
             t_w += dt
 
         # Reset public-facing/metrics buffers so the scored run starts clean at t=0.
@@ -2640,6 +2981,8 @@ def run_simulation_frames_persistent(
         truth_candidate_events = 0
         truth_accepted_events = 0
         truth_suppressed_events = 0
+        truth_candidate_event_times_last_hour.clear()
+        truth_suppressed_event_times_last_hour.clear()
         suppression_effect_sum = 0.0
         suppression_effect_by_mode.clear()
         suppression_effect_by_source = {"direct_detection": 0.0, "model_scored": 0.0}
@@ -2738,6 +3081,9 @@ def run_simulation_frames_persistent(
         })
         return out
 
+    # ------------------------------------------------------------------------
+    # Main simulation loop
+    # ------------------------------------------------------------------------
     while t <= t_end:
         step_pose_before = {rid: tuple(pose[rid]) for rid in pose}
         step_motion_feedback = apply_external_motion_feedback(
@@ -2767,79 +3113,20 @@ def run_simulation_frames_persistent(
         step_drop_debounce_before = int(bus.intervention_msg_dropped_debounce)
         step_drop_low_weight_before = int(bus.intervention_msg_dropped_low_weight)
         step_intervention_feedback_applied = 0
-        # 1) Optional: trigger-only repartition on health threshold
-        if any(profiles[rid].health <= health_threshold for rid in profiles):
-            partitioner.recompute(force=True)
-            cells = partitioner.cells_for_ids()
-            id_to_cell = {rid: cells[i] for i, rid in enumerate(partitioner.ids)}
-            if debug_zone_areas:
-                def _poly_area(poly):
-                    if not poly:
-                        return 0.0
-                    s = 0.0
-                    n = len(poly)
-                    for k in range(n):
-                        x1, y1 = poly[k]
-                        x2, y2 = poly[(k + 1) % n]
-                        s += x1 * y2 - x2 * y1
-                    return abs(0.5 * s)
-                for rid0 in [rr["id"] for rr in robots_def]:
-                    area = _poly_area(id_to_cell.get(rid0, []))
-                    print(f"[zone@t={t:.1f}] {rid0} area={area:.2f}")
-            for r in robots_def:
-                rid = r['id']
-                robots[rid].update_zone(id_to_cell.get(rid, []))   # UAVs: []
-                robots[rid].update_neighbors(partitioner.neighbors_for_id(rid))
-                if mon is not None and getattr(mon, 'enabled', False):
-                    mon.set_zone(rid, id_to_cell.get(rid, []), t=t)
 
+        # --------------------------------------------------------------------
+        # Stage 1: Optional trigger-only repartition on health threshold
+        # --------------------------------------------------------------------
+        _run_zone_partitioning_algorithm(t)
 
-        # 2) Ground-truth event generation (or legacy local detections)
-        truth_step = run_truth_generation_stage(
-            use_ground_truth=use_ground_truth,
-            now_t=t,
-            dt=dt,
-            rng=rng,
-            W=W,
-            H=H,
-            w_cdf=w_cdf,
-            w_shape=w_shape,
-            mu_true=mu_true,
-            sample_from_value_map_fn=_sample_from_value_map,
-            suppression_eval_fn=_suppression_eval,
-            process_truth_event_fn=_process_truth_event,
-            spawn_offspring_fn=_spawn_offspring,
-            truth_queue=truth_queue,
-            suppression_effect_by_mode=suppression_effect_by_mode,
-            suppression_effect_by_source=suppression_effect_by_source,
-            truth_candidate_events=truth_candidate_events,
-            truth_accepted_events=truth_accepted_events,
-            truth_suppressed_events=truth_suppressed_events,
-            suppression_effect_sum=suppression_effect_sum,
-            robots_def=robots_def,
-            pose=pose,
-            bird_present_until=bird_present_until,
-            last_detection_time=last_detection_time,
-            detect_rate_per_robot=detect_rate_per_robot,
-            bird_stay_mean_s=bird_stay_mean_s,
-            bird_detection_prob=bird_detection_prob,
-            per_robot_cooldown_s=per_robot_cooldown_s,
-            max_detections_per_step=max_detections_per_step,
-            detect_sigma_m=detect_sigma_m,
-            id_to_cell=id_to_cell,
-            point_in_polygon_fn=point_in_polygon,
-            robots=robots,
-            bus=bus,
-            taskgen=taskgen,
-            pending_event_onsets=pending_event_onsets,
-            mon=mon,
-        )
-        truth_candidate_events = int(truth_step.truth_candidate_events)
-        truth_accepted_events = int(truth_step.truth_accepted_events)
-        truth_suppressed_events = int(truth_step.truth_suppressed_events)
-        suppression_effect_sum = float(truth_step.suppression_effect_sum)
+        # --------------------------------------------------------------------
+        # Stage 2: Ground-truth event generation or legacy local detections
+        # --------------------------------------------------------------------
+        truth_step = _run_truth_generation_algorithm(t)
 
-        # 3) Periodic patrolling + making tasks persistent (and assigned)
+        # --------------------------------------------------------------------
+        # Stage 3: Periodic planning, task generation, and dispatch
+        # --------------------------------------------------------------------
         if (t - last_replan) >= task_replan_period_s:
             _process_near_goal_model_deterring_before_replan(t)
             # Drop patrolling tasks that are close to recent deterrences.
@@ -2871,7 +3158,9 @@ def run_simulation_frames_persistent(
             _spawn_and_assign_new_tasks(now_t=t, patrolling_only=False)
             last_replan = t
 
-        # 4) Move robots toward goals; complete tasks on arrival rules
+        # --------------------------------------------------------------------
+        # Stage 4: Motion execution and task completion checks
+        # --------------------------------------------------------------------
         motion_commands = []
         for r in robots_def:
             rid = r['id']
@@ -3029,6 +3318,9 @@ def run_simulation_frames_persistent(
             goal=goal,
         )
 
+        # --------------------------------------------------------------------
+        # Stage 5: Telemetry, model advance, and forecast evaluation
+        # --------------------------------------------------------------------
         # Telemetry: per-step poses + hotspots + periodic flush
         step_telemetry = run_telemetry_stage(
             mon=mon,
@@ -3067,7 +3359,9 @@ def run_simulation_frames_persistent(
             forecast_lead_times=forecast_lead_times,
         )
 
-        # 6) Yield frame snapshot
+        # --------------------------------------------------------------------
+        # Stage 6: Build and emit the frame snapshot
+        # --------------------------------------------------------------------
         # Event visualization buffers (recent window)
         t_min = t - event_viz_window_s
         truth_pts = [(x, y) for (x, y, tt) in recent_truth if tt >= t_min]
@@ -3363,6 +3657,8 @@ def run_simulation_frames_persistent(
             "truth_detections_missed_range": int(truth_detections_missed_range),
             "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
+            "birds_deterred_pct": (100.0 * float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
+            **_current_truth_window_metrics(t),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
             "truth_suppression_effect_by_mode": dict(suppression_effect_by_mode),
@@ -3488,6 +3784,8 @@ def run_simulation_frames_persistent(
             "truth_detections_missed_range": int(truth_detections_missed_range),
             "truth_detections_missed_false_negative": int(truth_detections_missed_false_negative),
             "truth_suppression_rate": (float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
+            "birds_deterred_pct": (100.0 * float(truth_suppressed_events) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
+            **_current_truth_window_metrics(t_end),
             "truth_suppression_effect_mean": (float(suppression_effect_sum) / float(truth_candidate_events)) if truth_candidate_events > 0 else float("nan"),
             "truth_suppression_effect_sum": float(suppression_effect_sum),
             **deterring_quality_cache,
@@ -3560,6 +3858,9 @@ def run_simulation_frames_persistent(
                 final_metrics.get("fleet_idle_no_task_fraction_so_far", float("nan"))
             ),
             truth_suppression_rate=float(final_metrics.get("truth_suppression_rate", float("nan"))),
+            birds_deterred_pct=float(final_metrics.get("birds_deterred_pct", float("nan"))),
+            truth_suppression_rate_last_hour=float(final_metrics.get("truth_suppression_rate_last_hour", float("nan"))),
+            birds_deterred_pct_last_hour=float(final_metrics.get("birds_deterred_pct_last_hour", float("nan"))),
             forecast_recall_at_k=float(final_metrics.get("forecast_recall_at_k", float("nan"))),
             forecast_precision_at_k=float(final_metrics.get("forecast_precision_at_k", float("nan"))),
         )
@@ -3591,6 +3892,91 @@ def run_simulation_frames_persistent(
             telemetry_step=step_telemetry,
             telemetry_dir=telemetry_dir,
         )
+        demo_tracking_links = _build_demo_tracking_links(
+            active_tasks=active_tasks,
+            motion_commands=motion_commands,
+        )
+        tracking_state = None
+        if bool(emit_tracking_state):
+            tracking_runtime_state = {
+                "robots": robots,
+                "profiles": profiles,
+                "pose": pose,
+                "goal": goal,
+                "cells": cells,
+                "active_tasks": active_tasks,
+                "completed_tasks": completed_tasks,
+                "recent_truth": recent_truth,
+                "recent_detections": recent_detections,
+                "recent_deterrences": recent_deterrences,
+                "truth_pts": truth_pts,
+                "det_pts": det_pts,
+                "taskgen": taskgen,
+                "assigner": assigner,
+                "bus": bus,
+                "service_history_by_robot": service_history_by_robot,
+                "preventive_service_rate_snapshot": preventive_service_rate_snapshot,
+                "preventive_direct_arrival_rate_snapshot": preventive_direct_arrival_rate_snapshot,
+                "preventive_capacity_remaining_snapshot": preventive_capacity_remaining_snapshot,
+                "preventive_capacity_ready_snapshot": preventive_capacity_ready_snapshot,
+                "travel_distance_by_robot": travel_distance_by_robot,
+                "energy_by_robot": energy_by_robot,
+                "robot_time_total": robot_time_total,
+                "robot_time_with_task": robot_time_with_task,
+                "robot_time_moving": robot_time_moving,
+                "robot_time_holding": robot_time_holding,
+                "robot_time_idle": robot_time_idle,
+                "robot_idle_streak": robot_idle_streak,
+                "robot_idle_streak_max": robot_idle_streak_max,
+                "fleet_task_engagement_time": fleet_task_engagement_time,
+                "fleet_moving_time": fleet_moving_time,
+                "fleet_idle_no_task_time": fleet_idle_no_task_time,
+                "completed_count_by_type": completed_count_by_type,
+                "response_times": response_times,
+                "truth_candidate_events": truth_candidate_events,
+                "truth_accepted_events": truth_accepted_events,
+                "truth_suppressed_events": truth_suppressed_events,
+                "truth_detection_opportunities": truth_detection_opportunities,
+                "truth_detections_observed": truth_detections_observed,
+                "truth_detections_missed_range": truth_detections_missed_range,
+                "truth_detections_missed_false_negative": truth_detections_missed_false_negative,
+                "suppression_effect_sum": suppression_effect_sum,
+                "forecast_recall_vals": forecast_recall_vals,
+                "forecast_precision_vals": forecast_precision_vals,
+                "forecast_lead_times": forecast_lead_times,
+                "model_diag": model_diag,
+                "motion_commands": motion_commands,
+                "metrics": metrics,
+                "metrics_compact": final_metrics,
+                "task_generation_structured": last_task_generation_structured,
+                "dispatch_structured": last_dispatch_structured,
+                "motion_execution_structured": last_motion_execution_structured,
+                "feedback_structured": last_feedback_structured,
+                "metrics_structured": last_metrics_structured,
+                "truth_generation_structured": last_truth_generation_structured,
+                "forecast_model_structured": last_forecast_model_structured,
+                "telemetry_structured": last_telemetry_structured,
+            }
+            raw_tracking_locals = dict(locals())
+            tracking_state = {
+                "demo_links": demo_tracking_links,
+                "runtime_state": export_named_tracking_state(
+                    tracking_runtime_state,
+                    include_arrays=bool(tracking_include_arrays),
+                    max_items=int(tracking_preview_limit),
+                ),
+            }
+            if bool(tracking_capture_frame_locals):
+                tracking_state["frame_locals"] = export_named_tracking_state(
+                    raw_tracking_locals,
+                    include_arrays=bool(tracking_include_arrays),
+                    max_items=int(tracking_preview_limit),
+                    skip_names={
+                        "raw_tracking_locals",
+                        "tracking_state",
+                        "tracking_runtime_state",
+                    },
+                )
         system_state_structured = build_production_runtime_snapshot(
             sim_time_s=(t - t_report_offset),
             poses={rid: tuple(pose[rid]) for rid in pose},
@@ -3603,6 +3989,7 @@ def run_simulation_frames_persistent(
             boundary_message_count=total_boundary_msgs,
             boundary_bytes_sent=total_boundary_bytes,
             metrics_compact=final_metrics,
+            tracking=tracking_state,
         )
         planning_diagnostics = None
         if bool(emit_planning_diagnostics):
@@ -3668,12 +4055,16 @@ def run_simulation_frames_persistent(
             "truth_generation_structured": last_truth_generation_structured.to_public_dict(),
             "forecast_model_structured": last_forecast_model_structured.to_public_dict(),
             "telemetry_structured": last_telemetry_structured.to_public_dict(),
+            "tracking_state": tracking_state,
             "planning_diagnostics": planning_diagnostics,
         }
         emit_structured_config_once = False
 
         t += dt
 
+    # ------------------------------------------------------------------------
+    # End-of-run reporting
+    # ------------------------------------------------------------------------
     if report_metrics_end:
         mrt = float(np.mean(response_times)) if response_times else float("nan")
         total_distance = float(sum(travel_distance_by_robot.values()))
@@ -3690,10 +4081,15 @@ def run_simulation_frames_persistent(
             f"engage={float(fleet_task_engagement_time / max(sim_elapsed_s, 1e-9)):.3f} "
             f"idle_no_task={float(fleet_idle_no_task_time / max(sim_elapsed_s, 1e-9)):.3f} "
             f"truth_suppr={float(truth_suppressed_events) / float(max(truth_candidate_events, 1)):.3f} "
+            f"birds_deterred_pct_last_hour={float(final_metrics.get('birds_deterred_pct_last_hour', float('nan'))):.2f} "
             f"msgs={total_boundary_msgs} "
             f"bytes={total_boundary_bytes}"
         )
 
+
+# ============================================================================
+# Experiment and reporting entrypoints
+# ============================================================================
 
 def run_metrics_experiments(
     num_runs=10,
@@ -3721,6 +4117,9 @@ def run_metrics_experiments(
             "truth_candidate_events",
             "truth_suppressed_events",
             "truth_suppression_rate",
+            "truth_suppression_rate_last_hour",
+            "birds_deterred_pct",
+            "birds_deterred_pct_last_hour",
             "truth_suppression_effect_mean",
             "fleet_task_assigned_fraction",
             "fleet_moving_fraction",
@@ -3860,6 +4259,9 @@ def run_metrics_experiments(
         "truth_detections_missed_range": _safe_stats("truth_detections_missed_range"),
         "truth_detections_missed_false_negative": _safe_stats("truth_detections_missed_false_negative"),
         "truth_suppression_rate": _safe_stats("truth_suppression_rate"),
+        "truth_suppression_rate_last_hour": _safe_stats("truth_suppression_rate_last_hour"),
+        "birds_deterred_pct": _safe_stats("birds_deterred_pct"),
+        "birds_deterred_pct_last_hour": _safe_stats("birds_deterred_pct_last_hour"),
         "truth_suppression_effect_mean": _safe_stats("truth_suppression_effect_mean"),
         "truth_suppression_effect_sum": _safe_stats("truth_suppression_effect_sum"),
         "deterring_actions_completed_total": _safe_stats("deterring_actions_completed_total"),
@@ -3925,6 +4327,10 @@ def run_metrics_experiments(
         },
     }
 
+
+# ============================================================================
+# Baseline comparison entrypoint
+# ============================================================================
 
 def run_baseline_suite(
     num_runs=10,
@@ -4028,12 +4434,13 @@ def run_baseline_suite(
             bar_len = 30
             fill = int(round(bar_len * pct / 100.0))
             bar = "#" * fill + "-" * (bar_len - fill)
-            print(
-                f"[progress] [{bar}] {pct:6.2f}% "
-                f"({runs_done_all}/{total_runs_all}) "
-                f"baseline={name} run={run_idx}/{run_total}",
-                flush=True,
-            )
+            if report_each_run:
+                print(
+                    f"[progress] [{bar}] {pct:6.2f}% "
+                    f"({runs_done_all}/{total_runs_all}) "
+                    f"baseline={name} run={run_idx}/{run_total}",
+                    flush=True,
+                )
             if progress_cb is not None:
                 try:
                     progress_cb(runs_done_all, total_runs_all, name, run_idx, run_total, seed, metrics)
@@ -4108,6 +4515,10 @@ def run_baseline_suite(
 
     return {"baselines": all_results, "comparison": comparison_df, "comparison_over_time": comparison_over_time_df}
 
+
+# ============================================================================
+# Visualization and demo entrypoints
+# ============================================================================
 
 def animate_demo_persistent(save_path=None, fps=5, duration_s=120, **sim_kwargs):
     frames = run_simulation_frames_persistent(dt=1.0, T_end=duration_s, fps=fps, **sim_kwargs)

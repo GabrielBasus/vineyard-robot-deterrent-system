@@ -3,7 +3,7 @@
 These files freeze deterministic, seed-locked reference outputs for the core production simulator.
 
 Primary harness:
-- `run_core_regression_check.py`
+- `experiments/run_core_regression_check.py`
 
 Default reference:
 - `core_default_proposed_seed123_t10_dt1.json`
@@ -11,13 +11,13 @@ Default reference:
 Typical usage:
 
 ```powershell
-python run_core_regression_check.py
+python -m experiments.run_core_regression_check
 ```
 
 Refresh the frozen reference only when you intentionally accept a behavior change:
 
 ```powershell
-python run_core_regression_check.py --write-reference
+python -m experiments.run_core_regression_check --write-reference
 ```
 
 Notes:

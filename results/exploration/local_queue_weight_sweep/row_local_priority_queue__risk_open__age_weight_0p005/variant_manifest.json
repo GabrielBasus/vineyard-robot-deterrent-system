@@ -1,0 +1,43 @@
+{
+  "variant_key": "row_local_priority_queue",
+  "title": "Row-Block Local Priority Queue",
+  "description": "Whole-row partitioning with live-pose row ownership and per-robot local priority queues instead of global assignment.",
+  "output_name": "row_local_priority_queue__risk_open__age_weight_0p005",
+  "runner_args": {
+    "num_runs": 3,
+    "seed_start": 123,
+    "t_end": 14400.0,
+    "dt": 1.0,
+    "nx": 120,
+    "ny": 96,
+    "time_metrics_period_s": 300.0,
+    "output_root": "results\\exploration\\local_queue_weight_sweep"
+  },
+  "extra_overrides": {
+    "model_deterring_risk_threshold": 0.0,
+    "model_deterring_risk_scale": 0.0001,
+    "local_queue_age_weight": 0.005
+  },
+  "effective_overrides": {
+    "simple_task_management": false,
+    "use_row_block_partitioning": true,
+    "use_local_priority_queue": true,
+    "update_zone_anchors_from_pose": true,
+    "zone_repartition_period_s": 60.0,
+    "zone_repartition_on_health": true,
+    "local_queue_distance_weight": 0.05,
+    "local_queue_deterring_bonus": 8.0,
+    "local_queue_direct_detection_bonus": 10.0,
+    "local_queue_patrolling_bonus": 1.0,
+    "local_queue_age_weight": 0.005,
+    "local_queue_preempt_margin": 0.25,
+    "max_active_tasks_per_robot": 3,
+    "max_active_patrolling_per_robot": 2,
+    "max_active_model_deterring_per_robot": 1,
+    "task_replan_period_s": 30.0,
+    "task_max_age_s": 240.0,
+    "uav_fraction": 0.0,
+    "model_deterring_risk_threshold": 0.0,
+    "model_deterring_risk_scale": 0.0001
+  }
+}

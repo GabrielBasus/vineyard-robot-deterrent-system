@@ -3,7 +3,7 @@ import unittest
 from Robot import Robot, RobotProfile
 from SESTPP import OnlineSESTPP
 from TaskGenerator import TaskGenerator
-from TaskGenerator_lab import TaskGenerator as TaskGeneratorLab
+from labs.TaskGenerator_lab import TaskGenerator as TaskGeneratorLab
 
 
 class TaskGeneratorFallbackPatrolTests(unittest.TestCase):

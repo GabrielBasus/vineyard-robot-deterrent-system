@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-import run_system_performance_check as perf
+import experiments.run_system_performance_check as perf
 
 
 def _metrics_row(
@@ -212,7 +212,7 @@ class MainIntegrationTests(unittest.TestCase):
             current_repo.mkdir()
             main_repo.mkdir()
 
-            with patch("run_system_performance_check.bench._run_worker_subprocess", side_effect=fake_run_worker_subprocess):
+            with patch("experiments.run_system_performance_check.bench._run_worker_subprocess", side_effect=fake_run_worker_subprocess):
                 rc = perf.main(
                     [
                         "--current-repo",

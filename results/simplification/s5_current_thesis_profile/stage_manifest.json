@@ -1,0 +1,36 @@
+{
+  "stage": {
+    "key": "s5_current_thesis_profile",
+    "title": "Current Thesis Profile",
+    "module_name": "DeterrentSystem",
+    "description": "Current thesis-facing proposed runtime: frozen calibration plus the named planner profile used for thesis confirmation work.",
+    "added_back": [
+      "Frozen calibration reuse.",
+      "Current thesis planner profile."
+    ],
+    "overrides": {
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "report_metrics_end": false
+    }
+  },
+  "runner_args": {
+    "num_runs": 5,
+    "seed_start": 123,
+    "t_end": 7200.0,
+    "dt": 1.0,
+    "nx": 120,
+    "ny": 96,
+    "time_metrics_period_s": 300.0,
+    "output_root": "results/simplification"
+  },
+  "sim_kwargs": {
+    "T_end": 7200.0,
+    "dt": 1.0,
+    "NX": 120,
+    "NY": 96,
+    "report_metrics_end": false,
+    "telemetry_dir": "results\\simplification\\s5_current_thesis_profile\\telemetry",
+    "telemetry_prompt_save": false,
+    "planner_profile": "thesis_calibrated_selective_proposed"
+  }
+}

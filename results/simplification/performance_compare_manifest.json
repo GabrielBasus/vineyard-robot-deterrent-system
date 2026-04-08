@@ -1,0 +1,88 @@
+{
+  "stage_keys": [
+    "s0_simple_tasks_core",
+    "s1_main_core",
+    "s2_direct_conflict",
+    "s3_persistence",
+    "s4_capacity_budget",
+    "s5_current_thesis_profile"
+  ],
+  "successful_stage_keys": [
+    "s0_simple_tasks_core",
+    "s1_main_core",
+    "s2_direct_conflict",
+    "s3_persistence",
+    "s4_capacity_budget",
+    "s5_current_thesis_profile"
+  ],
+  "num_runs": 5,
+  "seed_start": 123,
+  "t_end": 7200.0,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 300.0,
+  "output_root": "results/simplification",
+  "main_stage": "auto",
+  "resolved_main_stage": "s5_current_thesis_profile",
+  "max_workers": 6,
+  "elapsed_wall_s": 1279.4479999542236,
+  "skip_existing": false,
+  "verbose_stage_logs": false,
+  "results": [
+    {
+      "stage_key": "s0_simple_tasks_core",
+      "status": "ok",
+      "duration_s": 406.2122440338135,
+      "output_dir": "results\\simplification\\s0_simple_tasks_core",
+      "stdout_path": "results\\simplification\\s0_simple_tasks_core\\performance_worker_stdout.log",
+      "stderr_path": "results\\simplification\\s0_simple_tasks_core\\performance_worker_stderr.log",
+      "stage_order": 0
+    },
+    {
+      "stage_key": "s1_main_core",
+      "status": "ok",
+      "duration_s": 1277.334857225418,
+      "output_dir": "results\\simplification\\s1_main_core",
+      "stdout_path": "results\\simplification\\s1_main_core\\performance_worker_stdout.log",
+      "stderr_path": "results\\simplification\\s1_main_core\\performance_worker_stderr.log",
+      "stage_order": 1
+    },
+    {
+      "stage_key": "s2_direct_conflict",
+      "status": "ok",
+      "duration_s": 1275.8278121948242,
+      "output_dir": "results\\simplification\\s2_direct_conflict",
+      "stdout_path": "results\\simplification\\s2_direct_conflict\\performance_worker_stdout.log",
+      "stderr_path": "results\\simplification\\s2_direct_conflict\\performance_worker_stderr.log",
+      "stage_order": 2
+    },
+    {
+      "stage_key": "s3_persistence",
+      "status": "ok",
+      "duration_s": 1279.0304584503174,
+      "output_dir": "results\\simplification\\s3_persistence",
+      "stdout_path": "results\\simplification\\s3_persistence\\performance_worker_stdout.log",
+      "stderr_path": "results\\simplification\\s3_persistence\\performance_worker_stderr.log",
+      "stage_order": 3
+    },
+    {
+      "stage_key": "s4_capacity_budget",
+      "status": "ok",
+      "duration_s": 1276.9120273590088,
+      "output_dir": "results\\simplification\\s4_capacity_budget",
+      "stdout_path": "results\\simplification\\s4_capacity_budget\\performance_worker_stdout.log",
+      "stderr_path": "results\\simplification\\s4_capacity_budget\\performance_worker_stderr.log",
+      "stage_order": 4
+    },
+    {
+      "stage_key": "s5_current_thesis_profile",
+      "status": "ok",
+      "duration_s": 1248.485642671585,
+      "output_dir": "results\\simplification\\s5_current_thesis_profile",
+      "stdout_path": "results\\simplification\\s5_current_thesis_profile\\performance_worker_stdout.log",
+      "stderr_path": "results\\simplification\\s5_current_thesis_profile\\performance_worker_stderr.log",
+      "stage_order": 5
+    }
+  ]
+}

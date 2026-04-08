@@ -1,0 +1,118 @@
+{
+  "display": {
+    "title": "Reactive vs Prediction Only vs Proposed",
+    "figure_width": 19.0,
+    "figure_height": 10.5,
+    "fps": 10,
+    "steps_per_frame": 1,
+    "goal_match_radius_m": 25.0,
+    "task_line_alpha": 0.75,
+    "queued_task_line_alpha": 0.5,
+    "label_fontsize": 8
+  },
+  "robot_rendering": {
+    "husky_length_m": 0.99,
+    "husky_width_m": 0.67,
+    "heading_line_m": 2.0,
+    "label_offset_m": 2.0,
+    "body_alpha": 0.9
+  },
+  "vineyard": {
+    "W": 500.0,
+    "H": 500.0,
+    "row_spacing_m": 4.8,
+    "row_width_m": 3.2,
+    "headland_space_m": 10.0,
+    "turn_space_m": 20.0
+  },
+  "scenario": {
+    "duration_s": 1800.0,
+    "dt": 5.0,
+    "seed": 321,
+    "fps": 1,
+    "NX": 90,
+    "NY": 72,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "warmup_s": 600.0,
+    "task_replan_period_s": 20.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 12.0,
+    "idle_roam_enabled": true,
+    "idle_roam_interval_s": 25.0,
+    "idle_roam_jitter_m": 18.0,
+    "mu_true": 1.8e-7,
+    "alpha_true": 0.1,
+    "omega_true": 1000.0,
+    "sigma_true": 9.0,
+    "beta_true": 0.35,
+    "detect_range_m": 220.0,
+    "row_gain": 2.0,
+    "edge_gain": 0.9,
+    "event_viz_window_s": 10.0,
+    "telemetry_clear_on_start": false,
+    "telemetry_prompt_save": false,
+    "report_metrics_end": false
+  },
+  "tracking": {
+    "emit_tracking_state": true,
+    "tracking_include_arrays": false,
+    "tracking_preview_limit": 50,
+    "tracking_capture_frame_locals": false
+  },
+  "metrics": [
+    {
+      "key": "value_weighted_exposure",
+      "label": "Value-Weighted Exposure",
+      "goal": "lower"
+    },
+    {
+      "key": "completed_tasks_total",
+      "label": "Completed Tasks",
+      "goal": "higher"
+    },
+    {
+      "key": "mean_response_time_s",
+      "label": "Mean Response Time (s)",
+      "goal": "lower"
+    },
+    {
+      "key": "birds_deterred_pct_last_hour",
+      "label": "Birds Deterred Last Hour (%)",
+      "goal": "higher"
+    }
+  ],
+  "systems": [
+    {
+      "key": "reactive",
+      "title": "Reactive",
+      "mode": "reactive",
+      "color": "#6e6e6e",
+      "line_style": "-",
+      "marker": "o",
+      "short_label": "R",
+      "overrides": {}
+    },
+    {
+      "key": "prediction_only",
+      "title": "Prediction Only",
+      "mode": "prediction_only",
+      "color": "#1f77b4",
+      "line_style": "--",
+      "marker": "s",
+      "short_label": "P",
+      "overrides": {}
+    },
+    {
+      "key": "proposed",
+      "title": "Proposed",
+      "mode": "proposed",
+      "color": "#d62728",
+      "line_style": "-.",
+      "marker": "^",
+      "short_label": "T",
+      "stage": "s5_current_thesis_profile",
+      "overrides": {}
+    }
+  ]
+}

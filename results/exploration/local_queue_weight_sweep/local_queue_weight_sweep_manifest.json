@@ -1,0 +1,395 @@
+{
+  "base_variant": "row_local_priority_queue",
+  "risk_threshold": 0.0,
+  "risk_scale": 0.0001,
+  "distance_values": [
+    0.02,
+    0.05,
+    0.08,
+    0.12
+  ],
+  "deterring_bonus_values": [
+    4.0,
+    8.0,
+    12.0,
+    16.0
+  ],
+  "direct_bonus_values": [
+    8.0,
+    10.0,
+    14.0,
+    18.0
+  ],
+  "age_weight_values": [
+    0.0,
+    0.005,
+    0.01,
+    0.02
+  ],
+  "preempt_margin_values": [
+    0.0,
+    0.1,
+    0.25,
+    0.5
+  ],
+  "repartition_period_values": [
+    15.0,
+    30.0,
+    60.0,
+    120.0
+  ],
+  "num_runs": 3,
+  "seed_start": 123,
+  "t_end": 14400.0,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 300.0,
+  "output_root": "results/exploration/local_queue_weight_sweep",
+  "max_workers": 16,
+  "elapsed_wall_s": 1482.2697670459747,
+  "variants": [
+    {
+      "family": "base",
+      "param_key": "",
+      "param_value": NaN,
+      "output_name": "row_local_priority_queue__risk_open__base",
+      "overrides": {}
+    },
+    {
+      "family": "distance",
+      "param_key": "local_queue_distance_weight",
+      "param_value": 0.02,
+      "output_name": "row_local_priority_queue__risk_open__distance_0p02",
+      "overrides": {
+        "local_queue_distance_weight": 0.02
+      }
+    },
+    {
+      "family": "distance",
+      "param_key": "local_queue_distance_weight",
+      "param_value": 0.08,
+      "output_name": "row_local_priority_queue__risk_open__distance_0p08",
+      "overrides": {
+        "local_queue_distance_weight": 0.08
+      }
+    },
+    {
+      "family": "distance",
+      "param_key": "local_queue_distance_weight",
+      "param_value": 0.12,
+      "output_name": "row_local_priority_queue__risk_open__distance_0p12",
+      "overrides": {
+        "local_queue_distance_weight": 0.12
+      }
+    },
+    {
+      "family": "deterring_bonus",
+      "param_key": "local_queue_deterring_bonus",
+      "param_value": 4.0,
+      "output_name": "row_local_priority_queue__risk_open__deterring_bonus_4",
+      "overrides": {
+        "local_queue_deterring_bonus": 4.0
+      }
+    },
+    {
+      "family": "deterring_bonus",
+      "param_key": "local_queue_deterring_bonus",
+      "param_value": 12.0,
+      "output_name": "row_local_priority_queue__risk_open__deterring_bonus_12",
+      "overrides": {
+        "local_queue_deterring_bonus": 12.0
+      }
+    },
+    {
+      "family": "deterring_bonus",
+      "param_key": "local_queue_deterring_bonus",
+      "param_value": 16.0,
+      "output_name": "row_local_priority_queue__risk_open__deterring_bonus_16",
+      "overrides": {
+        "local_queue_deterring_bonus": 16.0
+      }
+    },
+    {
+      "family": "direct_bonus",
+      "param_key": "local_queue_direct_detection_bonus",
+      "param_value": 8.0,
+      "output_name": "row_local_priority_queue__risk_open__direct_bonus_8",
+      "overrides": {
+        "local_queue_direct_detection_bonus": 8.0
+      }
+    },
+    {
+      "family": "direct_bonus",
+      "param_key": "local_queue_direct_detection_bonus",
+      "param_value": 14.0,
+      "output_name": "row_local_priority_queue__risk_open__direct_bonus_14",
+      "overrides": {
+        "local_queue_direct_detection_bonus": 14.0
+      }
+    },
+    {
+      "family": "direct_bonus",
+      "param_key": "local_queue_direct_detection_bonus",
+      "param_value": 18.0,
+      "output_name": "row_local_priority_queue__risk_open__direct_bonus_18",
+      "overrides": {
+        "local_queue_direct_detection_bonus": 18.0
+      }
+    },
+    {
+      "family": "age_weight",
+      "param_key": "local_queue_age_weight",
+      "param_value": 0.0,
+      "output_name": "row_local_priority_queue__risk_open__age_weight_0",
+      "overrides": {
+        "local_queue_age_weight": 0.0
+      }
+    },
+    {
+      "family": "age_weight",
+      "param_key": "local_queue_age_weight",
+      "param_value": 0.005,
+      "output_name": "row_local_priority_queue__risk_open__age_weight_0p005",
+      "overrides": {
+        "local_queue_age_weight": 0.005
+      }
+    },
+    {
+      "family": "age_weight",
+      "param_key": "local_queue_age_weight",
+      "param_value": 0.02,
+      "output_name": "row_local_priority_queue__risk_open__age_weight_0p02",
+      "overrides": {
+        "local_queue_age_weight": 0.02
+      }
+    },
+    {
+      "family": "preempt_margin",
+      "param_key": "local_queue_preempt_margin",
+      "param_value": 0.0,
+      "output_name": "row_local_priority_queue__risk_open__preempt_margin_0",
+      "overrides": {
+        "local_queue_preempt_margin": 0.0
+      }
+    },
+    {
+      "family": "preempt_margin",
+      "param_key": "local_queue_preempt_margin",
+      "param_value": 0.1,
+      "output_name": "row_local_priority_queue__risk_open__preempt_margin_0p1",
+      "overrides": {
+        "local_queue_preempt_margin": 0.1
+      }
+    },
+    {
+      "family": "preempt_margin",
+      "param_key": "local_queue_preempt_margin",
+      "param_value": 0.5,
+      "output_name": "row_local_priority_queue__risk_open__preempt_margin_0p5",
+      "overrides": {
+        "local_queue_preempt_margin": 0.5
+      }
+    },
+    {
+      "family": "repartition_period",
+      "param_key": "zone_repartition_period_s",
+      "param_value": 15.0,
+      "output_name": "row_local_priority_queue__risk_open__repartition_period_15",
+      "overrides": {
+        "zone_repartition_period_s": 15.0
+      }
+    },
+    {
+      "family": "repartition_period",
+      "param_key": "zone_repartition_period_s",
+      "param_value": 30.0,
+      "output_name": "row_local_priority_queue__risk_open__repartition_period_30",
+      "overrides": {
+        "zone_repartition_period_s": 30.0
+      }
+    },
+    {
+      "family": "repartition_period",
+      "param_key": "zone_repartition_period_s",
+      "param_value": 120.0,
+      "output_name": "row_local_priority_queue__risk_open__repartition_period_120",
+      "overrides": {
+        "zone_repartition_period_s": 120.0
+      }
+    }
+  ],
+  "runtime_results": [
+    {
+      "output_name": "row_local_priority_queue__risk_open__preempt_margin_0",
+      "family": "preempt_margin",
+      "status": "ok",
+      "duration_s": 848.9385995864868,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__preempt_margin_0",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__preempt_margin_0\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__preempt_margin_0\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__preempt_margin_0p1",
+      "family": "preempt_margin",
+      "status": "ok",
+      "duration_s": 934.0688683986664,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__preempt_margin_0p1",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__preempt_margin_0p1\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__preempt_margin_0p1\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__direct_bonus_14",
+      "family": "direct_bonus",
+      "status": "ok",
+      "duration_s": 1011.6825928688049,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__direct_bonus_14",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__direct_bonus_14\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__direct_bonus_14\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__base",
+      "family": "base",
+      "status": "ok",
+      "duration_s": 1016.5252230167389,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__base",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__base\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__base\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__direct_bonus_18",
+      "family": "direct_bonus",
+      "status": "ok",
+      "duration_s": 1017.6410136222839,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__direct_bonus_18",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__direct_bonus_18\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__direct_bonus_18\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__deterring_bonus_12",
+      "family": "deterring_bonus",
+      "status": "ok",
+      "duration_s": 1017.6550188064575,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__deterring_bonus_12",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__deterring_bonus_12\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__deterring_bonus_12\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__direct_bonus_8",
+      "family": "direct_bonus",
+      "status": "ok",
+      "duration_s": 1020.9563393592834,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__direct_bonus_8",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__direct_bonus_8\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__direct_bonus_8\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__distance_0p12",
+      "family": "distance",
+      "status": "ok",
+      "duration_s": 1022.6914584636688,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__distance_0p12",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__distance_0p12\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__distance_0p12\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__deterring_bonus_16",
+      "family": "deterring_bonus",
+      "status": "ok",
+      "duration_s": 1056.977813243866,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__deterring_bonus_16",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__deterring_bonus_16\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__deterring_bonus_16\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__age_weight_0p02",
+      "family": "age_weight",
+      "status": "ok",
+      "duration_s": 1069.4183876514435,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__age_weight_0p02",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__age_weight_0p02\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__age_weight_0p02\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__distance_0p02",
+      "family": "distance",
+      "status": "ok",
+      "duration_s": 1094.9306123256683,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__distance_0p02",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__distance_0p02\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__distance_0p02\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__age_weight_0p005",
+      "family": "age_weight",
+      "status": "ok",
+      "duration_s": 1099.769154548645,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__age_weight_0p005",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__age_weight_0p005\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__age_weight_0p005\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__age_weight_0",
+      "family": "age_weight",
+      "status": "ok",
+      "duration_s": 1121.115153312683,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__age_weight_0",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__age_weight_0\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__age_weight_0\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__preempt_margin_0p5",
+      "family": "preempt_margin",
+      "status": "ok",
+      "duration_s": 1163.9966235160828,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__preempt_margin_0p5",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__preempt_margin_0p5\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__preempt_margin_0p5\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__distance_0p08",
+      "family": "distance",
+      "status": "ok",
+      "duration_s": 1167.1611595153809,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__distance_0p08",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__distance_0p08\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__distance_0p08\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__deterring_bonus_4",
+      "family": "deterring_bonus",
+      "status": "ok",
+      "duration_s": 1196.1535828113556,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__deterring_bonus_4",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__deterring_bonus_4\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__deterring_bonus_4\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__repartition_period_120",
+      "family": "repartition_period",
+      "status": "ok",
+      "duration_s": 340.30148220062256,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__repartition_period_120",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__repartition_period_120\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__repartition_period_120\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__repartition_period_15",
+      "family": "repartition_period",
+      "status": "ok",
+      "duration_s": 561.7849812507629,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__repartition_period_15",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__repartition_period_15\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__repartition_period_15\\weight_sweep_worker_stderr.log"
+    },
+    {
+      "output_name": "row_local_priority_queue__risk_open__repartition_period_30",
+      "family": "repartition_period",
+      "status": "ok",
+      "duration_s": 547.7841486930847,
+      "output_dir": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__repartition_period_30",
+      "stdout_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__repartition_period_30\\weight_sweep_worker_stdout.log",
+      "stderr_path": "results\\exploration\\local_queue_weight_sweep\\row_local_priority_queue__risk_open__repartition_period_30\\weight_sweep_worker_stderr.log"
+    }
+  ]
+}

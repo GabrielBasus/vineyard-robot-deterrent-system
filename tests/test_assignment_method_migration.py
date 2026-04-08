@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pandas as pd
 
-import assignment_methods_lab as aml
-import DeterrentSystem_assignment_lab as ds
-import run_assignment_tuning_sweep_lab as tuning
+import labs.assignment_methods_lab as aml
+import labs.DeterrentSystem_assignment_lab as ds
+import experiments.run_assignment_tuning_sweep_lab as tuning
 from config_loader import _flatten_mapping, _load_yaml_mapping, parse_args_with_config
 
 

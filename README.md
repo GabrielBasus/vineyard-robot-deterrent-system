@@ -18,13 +18,329 @@ It implements an intervention-aware spatiotemporal intensity model, decentralize
   - Ground-truth event process
   - Closed-loop intervention feedback
   - Metrics collection and baseline comparisons
-- **Monitoring and telemetry (`telemetry_sim.py`, `streamlit_app.py`)**
+- **Monitoring and telemetry (`telemetry_sim.py`, `demos/streamlit_app.py`)**
   - Live telemetry CSV output
   - Streamlit dashboard with map/tasks/robot diagnostics
 - **Experiment scripts**
-  - `run_24h_experiment.py` (sequential 24h sweep, headless, thesis summary outputs)
-  - `run_24h_experiment_parallel.py` (multiprocessing 24h sweep, headless, faster)
-  - `demo_optimal_proposed.py` (single-file visual demo using best proposed config)
+  - `experiments/run_24h_experiment.py` (sequential 24h sweep, headless, thesis summary outputs)
+  - `experiments/run_24h_experiment_parallel.py` (multiprocessing 24h sweep, headless, faster)
+  - `demos/demo_optimal_proposed.py` (single-file visual demo using best proposed config)
+
+## Workspace Layout
+
+The repository is organized by role so the root stays reserved for core runtime modules. Supporting scripts now live in:
+
+- `demos/`
+- `diagnostics/`
+- `docs/`
+- `experiments/`
+- `labs/`
+- `plots/`
+
+The directory map and run conventions are documented in `docs/WORKSPACE_LAYOUT.md`.
+
+## Mathematical Implementation
+
+This section describes the implemented math from environment input to reported output. The main runtime lives in `DeterrentSystem.py`, the online field model lives in `SESTPP.py`, task scoring lives in `TaskGenerator.py`, and the counterfactual deterrence estimator lives in `planner_task_estimation.py`.
+
+### 1. Spatial Value Surface
+
+The simulator starts from a geometric map of vineyard rows and field edges. Every world point `(x, y)` is given a value weight:
+
+```text
+d_row(x, y) = distance to the nearest vineyard-row centerline
+row_w(x, y) = row_gain                    if d_row(x, y) <= row_width_m / 2
+              0                           otherwise
+
+d_edge(x, y) = distance to the outer field boundary
+edge_w(x, y) = edge_gain * exp(-d_edge(x, y) / edge_scale_m)
+
+w(x, y) = 1 + row_w(x, y) + edge_w(x, y)
+```
+
+In the main runtime this is implemented by `value_weight(...)` in `DeterrentSystem.py`. The same value surface is reused in scoring and in the final exposure metric.
+
+### 2. Ground-Truth Bird Process
+
+The truth process is a discrete-time self-exciting spatial point process with suppression from recent deterrence events.
+
+First, a base spatial sampling grid is built from the positive value weights:
+
+```text
+W_grid(i, j) = max(w(x_i, y_j), 0)
+P_base(i, j) = W_grid(i, j) / sum(W_grid)
+```
+
+At each step of duration `dt`, the number of base events is:
+
+```text
+lambda_base = mu_true * mean(W_grid) * area
+N_base ~ Poisson(lambda_base * dt)
+```
+
+Each base event location is sampled from `P_base`.
+
+Every accepted truth event also produces offspring:
+
+```text
+N_off ~ Poisson(alpha_true)
+Delta t ~ Exponential(mean = omega_true)
+Delta x, Delta y ~ Normal(0, sigma_true)
+```
+
+This gives a truth process with both background events and clustered after-events.
+
+### 3. Suppression From Robot Deterrence
+
+Truth events are not accepted automatically. Each candidate truth event is filtered by recent deterrence actions. For a candidate event at `(x, y, t)`, every recent deterrence event `z` contributes:
+
+```text
+c_z(x, y, t) =
+    beta_z
+    * exp(-||[x, y] - [x_z, y_z]||^2 / (2 * sigma_z^2))
+    * exp(-(t - t_z) / omega_z)
+```
+
+The total suppression mass is:
+
+```text
+s(x, y, t) = sum_z c_z(x, y, t)
+```
+
+The candidate truth event survives with probability:
+
+```text
+p_keep = exp(-s)
+p_suppress = 1 - p_keep
+```
+
+The simulator samples a Bernoulli draw with `p_keep`. If the event is suppressed, it contributes to:
+
+```text
+truth_suppressed_events
+birds_deterred_pct = 100 * truth_suppressed_events / truth_candidate_events
+truth_suppression_rate = truth_suppressed_events / truth_candidate_events
+```
+
+This is implemented in `_suppression_eval(...)` and the truth-update loop in `DeterrentSystem.py`.
+
+### 4. Online SESTPP Forecast Model
+
+Each robot carries an online SESTPP model over its grid. The state is:
+
+- `mu`: background rate grid
+- `trigger_mass`: self- and cross-excitation grid
+- `inhib_channels[m]`: one inhibition grid per intervention mode
+
+The time-of-day modulation is:
+
+```text
+phi(t) = 2 * pi * (t mod 24h) / 24h
+m(t) = max(0.2, 1 + 0.4 * sin(phi) + 0.15 * sin(2 * phi))
+```
+
+State decay over one step is:
+
+```text
+trigger_mass <- trigger_mass * exp(-dt / omega)
+inhib_channel_m <- inhib_channel_m * exp(-dt / omega_inhib,m)
+```
+
+Event stamps are added by Gaussian kernels:
+
+```text
+local detection stamp amplitude       = alpha_in
+cross-boundary stamp amplitude        = alpha_cross * weight
+intervention stamp amplitude          = alpha_inhib * beta_u
+```
+
+The forecast intensity is then:
+
+```text
+lambda(x, y, t) = max(0, mu(x, y) * m(t) + trigger_mass(x, y) - inhib_mass(x, y))
+inhib_mass = sum_m inhib_channel_m
+```
+
+This is implemented in `OnlineSESTPP` in `SESTPP.py`.
+
+### 5. Hotspot Extraction
+
+Hotspots are selected from the largest cells of either `lambda` or `lambda - mu`. In the main runtime the excess field is used:
+
+```text
+hotspot_score(x, y) = lambda(x, y) - mu(x, y)
+```
+
+The highest-scoring cells are greedily kept while enforcing a merge radius so nearby cells collapse into one hotspot.
+
+### 6. Patrol Task Scoring
+
+For a patrol candidate at `(x, y)`, the expected field benefit is integrated over a finite horizon:
+
+```text
+time_factor = omega * (1 - exp(-horizon_s / omega))
+benefit = max(0, patrol_field_score(x, y)) * w(x, y) * time_factor * DeltaA
+```
+
+The travel-and-service cost is:
+
+```text
+cost_eta = w_eta * (distance / speed + spinup) + fixed_cost
+```
+
+The patrol task utility is:
+
+```text
+utility_patrol = benefit - cost_eta
+score_patrol = utility_patrol
+```
+
+This is implemented inside `TaskGenerator.periodic_patrolling(...)`.
+
+### 7. Model-Scored Preventive Deterrence
+
+Preventive deterring tasks use a counterfactual exposure-reduction estimate. For a candidate action at `(x, y)`:
+
+```text
+available_integral(x, y) =
+    max(lambda - baseline_grid, 0) * omega * (1 - exp(-horizon_s / omega))
+```
+
+The intervention footprint uses a normalized Gaussian kernel and an intervention decay integral:
+
+```text
+suppression_amp = alpha_inhib * beta_u
+suppression_here =
+    suppression_amp
+    * kernel_here
+    * omega_u * (1 - exp(-horizon_s / omega_u))
+```
+
+The reduction at each grid cell is capped by what is available to suppress:
+
+```text
+reduction_here = min(available_here, suppression_here)
+```
+
+The predicted weighted reduction is:
+
+```text
+predicted_deltaJ =
+    sum_cells w(cell) * reduction_here * DeltaA
+```
+
+The preventive action utility and normalized score are:
+
+```text
+utility_deterring = predicted_deltaJ - cost_eta
+deltaJ_per_cost = predicted_deltaJ / max(cost_eta, 1e-6)
+```
+
+This is implemented in `estimate_counterfactual_reduction(...)` in `planner_task_estimation.py` and consumed by `TaskGenerator.py`.
+
+### 8. Heuristic Preventive Gates
+
+The legacy heuristic risk gate maps the excess field to a pseudo-confidence:
+
+```text
+risk_conf = 1 - exp(-max(lambda - mu, 0) / deterring_risk_scale)
+```
+
+If enabled, a candidate must satisfy:
+
+```text
+risk_conf >= model_deterring_risk_threshold
+```
+
+The simplified `s1_risk_open_core` stage sets the threshold to `0.0`, which effectively disables this extra cutoff while keeping the rest of the preventive pipeline intact.
+
+Additional optional gates in the main codebase use:
+
+- persistence / repeat blocking
+- ETA caps
+- direct-detection conflict checks
+- `predicted_deltaJ` minimums
+- `deltaJ_per_cost` minimums
+
+### 9. Assignment And Dispatch
+
+After extraction and optional pre-assignment selection, the runtime assigns tasks to robots. The main assignment score combines capability, travel time, load, zone affinity, health, priority, and task value:
+
+```text
+assignment_score =
+    w_cap   * capability
+  - w_eta   * eta
+  + w_stay  * endurance
+  + w_zone  * zone_bonus
+  + w_health * health
+  + w_prio  * task_priority
+  + w_task_value * task_value
+  - w_load  * active_load
+```
+
+Dispatch then enforces queue caps and per-type limits such as:
+
+- `max_active_tasks_per_robot`
+- `max_active_patrolling_per_robot`
+- `max_active_model_deterring_per_robot`
+
+These dispatch constraints are what drive the planner rejection counters in the experiment outputs.
+
+### 10. Output Metrics
+
+The core reported metrics are direct functions of the event/task history:
+
+```text
+value_weighted_exposure =
+    sum_{accepted truth events e} w(x_e, y_e)
+
+mean_response_time_s =
+    mean over matched detections of (task_completion_time - event_time)
+
+tasks_per_unit_distance =
+    completed_tasks_total / total_robot_distance
+
+exposure_per_completed_task =
+    value_weighted_exposure / completed_tasks_total
+
+fleet_task_engagement_fraction_so_far =
+    fleet_task_engagement_time / elapsed_sim_time
+```
+
+The baseline experiment runners aggregate these per-run metrics into:
+
+- mean / variance tables in `comparison.csv`
+- time-bucket summaries in `comparison_over_time.csv`
+- derived improvements such as proposed-vs-reactive exposure improvement
+
+### 11. Exploratory Row-Queue Variant
+
+The isolated exploration line in `exploration/` changes two pieces of math.
+
+Whole-row ownership replaces polygonal power cells. Each row center `y_k` is assigned to robot `r` by minimizing:
+
+```text
+score_row(k, r) =
+    (y_k - anchor_y_r)^2
+    - (row_health_gain_m * normalized_weight_r)^2
+```
+
+where `normalized_weight_r` is the health-derived zone weight for robot `r`.
+
+The local priority queue then replaces global assignment for strictly local task choice:
+
+```text
+priority(task, robot) =
+    task_value
+  + type_bonus
+  + zone_bonus
+  + 0.25 * support
+  + 0.50 * selection_weight
+  - distance_weight * distance(robot, task)
+  - age_weight * task_age
+```
+
+The frequent-repartition exploration variant keeps the same formulas but recomputes row ownership more often and increases the distance penalty so nearby tasks are favored more strongly.
 
 ## Quick Start
 
@@ -37,36 +353,65 @@ python -m py_compile DeterrentSystem.py TaskGenerator.py SESTPP.py
 Run the base 24h sweep (sequential):
 
 ```powershell
-python run_24h_experiment.py
+python -m experiments.run_24h_experiment
 ```
 
 Run faster parallel sweep:
 
 ```powershell
-python run_24h_experiment_parallel.py --profile fast --max-workers 12
+python -m experiments.run_24h_experiment_parallel --profile fast --max-workers 12
 ```
 
 Run a visual demo of the best proposed configuration (from summary CSV):
 
 ```powershell
-python demo_optimal_proposed.py
+python -m demos.demo_optimal_proposed
 ```
 
 Save demo as video:
 
 ```powershell
-python demo_optimal_proposed.py --duration-s 1800 --fps 10 --save-path demo.mp4
+python -m demos.demo_optimal_proposed --duration-s 1800 --fps 10 --save-path demo.mp4
 ```
 
 Launch live dashboard (if telemetry is being flushed by a running sim):
 
 ```powershell
-streamlit run streamlit_app.py
+streamlit run demos/streamlit_app.py
 ```
+
+## Pluggable Testbench
+
+Use the config-driven testbench when you want one shared scenario and one shared metric contract, but different systems plugged into the same benchmark.
+
+The harness supports:
+
+- simplification stages
+- exploration variants
+- direct current-workspace modes
+- arbitrary repo/module targets, including the sibling `main` worktree
+
+Bundled example:
+
+```powershell
+python -m testbench.run_testbench --config testbench/example_config.json --max-workers 4
+```
+
+The testbench writes:
+
+- `per_run_metrics.csv`
+- `per_run_timeseries.csv`
+- `summary_by_metric.csv`
+- `advantage_vs_reference.csv`
+- `system_scoreboard.csv`
+- `testbench_manifest.json`
+- `report.md`
+
+Configuration details are in [`testbench/README.md`](testbench/README.md).
 
 ## Thesis Evaluation Order
 
-Use the staged thesis workflow in [`EXPERIMENT_EXECUTION_ORDER.md`](EXPERIMENT_EXECUTION_ORDER.md). Each stage runner now writes a README into its output directory describing:
+Use the staged thesis workflow in [`docs/EXPERIMENT_EXECUTION_ORDER.md`](docs/EXPERIMENT_EXECUTION_ORDER.md). Each stage runner now writes a README into its output directory describing:
 
 - the question that stage answers,
 - the metrics that matter,
@@ -84,7 +429,7 @@ Typical experiment outputs include:
 
 ## Results Snapshot
 
-After running experiments and plotting (`python plot_experiment_results.py`), key figures are saved in `results/`.
+After running experiments and plotting (`python -m plots.plot_experiment_results`), key figures are saved in `results/`.
 
 Most important plots to review:
 
@@ -127,10 +472,10 @@ You can also open the generated summary tables:
 
 Detailed instructions for experiment workflows and CLI options are in:
 
-- `EXPERIMENTS.md`
-- `EXPERIMENT_EXECUTION_ORDER.md`
+- `docs/EXPERIMENTS.md`
+- `docs/EXPERIMENT_EXECUTION_ORDER.md`
 
 ## Notes on Visualization vs Batch Runs
 
-- `run_24h_experiment.py` and `run_24h_experiment_parallel.py` are configured for **headless batch data collection** (no visualization).
-- `demo_optimal_proposed.py` is intended for **visual presentation/demo** of a selected best proposed configuration.
+- `experiments/run_24h_experiment.py` and `experiments/run_24h_experiment_parallel.py` are configured for **headless batch data collection** (no visualization).
+- `demos/demo_optimal_proposed.py` is intended for **visual presentation/demo** of a selected best proposed configuration.

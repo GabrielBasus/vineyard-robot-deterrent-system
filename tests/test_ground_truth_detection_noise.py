@@ -1,7 +1,7 @@
 import unittest
 
 import DeterrentSystem as production_ds
-import DeterrentSystem_assignment_lab as assignment_lab_ds
+import labs.DeterrentSystem_assignment_lab as assignment_lab_ds
 import DeterrentSystem_simple_tasks as simple_ds
 
 

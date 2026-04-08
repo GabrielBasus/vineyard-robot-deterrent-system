@@ -1,0 +1,44 @@
+{
+  "stage_keys": [
+    "s1_risk_open_core",
+    "s5_current_thesis_profile"
+  ],
+  "successful_stage_keys": [
+    "s1_risk_open_core",
+    "s5_current_thesis_profile"
+  ],
+  "num_runs": 1,
+  "seed_start": 123,
+  "t_end": 60.0,
+  "dt": 1.0,
+  "nx": 120,
+  "ny": 96,
+  "time_metrics_period_s": 30.0,
+  "output_root": "results\\verify_performance_compare",
+  "main_stage": "auto",
+  "resolved_main_stage": "s5_current_thesis_profile",
+  "max_workers": 2,
+  "elapsed_wall_s": 5.704270124435425,
+  "skip_existing": false,
+  "verbose_stage_logs": false,
+  "results": [
+    {
+      "stage_key": "s1_risk_open_core",
+      "status": "ok",
+      "duration_s": 4.972414970397949,
+      "output_dir": "results\\verify_performance_compare\\s1_risk_open_core",
+      "stdout_path": "results\\verify_performance_compare\\s1_risk_open_core\\performance_worker_stdout.log",
+      "stderr_path": "results\\verify_performance_compare\\s1_risk_open_core\\performance_worker_stderr.log",
+      "stage_order": 2
+    },
+    {
+      "stage_key": "s5_current_thesis_profile",
+      "status": "ok",
+      "duration_s": 5.493993043899536,
+      "output_dir": "results\\verify_performance_compare\\s5_current_thesis_profile",
+      "stdout_path": "results\\verify_performance_compare\\s5_current_thesis_profile\\performance_worker_stdout.log",
+      "stderr_path": "results\\verify_performance_compare\\s5_current_thesis_profile\\performance_worker_stderr.log",
+      "stage_order": 7
+    }
+  ]
+}

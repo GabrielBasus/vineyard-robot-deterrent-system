@@ -1,7 +1,7 @@
 import unittest
 
 from DeterrentSystem import EventBus as ProductionEventBus
-from DeterrentSystem_assignment_lab import EventBus as LabEventBus
+from labs.DeterrentSystem_assignment_lab import EventBus as LabEventBus
 from DeterrentSystem_simple_tasks import EventBus as SimpleEventBus
 from Robot import Robot
 
