@@ -1,13 +1,18 @@
 # Experiment Runner Guide
 
-This repo includes two experiment runners:
+This repo includes these maintained experiment runners:
 
 - `experiments/run_24h_experiment.py` (sequential, baseline/stable)
 - `experiments/run_24h_experiment_parallel.py` (multiprocessing, faster)
 - `demos/demo_live_day_vineyard.py` (single-file, audience-friendly visual demo)
+- `experiments/run_habituation_stl_production_ladder.py` (production B0-B4 habituation/STL ladder)
+- `experiments/diagnose_habituation_stl_production.py` (short-run STL/habituation diagnostic)
+- `experiments/summarize_habituation_stl_ladder.py` (paired result summaries and advisor figures)
 
 The first two are designed for 24-hour simulated vineyard experiments and export CSVs for thesis analysis.
 The demo script is for live visualization and presentation.
+
+For the April thesis dispatch reframe, use `docs/THESIS_DISPATCH_RUNBOOK.md` for the dedicated demo configs, batch testbench configs, and thesis dispatch suite commands.
 
 ## Thesis Staged Workflow Checklist
 
@@ -17,9 +22,51 @@ The demo script is for live visualization and presentation.
 - [ ] Stage 4, planner / assignment tuning: `python -m experiments.run_assignment_tuning_sweep_lab --config configs/run_assignment_tuning_sweep_lab.yaml`
 - [ ] Stage 5, assignment-method comparison if still needed: `python -m experiments.run_assignment_method_comparison_lab --with-smoke-check` then `python -m plots.plot_assignment_method_comparison_lab`
 - [ ] Stage 6, robot scaling / long-horizon confirmation: `python -m experiments.run_robot_scaling_experiment --profile fast`
+- [ ] STL addendum, habituation-aware value: run the B0-B4 ladder and B1/B3/B4 confirmatory batch documented below.
 - Use the README written into each stage output directory to decide whether the next stage is justified.
 - The concise thesis-methods version of this order is in `docs/EXPERIMENT_EXECUTION_ORDER.md`.
 
+
+## Habituation-Aware STL Experiments
+
+Use these runners for the proposal STL integration. They do not modify command runners or dispatcher commands; they select existing simulator kwargs such as `predictive_utility_mode="stl_robustness"`, `stl_active_clauses`, and `enable_habituation`.
+
+### B0-B4 ladder
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_b0_b4_900s_10seed_v5 --duration-s 900 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --max-workers 2
+```
+
+### Confirmatory B1/B3/B4 batch
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5 --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --systems B1_unc_legacy B3_res_stl_nohab B4_res_stl_full --max-workers 2
+```
+
+### Summarize a ladder run
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --run-dir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5
+```
+
+Primary outputs:
+
+- `ladder_manifest.json`
+- raw per-run JSON under `raw/`
+- `THESIS_RESULTS_SUMMARY.md` for confirmatory summaries
+- advisor figures under `advisor_figures/`
+
+Primary metrics:
+
+- `value_weighted_exposure`
+- `truth_suppression_rate`
+- `truth_suppression_effect_sum`
+- `habituation_eta_at_apply_mean`
+- `habituation_variety_index`
+- `stl_robustness_global_mean`
+- `stl_robustness_exp`, `stl_robustness_cov`, `stl_robustness_hab`
+
+Current result summary: `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`.
 ## Requirements
 
 - Python 3.10+

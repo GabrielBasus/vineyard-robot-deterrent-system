@@ -1,281 +1,179 @@
-# STL Theory and Integration Audit
+# STL Theory and Production Integration Audit
 
-This note records how Signal Temporal Logic (STL) is used in the habituation
-integration, how that maps to `docs/proposal_stl.pdf`, and what still needs to
-be verified before using the results as thesis evidence.
+This document records how Signal Temporal Logic (STL) and cue habituation are implemented in the production simulator. It supersedes the earlier planning notes and should be read together with `docs/proposal_stl.pdf` and `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`.
 
-## Purpose
+## Integration Status
 
-The proposal reframes predictive bird deterrence as a spatio-temporal
-specification satisfaction problem. The key change is:
+The habituation-aware STL integration is implemented in the production path.
 
-```text
-Predictive task value = counterfactual STL robustness improvement
-```
+Implemented:
 
-Instead of ranking predictive tasks by a hand-tuned scalar exposure reduction,
-the planner scores a candidate action `a` for robot `r` as:
+- per-cell, per-cue habituation state in the production truth loop
+- truth suppression scaled by action-time effectiveness `eta_at_apply`
+- opt-in predictive value mode `predictive_utility_mode="stl_robustness"`
+- counterfactual STL task value `U(a,r)` for model-scored predictive deterrence
+- B3/B4 clause separation through `stl_active_clauses`
+- existing dispatcher policies preserved through compatibility fields `utility`, `score`, `predicted_deltaJ`, and `deltaJ_per_cost`
+- STL and habituation diagnostics exported in production metrics and task previews
+- production ladder and confirmatory experiment runners
 
-```text
-U(a, r) = robustness(Phi_r, xi_with_action) - robustness(Phi_r, xi_without_action)
-```
-
-This is implemented as `counterfactual_value(...)` in
-`habituation_stl/task_value.py` and is passed through the existing task
-generator/dispatcher as `predictive_stl_U`, `utility`, and `score`.
+The integration keeps SESTPP, zone partitioning, robot fleet logic, task admission, and dispatch commands intact. The predictive value function is the intentionally changed component.
 
 ## STL Background
 
-STL formulas are evaluated over real-valued time signals. In this project, the
-signals are sampled at a fixed monitor period:
+Signal Temporal Logic evaluates formulas over real-valued time signals and returns a quantitative robustness margin. Positive robustness means the signal satisfies the formula with margin. Negative robustness means it violates the formula.
 
-- `e_z(t)`: value-weighted exposure or exposure rate for cell `z`
+The production integration uses sampled robot-local traces:
+
+- `e_z(t)`: value-weighted exposure rate for cell `z`
 - `g_z(t)`: coverage age for cell `z`
-- `eta_z(t)`: effectiveness of the deterrence cue active in cell `z`
-- optionally `arr_a(t)` and `srv_a(t)` for reactive task deadlines
+- `eta_z(t)`: effectiveness of the candidate deterrent cue in cell `z`
 
-The quantitative STL semantics returns a real robustness value:
-
-- positive robustness means the formula is satisfied with margin
-- zero means the formula is exactly on the boundary
-- negative means the formula is violated
-
-Classical STL conjunction uses `min`. This project also implements a smooth
-soft-min aggregator so non-binding clauses still influence the score.
-
-Implementation:
-
-- `habituation_stl/stl.py`
-  - `Pred`, `Neg`, `And`, `Or`, `Implies`
-  - `Always`, `Eventually`, `Until`
-  - past-time operators `Once`, `Historically`, `Since`
-  - `Aggregator("smooth", theta)` for soft-min/soft-max robustness
-  - `Scale` for clause weighting
+The package implementation is in `habituation_stl/stl.py` and includes predicates, Boolean operators, future temporal operators, past-time operators, smooth aggregators, and clause scaling.
 
 ## Mission Specification
 
-The proposal defines a mission formula:
+The proposal mission is represented as a conjunction of clauses:
 
 ```text
-Phi = phi_exp AND phi_react AND phi_cov AND phi_hab
+Phi = phi_exp AND phi_cov AND phi_hab
 ```
 
-The current production integration uses the following clauses:
+A reactive-deadline clause is also implemented in `habituation_stl/mission_spec.py`, but the production predictive value currently focuses on exposure, coverage, and habituation because reactive protection remains handled by the existing direct-detection dispatcher priority.
 
-| Clause | Meaning | Implementation |
-|---|---|---|
-| `phi_exp` | keep exposure below budget `E_star` | `e_z <= E_star` |
-| `phi_cov` | keep coverage age below `T_cov` | `g_z <= T_cov` |
-| `phi_hab` | active deterrence should use an effective cue | `eta_z >= eta_min` |
-| `phi_react` | reactive arrivals should be serviced before deadline | present in `mission_spec.py`, not currently central in production predictive scoring |
+Production clauses:
 
-Implementation:
+| Clause | Signal test | Purpose |
+| --- | --- | --- |
+| `exp` | `e_z <= stl_E_star` | reward predicted exposure reduction |
+| `cov` | `g_z <= stl_T_cov_s` | reward serving stale cells |
+| `hab` | `eta_z >= stl_eta_min` | penalize repeated use of habituated cues |
 
-- `habituation_stl/mission_spec.py`
-  - `SpecParams`
-  - `build_clauses(...)`
-  - `build_spec(...)`
-  - `build_inner_clauses(...)`
+The active clause set controls the B0-B4 ladder:
 
-Important details:
+- B3 uses `stl_active_clauses=("exp", "cov")`.
+- B4 uses `stl_active_clauses=("exp", "cov", "hab")`.
 
-- Predicate margins are normalized by thresholds, matching the proposal's
-  scale-comparability requirement.
-- `active_clauses` controls whether B3 uses `("exp", "cov")` and B4 uses
-  `("exp", "cov", "hab")`.
-- `clause_weights` are now applied through `Scale(...)`.
-- The returned per-clause dictionary remains unweighted for diagnostics.
-
-## Habituation Model
-
-The proposal uses per-cell, per-cue effectiveness:
-
-```text
-eta[z, mode] in (0, 1]
-```
-
-Effectiveness recovers toward `1.0` over time and drops after a cue is applied.
-
-Implementation:
-
-- `habituation_stl/habituation.py`
-  - `HabituationField.recover(dt)`
-  - `HabituationField.apply(cell, mode)`
-  - `HabituationField.effectiveness(cell, mode)`
-
-Production wiring:
-
-- `DeterrentSystem.py` creates one `HabituationField`.
-- Every truth step recovers the field.
-- Every completed deterrence action applies a mode-specific habituation update.
-- Ground-truth suppression is scaled by `eta_at_apply`.
-- `direct_detection_habituation_mode="laser"` maps reactive direct detections
-  onto a physical cue bucket instead of a separate non-physical mode.
-
-The direct-detection mapping is important. Without it, reactive completions
-would degrade only a `direct_detection` bucket, while B4 candidate scoring
-evaluates `formation`, `laser`, and `biosonic`; B4 would then see all predictive
-cues as fresh.
+This separation is important. B3 tests whether STL robustness itself is useful. B4 tests whether adding the habituation clause changes behavior and improves outcomes when ground truth habituates.
 
 ## Counterfactual Task Value
 
-The proposal's Algorithm 2 is implemented by
-`habituation_stl/task_value.py::counterfactual_value(...)`.
+For each candidate predictive action `a` and robot `r`, the planner computes:
 
-For a candidate action `(target_cell, mode, completion_lead_s)`:
+```text
+U(a,r) = robustness(Phi_r, trace_with_action) - robustness(Phi_r, trace_without_action)
+```
 
-1. Build the nominal trajectory `xi_without_action`.
-2. Copy it to `xi_with_action`.
-3. From the completion lead onward:
-   - reduce `e_target` by an effectiveness-scaled suppression bump
-   - reset `g_target`
-   - set `eta_target` to the cue effectiveness at application
-4. Evaluate the local STL spec on both traces.
-5. Return the robustness difference.
+Implementation:
 
-Production adapters live in `planner_task_estimation.py`:
+- `habituation_stl/task_value.py::counterfactual_value(...)`
+- `planner_task_estimation.py::estimate_stl_counterfactual_value(...)`
+- `TaskGenerator.py` candidate scoring when `predictive_utility_mode="stl_robustness"`
 
-- derive local cells for the robot
-- compute exposure from the robot's SESTPP intensity field
-- compute coverage age from `last_service_t_by_cell`
-- map mode labels to habituation/STL mode ids
-- return `predictive_stl_U` plus diagnostic fields such as
-  `stl_eta_at_apply`
+The adapter constructs a robot-local cell state from the SESTPP field and coverage memory:
 
-## B3 vs B4 Semantics
+- exposure rate from value-weighted `rob.m.lam`
+- coverage age from `last_service_t_by_cell`
+- cue effectiveness from `HabituationField.effectiveness(cell, mode)`
+- completion lead from candidate ETA/service timing
 
-The proposal's ladder isolates the value-function components:
+The selected STL value is exported as `predictive_stl_U` and mirrored into legacy dispatch fields so the dispatcher does not need a special STL branch.
 
-- B3: STL robustness without the habituation clause
-- B4: STL robustness with the habituation clause
+## Habituation Model
 
-The implementation now follows that separation:
+`habituation_stl/habituation.py` implements `HabituationField`, a per-cell, per-mode effectiveness state. Effectiveness recovers toward `1.0` over time and drops when a cue is applied.
 
-- B3 uses `stl_active_clauses=("exp", "cov")`
-- B4 uses `stl_active_clauses=("exp", "cov", "hab")`
-- when `"hab"` is not active, the planner-side counterfactual assumes
-  `eta_app = 1.0`
-- when `"hab"` is active, `eta_app = hab.effectiveness(cell, mode)`
+Production wiring in `DeterrentSystem.py`:
 
-This matters because B3 should isolate the robustness reformulation itself,
-while B4 should add habituation-aware mode selection. The ground truth may still
-have habituation on or off independently, as required by the proposal's control
-design.
+- `hab.recover(dt)` runs during the truth step.
+- completed deterring tasks read `eta_at_apply` before applying habituation.
+- completed deterring tasks call `hab.apply(cell, mode)`.
+- recent deterrence events store `eta`.
+- `_suppression_eval(...)` multiplies truth suppression by stored `eta`.
+- direct-detection deterring is mapped onto a physical cue bucket through `direct_detection_habituation_mode="laser"`.
+
+The non-habituating control is produced by setting `enable_habituation=False` or `habituation_kappa=0.0`.
 
 ## Dispatcher Consistency
 
-The proposal explicitly says the dispatcher should remain unchanged and only the
-predictive value should be replaced.
+The proposal requires the dispatcher to remain unchanged. The production integration follows that requirement.
 
-That is how the current integration works:
+In STL mode, `TaskGenerator.py` sets:
 
-- `TaskGenerator.py` computes `predictive_stl_U`.
-- STL mode sets compatibility fields:
-  - `utility`
-  - `score`
-  - `predicted_deltaJ`
-  - `deltaJ_per_cost`
-- `planner_task_extraction.py` now forces `utility` and `score` from
-  `predictive_stl_U` in STL mode.
-- existing dispatch policies still rank by their normal task fields.
+- `predictive_stl_U = U`
+- `utility = U`
+- `score = U`
+- `predicted_deltaJ = U`
+- `deltaJ_per_cost = U / cost`
 
-No command runners or experiment command files are required for this behavior.
+`planner_task_extraction.py` preserves these values. Existing dispatch policies such as `unc`, `res`, `res-soft`, `res-adaptive`, `time-aware`, and `risk-adjusted` continue to rank by the same fields they already used.
 
-## Online Monitoring
+## Production Telemetry
 
-The proposal's Algorithm 1 is represented by `habituation_stl/signals.py`.
+Production metrics now include:
 
-`RobotMonitor` keeps rolling buffers for each robot's local cells and reports:
-
-- per-clause robustness
-- global smooth-min robustness
-
-Production exports include:
-
+- `habituation_eta_mean`
+- `habituation_eta_min`
+- `habituation_eta_at_apply_mean`
+- `habituation_variety_index`
 - `stl_robustness_global_mean`
 - `stl_robustness_global_min`
 - `stl_robustness_exp`
 - `stl_robustness_cov`
 - `stl_robustness_hab`
-- `habituation_eta_mean`
-- `habituation_eta_min`
-- `habituation_eta_at_apply_mean`
-- `habituation_variety_index`
+- `truth_candidate_events`
+- `truth_accepted_events`
+- `truth_suppressed_events`
+- `truth_suppression_effect_mean`
+- `truth_suppression_effect_sum`
 
-The monitor is currently diagnostic/telemetry. Predictive task value uses the
-forward-looking counterfactual in `task_value.py`.
+These fields are required for diagnosing whether a run has enough suppression opportunity for habituation to affect realized exposure.
 
-## Current Consistency Assessment
+## Validation Summary
 
-The integration is now broadly consistent with the proposal:
+Focused checks passed during integration:
 
-- STL robustness is used as the predictive task value.
-- B3 and B4 are separated by `active_clauses`.
-- B4 sees reduced cue effectiveness when the physical cue has been repeated.
-- Direct detections now habituate a physical cue bucket.
-- Dispatcher logic remains unchanged.
-- Ground truth uses habituation-scaled suppression.
-- Diagnostics expose candidate-level STL utility and cue effectiveness.
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe -m py_compile DeterrentSystem.py planner_task_estimation.py experiments\diagnose_habituation_stl_production.py system_structure.py
+$env:PYTHONPATH=(Resolve-Path .).Path; C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe -m unittest tests.test_ground_truth_habituation_wiring
+$env:PYTHONPATH=(Resolve-Path .).Path; C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe -m unittest tests.test_predictive_utility_calibration.PredictiveUtilityPropagationTests.test_stl_robustness_overwrites_stale_legacy_utility
+$env:PYTHONPATH=(Resolve-Path .\habituation_stl).Path; C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe habituation_stl\tests\test_spec_value.py
+```
 
-Recent diagnostic result:
+Production evidence is summarized in `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`. The strongest current result is the 1800-second, 10-seed B1/B3/B4 confirmatory batch:
 
-- `B4_res_stl_full/hab_on` laser candidates now show reduced
-  `stl_eta_at_apply`.
-- B3 remains fresh in candidate scoring.
-- B4 candidate mode preference shifted from laser toward formation in the short
-  single-seed probe.
-- Accepted tasks did not yet diverge in the 420-second single-seed diagnostic,
-  so longer/multi-seed evidence is still needed.
+- B4 improves over B1 under habituation: mean paired exposure delta `-2298.52`, 95% CI `[-4184.21, -412.82]`.
+- B4 improves over B3 under habituation: mean paired exposure delta `-3288.10`, 95% CI `[-4112.47, -2463.73]`.
+- B4 and B3 are identical when habituation is disabled: exposure delta `0.00`.
 
-## Known Deviations and Risks
+## Known Scope Limits
 
-1. `phi_react` is implemented but not currently the main differentiator in the
-   predictive counterfactual path. Reactive protection still comes from the
-   existing dispatcher and override logic.
+- The habituation model is a stylized simulation mechanism, not a fitted biological model.
+- `phi_react` is implemented but not the primary production predictive-score differentiator.
+- The counterfactual rollout is a local analytic approximation rather than a full future SESTPP simulation.
+- The global STL robustness metric is stricter for B4 because B4 includes the habituation clause; exposure and mechanism metrics are the primary thesis evidence.
 
-2. The proposal describes a past-time cue-variety form and a continuous
-   effectiveness-floor form. The implementation uses the effectiveness-floor
-   form for scoring and an entropy-style variety metric for reporting.
+## Files
 
-3. The online monitor uses non-temporal inner clauses over a trailing buffer,
-   then takes the historical minimum. This is consistent with run-so-far
-   telemetry, but task value uses the forward-looking STL formula.
+Core package:
 
-4. The suppression predictor is a cheap analytic approximation. It uses local
-   cell exposure and a self-cell suppression bump rather than a full spatial
-   rollout of the SESTPP field.
-
-5. B4's effect may still be too weak to change accepted tasks or exposure under
-   short runs. If long runs still show weak separation, tune:
-   - `stl_eta_min`
-   - `clause_weights["hab"]`
-   - habituation strength `kappa`
-   - direct-detection physical cue mapping
-   - scenario load and hotspot concentration
-
-## Verification Checklist
-
-Before thesis-scale results, verify:
-
-- `diagnostic_action_variants.csv` shows B3 and B4 differ only when
-  habituation is on.
-- B4's habituated cue has lower `stl_eta_at_apply`.
-- B4 candidate utilities penalize the habituated cue.
-- B4 selected candidate modes show more variety than B3.
-- accepted predictive tasks eventually diverge in longer runs.
-- exposure or robustness improves statistically across paired seeds.
-
-## Files to Revisit
-
-- `docs/proposal_stl.pdf`
 - `habituation_stl/stl.py`
 - `habituation_stl/mission_spec.py`
 - `habituation_stl/task_value.py`
-- `habituation_stl/signals.py`
 - `habituation_stl/habituation.py`
+- `habituation_stl/signals.py`
+- `habituation_stl/metrics.py`
+
+Production adapters:
+
+- `DeterrentSystem.py`
+- `TaskGenerator.py`
 - `planner_task_estimation.py`
 - `planner_task_extraction.py`
-- `TaskGenerator.py`
-- `DeterrentSystem.py`
+- `system_structure.py`
+
+Experiment tools:
+
 - `experiments/diagnose_habituation_stl_production.py`
 - `experiments/run_habituation_stl_production_ladder.py`
+- `experiments/summarize_habituation_stl_ladder.py`

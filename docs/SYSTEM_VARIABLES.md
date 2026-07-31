@@ -179,6 +179,21 @@ Note:
 - `enable_model_scored_deterring` - baseline toggle for preventive deterring.
 - `auto_enable_proposed_preventive_window` - auto-set a nonzero preventive window for `proposed` when preventive deterring is enabled.
 - `default_proposed_model_deterring_window_s` - default preventive-window value used by the auto-configuration.
+### 1.7.1 Predictive utility modes and STL scoring
+
+- `predictive_utility_mode` - predictive deterrence value mode. Supported production values include legacy/deltaJ modes and `stl_robustness`.
+- `stl_E_star` - exposure budget threshold used by the STL exposure clause.
+- `stl_T_cov_s` - coverage-age threshold used by the STL coverage clause.
+- `stl_T_react_s` - reactive deadline threshold available to the STL reactive clause.
+- `stl_W_s` - anti-habituation / cue-variety time window parameter from the proposal interface.
+- `stl_eta_min` - effectiveness floor used by the STL habituation clause.
+- `stl_horizon_s` - forward prediction horizon used for counterfactual robustness scoring.
+- `stl_monitor_dt_s` - sample period for STL trace construction and robot monitor buffers.
+- `stl_theta` - smooth robustness temperature.
+- `stl_smooth` - enable smooth-min/smooth-max robustness aggregation instead of hard min/max.
+- `stl_active_clauses` - tuple/list of active STL clauses. B3 uses `("exp", "cov")`; B4 uses `("exp", "cov", "hab")`.
+
+In `stl_robustness` mode, `TaskGenerator.py` writes `predictive_stl_U` and mirrors it into `utility`, `score`, `predicted_deltaJ`, and `deltaJ_per_cost` for dispatcher compatibility.
 
 ### 1.8 Planner / dispatch / queue admission
 
@@ -226,6 +241,13 @@ Default modes in current code:
 - `beta_true` - truth suppression strength.
 - `use_mode_dependent_truth_suppression` - let each deterring mode use its own truth suppression parameters.
 - `warmup_s` - truth-process warmup horizon before the visible run.
+### 1.11.1 Habituation truth controls
+
+- `enable_habituation` - enable per-cell/per-cue habituation in ground-truth suppression and STL diagnostics.
+- `habituation_T_rec_s` - recovery time scale for cue effectiveness.
+- `habituation_kappa` - multiplicative drop strength when a cue is applied. `0.0` disables behavioral habituation.
+- `habituation_gamma` - optional cross-mode coupling strength.
+- `direct_detection_habituation_mode` - physical cue bucket used for direct-detection deterrence in the habituation field; production uses `laser` so reactive deterrence participates in cue habituation.
 
 ### 1.12 Forecast, telemetry, and evaluation
 
@@ -251,6 +273,22 @@ Default modes in current code:
 - `intervention_boundary_spatial_quant_m` - spatial quantization used for intervention message dedupe.
 - `intervention_boundary_min_weight` - minimum shared intervention weight.
 - `report_metrics_end` - print / return final metrics summary.
+Additional STL/habituation metrics exported by the production runtime:
+
+- `habituation_eta_mean`
+- `habituation_eta_min`
+- `habituation_eta_at_apply_mean`
+- `habituation_variety_index`
+- `stl_robustness_global_mean`
+- `stl_robustness_global_min`
+- `stl_robustness_exp`
+- `stl_robustness_cov`
+- `stl_robustness_hab`
+- `truth_candidate_events`
+- `truth_accepted_events`
+- `truth_suppressed_events`
+- `truth_suppression_effect_mean`
+- `truth_suppression_effect_sum`
 
 ### 1.14 Row geometry and motion constraints
 
@@ -556,8 +594,9 @@ These are the top-level sweep controls for `run_assignment_tuning_sweep_lab.py:1
 If you are changing the system by hand, the most important files to inspect in order are:
 
 1. `DeterrentSystem.py` - production top-level simulator inputs.
-2. `TaskGenerator.py` - patrol / preventive task creation and assignment weights.
-3. `SESTPP.py` - model-level process parameters.
+2. `TaskGenerator.py` - patrol / preventive task creation, STL predictive value propagation, and assignment weights.
+3. `planner_task_estimation.py` and `habituation_stl/` - counterfactual value functions, STL clauses, and habituation mechanics.
+4. `SESTPP.py` - model-level process parameters.
 4. `labs/DeterrentSystem_assignment_lab.py` and `labs/TaskGenerator_lab.py` - lab-only assignment, gating, and patrol-filter variants.
 5. Runner scripts - only if you are launching sweeps or confirm studies.
 

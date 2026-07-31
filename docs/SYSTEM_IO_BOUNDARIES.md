@@ -38,6 +38,8 @@ Sections in the structured config:
 - `motion`
 - `idle_behavior`
 - `deterring_modes`
+- `habituation`
+- `stl`
 
 This does not change simulator behavior. It only groups the existing flat inputs into subsystem-aligned sections.
 
@@ -68,9 +70,12 @@ Consumes:
 - `task_priority`
 - `gating`
 - `deterring_modes`
+- `habituation`
+- `stl`
 - robot forecast state from `SESTPP.py`
 - live robot poses when enabled for task planning
 - recent detections and recent deterrence history
+- habituation/STL adapters when `predictive_utility_mode="stl_robustness"`
 
 Produces:
 - candidate patrolling tasks
@@ -131,6 +136,7 @@ Produces:
 - truth event stream
 - detections seen by robots
 - suppression outcomes
+- habituation effectiveness updates and event-level `eta_at_apply`
 
 Implementation note:
 - per-step truth generation / legacy detection processing is now factored through `system_stage_helpers.py`
@@ -246,6 +252,9 @@ Contains a compact, stage-oriented summary of:
 - fleet engagement / moving / idle fractions
 - truth suppression rate
 - forecast recall / precision
+- habituation effectiveness summaries
+- STL robustness clause summaries
+- truth suppression opportunity/effect summaries
 
 ### 4.6 Truth / event-generation stage
 
@@ -292,6 +301,39 @@ Contains:
 Implementation note:
 - telemetry emission and telemetry-stage summary construction are now factored through `system_stage_helpers.py`
 
+
+### 4.9 Habituation / STL diagnostics
+
+The habituation-aware STL integration adds diagnostic fields to existing stage outputs rather than adding a separate runtime stage.
+
+Config sections:
+
+- `habituation`
+- `stl`
+
+Task preview fields can include:
+
+- `predictive_stl_U`
+- `stl_summary`
+- `stl_eta_at_apply`
+- `predictive_action_variants`
+
+Metric fields can include:
+
+- `habituation_eta_mean`
+- `habituation_eta_min`
+- `habituation_eta_at_apply_mean`
+- `habituation_variety_index`
+- `stl_robustness_global_mean`
+- `stl_robustness_global_min`
+- `stl_robustness_exp`
+- `stl_robustness_cov`
+- `stl_robustness_hab`
+- `truth_candidate_events`
+- `truth_accepted_events`
+- `truth_suppressed_events`
+- `truth_suppression_effect_mean`
+- `truth_suppression_effect_sum`
 ## 5. Frame outputs
 
 The production frame output in `DeterrentSystem.py` now has three layers:
@@ -351,6 +393,7 @@ This change is intended to make the system easier to understand without changing
 - runtime state is summarized in one compact structure
 - every major stage now has an explicit stage output
 - the path from inputs -> subsystem -> outputs is explicit
+- STL/habituation diagnostics make it possible to distinguish wiring failures from underpowered truth-suppression scenarios
 
 ## 7. Current limitation
 

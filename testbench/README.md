@@ -112,6 +112,20 @@ Native metrics include:
 - `native_boundary_message_count`
 - `native_forecast_recall_at_k`
 - `native_forecast_precision_at_k`
+- `native_habituation_eta_mean`
+- `native_habituation_eta_min`
+- `native_habituation_eta_at_apply_mean`
+- `native_habituation_variety_index`
+- `native_stl_robustness_global_mean`
+- `native_stl_robustness_global_min`
+- `native_stl_robustness_exp`
+- `native_stl_robustness_cov`
+- `native_stl_robustness_hab`
+- `native_truth_candidate_events`
+- `native_truth_accepted_events`
+- `native_truth_suppressed_events`
+- `native_truth_suppression_effect_mean`
+- `native_truth_suppression_effect_sum`
 
 Artifacts:
 
@@ -124,3 +138,27 @@ Artifacts:
 - `system_scoreboard.csv`
 - `testbench_manifest.json`
 - `report.md`
+
+## Habituation-Aware STL Runs
+
+The B0-B4 STL ladder uses dedicated experiment runners rather than generic JSON testbench configs because it needs paired habituation-on/off controls and system-specific STL clause settings.
+
+Run the production ladder:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_b0_b4_900s_10seed_v5 --duration-s 900 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --max-workers 2
+```
+
+Run the confirmatory B1/B3/B4 batch:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5 --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --systems B1_unc_legacy B3_res_stl_nohab B4_res_stl_full --max-workers 2
+```
+
+Summarize:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --run-dir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5
+```
+
+Current confirmed result documentation: `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`.

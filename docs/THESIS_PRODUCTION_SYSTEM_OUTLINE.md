@@ -15,7 +15,7 @@ The production system now implements the full closed-loop architecture that the 
 - direct-detection deterring tasks plus forecast-driven patrol and preventive deterring tasks,
 - task extraction, selection, dispatch, and motion execution inside one persistent runtime,
 - boundary sharing of both detections and completed intervention events,
-- value-weighted exposure, response-time, forecast, suppression, and communication metrics,
+- value-weighted exposure, response-time, forecast, suppression, habituation, STL robustness, and communication metrics,
 - reproducible calibration, experiment, and testbench workflows around the runtime.
 
 In the current codebase, these pieces are implemented primarily in `DeterrentSystem.py`, `SESTPP.py`, `TaskGenerator.py`, `planner_task_estimation.py`, `planner_dispatch.py`, and `system_structure.py`.
@@ -34,9 +34,10 @@ The production goal is to run a decentralized multi-robot deterrence loop that:
 1. Maintain a real-time spatial risk field for each robot zone using local detections and shared boundary events.
 2. Represent completed deterrence actions as suppressive interventions with mode-dependent strength, spread, and decay.
 3. Generate both reactive and predictive tasks from one shared forecasted field.
-4. Score preventive actions by predicted future exposure reduction relative to execution cost.
-5. Coordinate multiple robots under assignment, dispatch, and admission constraints that prevent queue collapse.
-6. Evaluate the system with metrics that reflect agricultural impact, responsiveness, deterrence effectiveness, travel cost, and communication overhead.
+4. Score preventive actions by either legacy predicted future exposure reduction or opt-in counterfactual STL robustness improvement.
+5. Model cue habituation so repeated use of the same deterrent mode can reduce realized suppression effectiveness.
+6. Coordinate multiple robots under assignment, dispatch, and admission constraints that prevent queue collapse.
+7. Evaluate the system with metrics that reflect agricultural impact, responsiveness, deterrence effectiveness, habituation, STL robustness, travel cost, and communication overhead.
 
 ## 1.5 Problem Setting and Notation
 
@@ -48,7 +49,8 @@ Let:
 - `E_r = {(x_i, t_i)}` denote detections maintained by robot `r`,
 - `U_r = {(z_j, tau_j, m_j)}` denote completed deterrence actions with mode `m_j`,
 - `w(x)` denote the value weighting over the vineyard,
-- `lambda_r(x, t)` denote the robot-local forecast intensity field.
+- `lambda_r(x, t)` denote the robot-local forecast intensity field,
+- `eta(z, m, t)` denote the habituation effectiveness of cue mode `m` in cell `z`.
 
 The production system solves a repeated online control problem: given the current robot poses, local forecast fields, active task queue, and recent interventions, decide which robots should execute reactive deterring, preventive deterring, or patrol actions next.
 
@@ -74,6 +76,16 @@ p_keep(x, y, t) = exp(-s(x, y, t))
 
 where `s(x, y, t)` is the accumulated suppressive effect of recent interventions. This makes deterrence actions affect both the truth process and the robot forecast loop.
 
+
+### 1.6.3 Habituating Ground Truth
+
+The production truth model optionally scales each completed deterrence event by a per-cell, per-cue effectiveness value:
+
+```text
+s_event(x, y, t) = eta(z, m, tau) * beta_m * K_m(x, y) * exp(-(t - tau) / omega_m)
+```
+
+The effectiveness state recovers toward `1.0` over time and decreases when a cue is applied in the same cell. This makes repeated cue use less effective in the simulated world. The non-habituating control sets `enable_habituation=False` or `habituation_kappa=0.0`, which keeps application-time effectiveness at `1.0`.
 ## 1.7 Production Forecast Model
 
 Each robot carries an `OnlineSESTPP` model over its zone. The implemented production forecast is:
@@ -130,7 +142,29 @@ deltaJ_per_cost(a) = predicted_deltaJ(a) / c_eta(a)
 
 The estimator builds a local intervention footprint, integrates available excess risk over a finite horizon, and caps the predicted reduction by what is actually available to suppress.
 
-### 1.8.4 Admission, Assignment, and Dispatch
+
+### 1.8.4 Habituation-Aware STL Predictive Value
+
+The proposal STL path is implemented as an opt-in predictive utility mode:
+
+```text
+predictive_utility_mode = "stl_robustness"
+```
+
+For a candidate predictive action `a` and robot `r`, the planner computes:
+
+```text
+U(a,r) = robustness(Phi_r, trace_with_action) - robustness(Phi_r, trace_without_action)
+```
+
+The production mission clauses are exposure, coverage, and optional habituation:
+
+```text
+Phi = phi_exp AND phi_cov AND phi_hab
+```
+
+B3 uses exposure and coverage only. B4 adds the habituation clause, causing repeated and less-effective cues to be penalized during candidate scoring. The resulting `U(a,r)` is mirrored into the existing task fields used by dispatch, so the dispatch logic remains unchanged.
+### 1.8.5 Admission, Assignment, and Dispatch
 
 The production runtime then applies:
 
@@ -191,7 +225,7 @@ The production planning stack is split across:
 
 - `planner_task_extraction.py` for candidate extraction,
 - `TaskGenerator.py` for patrol and preventive candidate scoring,
-- `planner_task_estimation.py` for counterfactual exposure-reduction estimation,
+- `planner_task_estimation.py` for legacy counterfactual exposure reduction and STL counterfactual robustness estimation,
 - `planner_task_selection.py` for optional preassignment filtering,
 - `planner_dispatch.py` for dispatch-time gating and assignment selection.
 
@@ -199,7 +233,7 @@ The production planning stack is split across:
 
 The production system is documented and instrumented through:
 
-- `system_structure.py` for structured runtime snapshots,
+- `system_structure.py` for structured runtime snapshots and STL/habituation config exports,
 - `planner_profiles.py` for named planner presets,
 - `docs/SYSTEM_VARIABLES.md` for configuration surface documentation,
 - `experiments/` for calibration and thesis-facing validation,
@@ -213,6 +247,7 @@ The production system is evaluated against the same main baselines used througho
 1. `reactive`: direct-response deterring only,
 2. `prediction_only`: patrol forecasting without intervention feedback,
 3. `proposed`: intervention-aware forecasting and preventive deterring.
+4. `B3_res_stl_nohab` / `B4_res_stl_full`: STL predictive-value baselines for the habituation study.
 
 The current staged validation flow is:
 
@@ -228,6 +263,8 @@ Primary reported metrics include:
 - value-weighted exposure,
 - mean response time,
 - birds deterred percentage,
+- habituation effectiveness and cue-variety metrics,
+- STL robustness clause metrics,
 - truth suppression rate,
 - forecast recall / precision at `k`,
 - completed tasks and task efficiency,
@@ -242,7 +279,8 @@ The implemented production system contributes:
 - a closed-loop simulator where completed deterrence actions alter both future truth events and future forecasts,
 - a shared planning pipeline spanning reactive deterring, patrol, and model-scored preventive deterring,
 - decentralized boundary communication for both detections and interventions,
-- a reproducible experiment and benchmark framework around the runtime.
+- a reproducible experiment and benchmark framework around the runtime,
+- a production habituation-aware STL predictive value path with paired-seed validation evidence.
 
 ## 1.13 Implemented Deliverables and Current Scope
 
@@ -250,7 +288,7 @@ Implemented deliverables now present in the repository include:
 
 - intervention-aware online forecasting,
 - mode-dependent deterrence actions,
-- counterfactual preventive scoring,
+- legacy counterfactual preventive scoring and opt-in STL robustness preventive scoring,
 - queue- and dispatch-aware multi-robot execution,
 - structured telemetry and runtime snapshots,
 - thesis-facing calibration and comparison workflows.
@@ -265,5 +303,5 @@ The production system should therefore be described as an implemented end-to-end
 4. Intervention-aware SESTPP forecast model and mode-dependent suppression design
 5. Task extraction, scoring, dispatch, and motion execution in the production planner
 6. Calibration workflow, baselines, and experimental methodology
-7. Results, ablations, operational tradeoffs, and discussion
+7. Results, ablations, habituation-aware STL evidence, operational tradeoffs, and discussion
 8. Conclusions, limitations, and future extensions

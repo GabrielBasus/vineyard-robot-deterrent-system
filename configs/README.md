@@ -31,3 +31,36 @@ Rules:
 - Nested YAML sections are supported; they are flattened into the existing runner argument names.
 - Current YAML support covers runner-exposed parameters. It does not yet replace the full production simulator function signature.
 - The confirm and assignment-tuning lab runners also accept `planner.profile: thesis_confirm` (alias `post_fix`) as a conservative post-fix preset; explicit YAML/CLI scalar overrides still win.
+
+## Thesis Dispatch Demo Configs
+
+The thesis dispatch visual comparisons use JSON config overlays for `python -m demos.demo_systems`.
+
+Files:
+
+- `configs/demo_thesis_dispatch_core3.json`
+- `configs/demo_thesis_dispatch_reservation_sweep.json`
+- `configs/demo_thesis_dispatch_random_ablation.json`
+
+These configs inherit the base structure from `configs/demo_config.json` and only override the title, displayed metrics, and the three system variants.
+
+Runbook:
+
+- See `docs/THESIS_DISPATCH_RUNBOOK.md` for the thesis meaning of each variant, the exact demo commands, and the matching `testbench` / `experiments` entrypoints.
+
+## Habituation-Aware STL Configuration
+
+The STL proposal experiments are run through `experiments/run_habituation_stl_production_ladder.py` rather than the visual demo JSON overlays. This is intentional: the ladder needs paired habituation-on/off controls and baseline-specific STL clause settings.
+
+Relevant simulator kwargs include:
+
+- `predictive_utility_mode="stl_robustness"`
+- `stl_active_clauses`
+- `stl_E_star`
+- `stl_T_cov_s`
+- `stl_eta_min`
+- `enable_habituation`
+- `habituation_kappa`
+- `habituation_T_rec_s`
+
+See `docs/SYSTEM_VARIABLES.md` for the full variable reference and `docs/habituation_stl_completion_plan.md` for reproduction commands.

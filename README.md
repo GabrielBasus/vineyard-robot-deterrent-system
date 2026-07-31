@@ -14,10 +14,17 @@ It implements an intervention-aware spatiotemporal intensity model, decentralize
 - **Task generation and scoring (`TaskGenerator.py`)**
   - Candidate generation from hotspots
   - Benefit-vs-cost action scoring for patrol and deterrence
+  - Optional habituation-aware STL robustness scoring for predictive deterring
 - **System simulation (`DeterrentSystem.py`)**
   - Ground-truth event process
   - Closed-loop intervention feedback
+  - Optional per-cell/per-cue habituation in the truth process
   - Metrics collection and baseline comparisons
+- **Habituation-aware STL package (`habituation_stl/`)**
+  - Signal Temporal Logic robustness operators
+  - Per-cell/per-mode cue habituation state
+  - Counterfactual predictive task value `U(a,r)`
+  - Reference tests and production integration helpers
 - **Monitoring and telemetry (`telemetry_sim.py`, `demos/streamlit_app.py`)**
   - Live telemetry CSV output
   - Streamlit dashboard with map/tasks/robot diagnostics
@@ -199,7 +206,9 @@ This is implemented inside `TaskGenerator.periodic_patrolling(...)`.
 
 ### 7. Model-Scored Preventive Deterrence
 
-Preventive deterring tasks use a counterfactual exposure-reduction estimate. For a candidate action at `(x, y)`:
+Preventive deterring tasks support two predictive value modes.
+
+The legacy mode uses a counterfactual exposure-reduction estimate. For a candidate action at `(x, y)`:
 
 ```text
 available_integral(x, y) =
@@ -237,6 +246,35 @@ deltaJ_per_cost = predicted_deltaJ / max(cost_eta, 1e-6)
 ```
 
 This is implemented in `estimate_counterfactual_reduction(...)` in `planner_task_estimation.py` and consumed by `TaskGenerator.py`.
+The habituation-aware STL mode is selected with:
+
+```text
+predictive_utility_mode = "stl_robustness"
+```
+
+In this mode, the candidate value is the counterfactual robustness improvement:
+
+```text
+U(a, r) = rho(Phi_r, xi_with_action) - rho(Phi_r, xi_without_action)
+```
+
+where `Phi_r` is the robot-local STL mission specification and `xi` is the predicted local signal trace. The active production clauses are:
+
+- `exp`: keep value-weighted exposure below `stl_E_star`
+- `cov`: keep coverage age below `stl_T_cov_s`
+- `hab`: prefer cues whose effectiveness is above `stl_eta_min`
+
+`TaskGenerator.py` stores the resulting value in `predictive_stl_U` and mirrors it into `utility`, `score`, `predicted_deltaJ`, and `deltaJ_per_cost` so existing dispatch policies continue to work without command or dispatcher changes.
+
+### 7.1 Habituation in Ground Truth
+
+When `enable_habituation=True`, each completed deterring action updates a per-cell, per-cue `HabituationField`. Truth suppression is scaled by the effectiveness sampled at the action completion time:
+
+```text
+suppression_event = eta(cell, mode) * beta_mode * spatial_kernel * temporal_decay
+```
+
+Repeated use of the same cue in the same cell lowers `eta`; recovery moves it back toward `1.0`. Setting `enable_habituation=False` or `habituation_kappa=0.0` keeps `eta_at_apply = 1.0` and provides the non-habituating control.
 
 ### 8. Heuristic Preventive Gates
 
@@ -380,6 +418,41 @@ Launch live dashboard (if telemetry is being flushed by a running sim):
 streamlit run demos/streamlit_app.py
 ```
 
+
+## Habituation-Aware STL Workflow
+
+Run the package-level STL and habituation tests:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path .\habituation_stl).Path
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe habituation_stl\tests\test_spec_value.py
+```
+
+Run the production B0-B4 ladder:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_b0_b4_900s_10seed_v5 --duration-s 900 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --max-workers 2
+```
+
+Run the confirmatory B1/B3/B4 batch:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5 --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --systems B1_unc_legacy B3_res_stl_nohab B4_res_stl_full --max-workers 2
+```
+
+Summarize ladder outputs:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --run-dir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5
+```
+
+Current thesis-facing STL documentation:
+
+- `docs/STL_THEORY_AND_INTEGRATION_AUDIT.md`
+- `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`
+- `docs/habituation_stl_completion_plan.md`
+- `habituation_stl/README_INTEGRATION.md`
+
 ## Pluggable Testbench
 
 Use the config-driven testbench when you want one shared scenario and one shared metric contract, but different systems plugged into the same benchmark.
@@ -439,6 +512,11 @@ Most important plots to review:
 - `results/tradeoff_exposure_vs_response_S2_nominal.png` (core tradeoff view)
 - `results/winner_count_by_baseline.png` (who wins across settings)
 - `results/mean_rank_heatmap.png` (ranking stability by scenario)
+For the habituation-aware STL result, use:
+
+- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/THESIS_RESULTS_SUMMARY.md`
+- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/exposure_mean_ci_by_system.png`
+- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/hab_on_b4_paired_exposure_deltas.png`
 
 ### Key Plots
 
