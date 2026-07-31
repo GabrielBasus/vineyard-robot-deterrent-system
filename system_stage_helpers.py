@@ -6,6 +6,7 @@ from typing import Any, Callable, Mapping, MutableMapping, MutableSequence, Sequ
 
 import numpy as np
 
+from action_schema import task_action_kind, task_action_name, task_action_service_time_s
 from system_structure import ForecastModelStageResult, MotionCommand, TelemetryStageResult, TruthEventStageResult
 
 
@@ -41,6 +42,41 @@ class TruthGenerationCounters:
 class MotionFeedbackStep:
     applied: bool
     updated_robot_count: int
+    route_progress_by_robot: Mapping[str, dict[str, Any]] | None = None
+
+
+def _assigned_task_stream(assigned_task: Mapping[str, Any] | None) -> str | None:
+    """Classify an assigned task as reactive or predictive for motion telemetry."""
+    if not assigned_task:
+        return None
+    action_kind = task_action_kind(assigned_task)
+    action_name = task_action_name(assigned_task)
+    if action_kind == "deterring":
+        return "reactive" if action_name == "direct_detection" else "predictive"
+    if action_kind == "patrolling":
+        return "predictive"
+    return None
+
+
+def _assigned_action_kind(assigned_task: Mapping[str, Any] | None) -> str | None:
+    """Return the canonical action kind for an assigned task, if one exists."""
+    if not assigned_task:
+        return None
+    return str(task_action_kind(assigned_task))
+
+
+def _assigned_action_name(assigned_task: Mapping[str, Any] | None) -> str | None:
+    """Return the canonical action name for an assigned task, if one exists."""
+    if not assigned_task:
+        return None
+    return str(task_action_name(assigned_task))
+
+
+def _assigned_action_service_time_s(assigned_task: Mapping[str, Any] | None) -> float | None:
+    """Return the canonical action service time for an assigned task, if one exists."""
+    if not assigned_task:
+        return None
+    return float(task_action_service_time_s(assigned_task))
 
 
 def build_motion_command(
@@ -52,7 +88,14 @@ def build_motion_command(
     command_type: str,
     source: str,
     assigned_task: Mapping[str, Any] | None,
+    planner_mode: str = "lane_projection",
+    route_node_ids: Sequence[str] | None = None,
+    route_waypoints: Sequence[tuple[float, float]] | None = None,
+    active_waypoint_index: int = 0,
+    blocked: bool = False,
+    wait_reason: str | None = None,
 ) -> MotionCommand:
+    """Build the structured command emitted by the production motion stage for one robot."""
     return MotionCommand(
         robot_id=str(robot_id),
         command_type=str(command_type),
@@ -60,9 +103,23 @@ def build_motion_command(
         assigned_task_id=(None if not assigned_task else int(assigned_task.get("id"))),
         assigned_task_type=(None if not assigned_task else str(assigned_task.get("type"))),
         assigned_task_mode=(None if not assigned_task or assigned_task.get("mode") in (None, "") else str(assigned_task.get("mode"))),
+        assigned_task_stream=_assigned_task_stream(assigned_task),
+        assigned_action_kind=_assigned_action_kind(assigned_task),
+        assigned_action_name=_assigned_action_name(assigned_task),
+        assigned_action_service_time_s=_assigned_action_service_time_s(assigned_task),
         goal=(None if goal is None else (float(goal[0]), float(goal[1]))),
         effective_goal=(None if effective_goal is None else (float(effective_goal[0]), float(effective_goal[1]))),
         current_pose=(float(pose[0]), float(pose[1])),
+        planner_mode=str(planner_mode),
+        route_node_ids=(None if route_node_ids is None else [str(node_id) for node_id in route_node_ids]),
+        route_waypoints=(
+            None
+            if route_waypoints is None
+            else [(float(point[0]), float(point[1])) for point in route_waypoints]
+        ),
+        active_waypoint_index=int(active_waypoint_index),
+        blocked=bool(blocked),
+        wait_reason=(None if wait_reason is None else str(wait_reason)),
     )
 
 
@@ -82,6 +139,7 @@ def run_forecast_evaluation_stage(
     forecast_hit_flags: MutableSequence[float],
     forecast_lead_times: MutableSequence[float],
 ) -> tuple[float, ForecastEvaluationStep]:
+    """Evaluate forecast hotspots against future truth events and update forecast metrics."""
     if not use_ground_truth or ((now_t - forecast_last_eval_t) < float(forecast_eval_period_s)):
         return float(forecast_last_eval_t), ForecastEvaluationStep(
             forecast_last_eval_t=float(forecast_last_eval_t),
@@ -186,6 +244,7 @@ def run_truth_generation_stage(
     mon: Any,
     record_truth_window_event_fn: Callable[[float, bool], None] | None = None,
 ) -> TruthGenerationCounters:
+    """Advance the ground-truth event process, apply suppression, and ingest detections."""
     if use_ground_truth:
         if w_cdf is not None:
             area = float(W * H)
@@ -303,6 +362,7 @@ def run_telemetry_stage(
     lane_center_for_fn: Callable[[float], float],
     is_at_headland_fn: Callable[[float], bool],
 ) -> TelemetryExecutionStep:
+    """Publish per-frame telemetry updates for robots, task state, and active hotspots."""
     if mon is None or not getattr(mon, "enabled", False):
         return TelemetryExecutionStep(
             robot_pose_updates=0,
@@ -385,6 +445,7 @@ def publish_motion_commands(
     pose: Mapping[str, tuple[float, float]],
     goal: Mapping[str, Any],
 ) -> str:
+    """Send structured motion commands to the optional external orchestration callback."""
     mode = str(motion_orchestration_mode).strip().lower()
     if callable(motion_command_callback):
         motion_command_callback(
@@ -419,8 +480,9 @@ def apply_external_motion_feedback(
     W: float,
     H: float,
 ) -> MotionFeedbackStep:
+    """Apply externally reported robot pose/state updates back into simulator state."""
     if not callable(motion_state_callback):
-        return MotionFeedbackStep(applied=False, updated_robot_count=0)
+        return MotionFeedbackStep(applied=False, updated_robot_count=0, route_progress_by_robot={})
 
     payload = motion_state_callback(
         {
@@ -447,11 +509,11 @@ def apply_external_motion_feedback(
         }
     )
     if not isinstance(payload, Mapping):
-        return MotionFeedbackStep(applied=False, updated_robot_count=0)
+        return MotionFeedbackStep(applied=False, updated_robot_count=0, route_progress_by_robot={})
 
     pose_updates = payload.get("poses")
     if not isinstance(pose_updates, Mapping):
-        return MotionFeedbackStep(applied=False, updated_robot_count=0)
+        pose_updates = {}
 
     updated_robot_count = 0
     for robot_id, xy in pose_updates.items():
@@ -467,9 +529,31 @@ def apply_external_motion_feedback(
         pose[robot_id] = (min(max(x, 0.0), float(W)), min(max(y, 0.0), float(H)))
         updated_robot_count += 1
 
+    route_progress_payload = payload.get("route_progress")
+    route_progress_by_robot: dict[str, dict[str, Any]] = {}
+    if isinstance(route_progress_payload, Mapping):
+        for robot_id, route_info in route_progress_payload.items():
+            if robot_id not in pose or not isinstance(route_info, Mapping):
+                continue
+            clean_info: dict[str, Any] = {}
+            if route_info.get("active_waypoint_index") is not None:
+                try:
+                    clean_info["active_waypoint_index"] = int(route_info.get("active_waypoint_index"))
+                except Exception:
+                    pass
+            if route_info.get("route_status") is not None:
+                clean_info["route_status"] = str(route_info.get("route_status"))
+            if route_info.get("blocked") is not None:
+                clean_info["blocked"] = bool(route_info.get("blocked"))
+            if route_info.get("wait_reason") is not None:
+                clean_info["wait_reason"] = str(route_info.get("wait_reason"))
+            if clean_info:
+                route_progress_by_robot[str(robot_id)] = clean_info
+
     return MotionFeedbackStep(
         applied=updated_robot_count > 0,
         updated_robot_count=int(updated_robot_count),
+        route_progress_by_robot=route_progress_by_robot,
     )
 
 
@@ -489,6 +573,7 @@ def build_truth_generation_stage_result(
     truth_suppressed_before: int,
     suppression_effect_sum: float,
 ) -> TruthEventStageResult:
+    """Create the structured summary for the truth-generation stage of the frame."""
     return TruthEventStageResult(
         now_t=float(now_t),
         use_ground_truth=bool(use_ground_truth),
@@ -512,6 +597,7 @@ def build_forecast_model_stage_result(
     forecast_step: ForecastEvaluationStep,
     forecast_samples_total: int,
 ) -> ForecastModelStageResult:
+    """Create the structured summary for forecast model advancement and evaluation."""
     lam_mean_vals = [float(v.get("lam_mean", float("nan"))) for v in model_diag.values()]
     lam_max_vals = [float(v.get("lam_max", float("nan"))) for v in model_diag.values()]
     trigger_sum_vals = [float(v.get("trigger_sum", float("nan"))) for v in model_diag.values()]
@@ -541,6 +627,7 @@ def build_telemetry_stage_result(
     telemetry_step: TelemetryExecutionStep,
     telemetry_dir: str,
 ) -> TelemetryStageResult:
+    """Create the structured summary for telemetry publication in the frame."""
     return TelemetryStageResult(
         now_t=float(now_t),
         telemetry_enabled=bool(telemetry_enabled),
