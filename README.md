@@ -512,11 +512,44 @@ Most important plots to review:
 - `results/tradeoff_exposure_vs_response_S2_nominal.png` (core tradeoff view)
 - `results/winner_count_by_baseline.png` (who wins across settings)
 - `results/mean_rank_heatmap.png` (ranking stability by scenario)
-For the habituation-aware STL result, use:
+
+### Habituation-Aware STL Testing
+
+The current STL proposal result comes from the production B1/B3/B4 confirmatory batch:
+
+`results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5`
+
+Run shape:
+
+- duration: 1800 seconds
+- seeds: 125-134
+- systems: `B1_unc_legacy`, `B3_res_stl_nohab`, `B4_res_stl_full`
+- controls: habituation on and habituation off
+
+Primary paired exposure results:
+
+| Comparison | Truth control | Mean paired delta in Jexp | 95% CI | Seeds improved |
+| --- | --- | ---: | ---: | ---: |
+| B4 - B1 | habituation on | -2298.52 | [-4184.21, -412.82] | 8/10 |
+| B4 - B3 | habituation on | -3288.10 | [-4112.47, -2463.73] | 10/10 |
+| B4 - B3 | habituation off | 0.00 | [0.00, 0.00] | 0/10 |
+
+Mechanism check under habituating truth:
+
+| Metric | Mean paired delta B4 - B3 | 95% CI |
+| --- | ---: | ---: |
+| Truth suppression rate | +0.0630 | [+0.0467, +0.0793] |
+| Eta at apply | +0.1454 | [+0.0843, +0.2064] |
+| Variety index | +0.3072 | [+0.2390, +0.3755] |
+
+Interpretation: B4 reduced value-weighted exposure relative to both the legacy unconstrained baseline and the STL-without-habituation baseline when truth habituated. When habituation was disabled, B4 collapsed to B3, which isolates the advantage to the habituation-aware STL clause.
+
+STL result artifacts:
 
 - `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/THESIS_RESULTS_SUMMARY.md`
 - `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/exposure_mean_ci_by_system.png`
 - `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/hab_on_b4_paired_exposure_deltas.png`
+- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/hab_on_b4_b3_mechanism_deltas.png`
 
 ### Key Plots
 
