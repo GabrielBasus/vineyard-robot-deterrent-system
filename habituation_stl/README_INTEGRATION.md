@@ -102,7 +102,7 @@ C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\ru
 Summarize results:
 
 ```powershell
-C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --run-dir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --outdir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5
 ```
 
 ## Documentation
