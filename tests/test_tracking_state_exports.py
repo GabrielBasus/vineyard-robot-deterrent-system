@@ -34,6 +34,12 @@ class TrackingStateExportTests(unittest.TestCase):
         system_state_structured = snapshot.get("system_state_structured")
         self.assertIsInstance(system_state_structured, dict)
         self.assertIn("tracking", system_state_structured)
+        motion_commands = snapshot.get("motion_commands")
+        self.assertIsInstance(motion_commands, list)
+        self.assertGreater(len(motion_commands), 0)
+        self.assertIn("assigned_action_kind", motion_commands[0])
+        self.assertIn("assigned_action_name", motion_commands[0])
+        self.assertIn("assigned_action_service_time_s", motion_commands[0])
         self.assertEqual(
             sorted(tracking_state["demo_links"].keys()),
             ["active_task_ids_by_robot", "current_task_ids_by_robot", "queued_task_ids_by_robot"],

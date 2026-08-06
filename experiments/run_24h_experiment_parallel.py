@@ -83,10 +83,18 @@ def _resolve_requested_runtime_controls(args: argparse.Namespace) -> dict:
             calibration_config_id=(calibration_config_id or None),
             planner_profile=planner_profile,
             planner_profile_values=planner_profile_values,
+            prediction_only_model_overrides=None,
+            proposed_model_overrides=None,
+            sigma=0.0,
+            omega=1.0,
+            alpha_in=None,
+            alpha_cross=None,
             alpha_inhib=0.0,
             omega_inhib=0.0,
             mu_base=0.0,
             bg_ema=0.0,
+            model_feedback_sigma_scale=1.0,
+            model_feedback_omega_scale=1.0,
         )
 
     return {

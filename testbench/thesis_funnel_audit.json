@@ -1,0 +1,95 @@
+{
+  "scenario": {
+    "num_runs": 3,
+    "seed_start": 123,
+    "duration_s": 900.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 180.0,
+    "warmup_s": 300.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_funnel_audit",
+    "reference_system": "unc",
+    "metrics": [
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_dispatched_total",
+      "native_predictive_completed_total",
+      "native_robot_predictive_fraction_mean",
+      "native_robot_idle_fraction_mean",
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s"
+    ],
+    "scoreboard_metrics": [
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_completed_total",
+      "native_robot_predictive_fraction_mean",
+      "native_value_weighted_exposure"
+    ],
+    "time_plot_metrics": [
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_dispatched_total",
+      "native_predictive_completed_total",
+      "native_robot_predictive_fraction_mean",
+      "native_value_weighted_exposure"
+    ]
+  },
+  "systems": [
+    {
+      "key": "react",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "React",
+      "description": "Predictive generation remains visible in the funnel but admissions are policy-blocked.",
+      "params": {
+        "dispatch_policy": "react"
+      }
+    },
+    {
+      "key": "unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Unconstrained",
+      "description": "Reference unc baseline for funnel accounting.",
+      "params": {
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reserved 0.25",
+      "description": "Reserved-capacity baseline for the thesis funnel audit.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25
+      }
+    }
+  ]
+}

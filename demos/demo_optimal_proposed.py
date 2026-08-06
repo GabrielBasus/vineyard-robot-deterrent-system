@@ -7,10 +7,16 @@ from pathlib import Path
 
 import pandas as pd
 
+try:
+    from demos._bootstrap import REPO_ROOT, resolve_repo_path
+except ModuleNotFoundError:
+    from _bootstrap import REPO_ROOT, resolve_repo_path
+
+from calibration_config import DEFAULT_CALIBRATION_MANIFEST_PATH
 import DeterrentSystem as ds
 
 
-ARCHIVE_OUTPUTS_DIR = Path("etc/archive_outputs")
+ARCHIVE_OUTPUTS_DIR = REPO_ROOT / "etc" / "archive_outputs"
 
 
 def _mode_pack(scale_beta=1.0, scale_cost=1.0):
@@ -96,11 +102,11 @@ def _select_best_from_summary(summary_path: Path):
 
 
 def _resolve_summary_csv(path_str: str) -> Path:
-    requested = Path(path_str)
+    requested = resolve_repo_path(path_str)
     if requested.exists():
         return requested
 
-    archived = ARCHIVE_OUTPUTS_DIR / requested
+    archived = ARCHIVE_OUTPUTS_DIR / requested.name
     if archived.exists():
         return archived
 
@@ -141,6 +147,8 @@ def main():
 
     sim_kwargs = {
         "simulation_mode": "proposed",
+        "use_frozen_calibration": True,
+        "calibration_manifest_path": str(DEFAULT_CALIBRATION_MANIFEST_PATH),
         "T_end": float(args.duration_s),
         "dt": 1.0,
         "W": 500.0,

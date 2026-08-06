@@ -43,3 +43,7 @@ ground_truth:
 
 model:
   model_beta_scale: 1.0
+
+calibration:
+  use_frozen_calibration: true
+  manifest_path: results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json

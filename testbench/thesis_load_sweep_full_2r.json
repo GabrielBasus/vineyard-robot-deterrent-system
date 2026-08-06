@@ -1,0 +1,102 @@
+{
+  "scenario": {
+    "num_runs": 5,
+    "seed_start": 123,
+    "duration_s": 86400.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 2,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 1800.0,
+    "warmup_s": 21600.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_load_sweep_full_2r",
+    "reference_system": "unc",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_reactive_mean_response_time_s",
+      "total_robot_distance_m",
+      "native_reactive_completed_fraction",
+      "native_predictive_completed_fraction",
+      "native_reactive_load_factor_estimate",
+      "native_robot_idle_fraction_mean",
+      "native_robot_predictive_fraction_mean",
+      "native_urgent_reactive_override_total",
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_completed_total"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_reactive_mean_response_time_s",
+      "total_robot_distance_m",
+      "native_reactive_completed_fraction",
+      "native_predictive_completed_fraction"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_reactive_mean_response_time_s",
+      "cumulative_distance_m",
+      "native_reactive_completed_fraction",
+      "native_predictive_completed_fraction",
+      "native_reactive_load_factor_estimate",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "UNC 2 Robots Full",
+      "params": {
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reservation 0.25 Utility 2 Robots Full",
+      "params": {
+        "planner_profile": "res_0p25"
+      }
+    },
+    {
+      "key": "res_rand_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reservation 0.25 Random 2 Robots Full",
+      "params": {
+        "planner_profile": "res_rand_0p25"
+      }
+    }
+  ],
+  "metadata": {
+    "comparison": "full_load_sweep_reserved_capacity_vs_unc_2r",
+    "robot_count": 2,
+    "load_point": "overload"
+  }
+}

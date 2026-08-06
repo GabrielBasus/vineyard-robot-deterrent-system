@@ -67,7 +67,15 @@ def _normalize_motion_command(command: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_fingerprint(*, seed: int, t_end: float, dt: float, fps: int, simulation_mode: str) -> dict[str, Any]:
+def build_fingerprint(
+    *,
+    seed: int,
+    t_end: float,
+    dt: float,
+    fps: int,
+    simulation_mode: str,
+    **sim_kwargs,
+) -> dict[str, Any]:
     mon = getattr(ds, "mon", None)
     prev_enabled = getattr(mon, "enabled", None) if mon is not None else None
     if mon is not None and hasattr(mon, "enabled"):
@@ -86,6 +94,7 @@ def build_fingerprint(*, seed: int, t_end: float, dt: float, fps: int, simulatio
                 motion_orchestration_mode="local",
                 motion_command_callback=None,
                 motion_state_callback=None,
+                **sim_kwargs,
             )
         )
     finally:

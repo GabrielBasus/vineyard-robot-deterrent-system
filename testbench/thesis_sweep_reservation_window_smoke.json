@@ -1,0 +1,104 @@
+{
+  "scenario": {
+    "num_runs": 2,
+    "seed_start": 123,
+    "duration_s": 300.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 120.0,
+    "warmup_s": 120.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_sweep_reservation_window_smoke",
+    "reference_system": "unc",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "UNC",
+      "description": "Unconstrained baseline.",
+      "params": {
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_tw_120",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Res T_W=120",
+      "description": "Reservation window smoke point.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 120.0
+      }
+    },
+    {
+      "key": "res_tw_600",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Res T_W=600",
+      "description": "Reservation window smoke point.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0
+      }
+    },
+    {
+      "key": "res_tw_1200",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Res T_W=1200",
+      "description": "Reservation window smoke point.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 1200.0
+      }
+    }
+  ]
+}

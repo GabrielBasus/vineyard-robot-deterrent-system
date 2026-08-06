@@ -1,0 +1,2134 @@
+{
+  "reference_schema_version": 1,
+  "metadata": {
+    "seed": 123,
+    "t_end": 10.0,
+    "dt": 1.0,
+    "fps": 1,
+    "simulation_mode": "proposed"
+  },
+  "frame_count": 11,
+  "final_metrics_compact": {
+    "birds_deterred_pct": "NaN",
+    "birds_deterred_pct_last_hour": "NaN",
+    "boundary_bytes_sent": 0,
+    "boundary_message_count": 0,
+    "calibrated_model_alpha_cross": 0.000342857143,
+    "calibrated_model_alpha_in": 0.000857142857,
+    "calibrated_model_alpha_inhib": 0.45,
+    "calibrated_model_bg_ema": 1e-06,
+    "calibrated_model_feedback_omega_scale": 1.0,
+    "calibrated_model_feedback_sigma_scale": 1.0,
+    "calibrated_model_mu_base": 5e-05,
+    "calibrated_model_omega": 700.0,
+    "calibrated_model_omega_inhib": 900.0,
+    "calibrated_model_sigma": 16.0,
+    "completed_tasks_total": 0,
+    "deterring_action_precision": "NaN",
+    "deterring_action_precision_direct_detection": "NaN",
+    "deterring_action_precision_model_scored": "NaN",
+    "deterring_actions_completed_direct_detection": 0,
+    "deterring_actions_completed_model_scored": 0,
+    "deterring_actions_completed_total": 0,
+    "direct_detection_task_cluster_groups": 0,
+    "direct_detection_task_cluster_merged": 0,
+    "direct_detection_task_refresh_active": 0,
+    "direct_detection_task_refresh_skipped_eta": 0,
+    "direct_detection_task_refresh_skipped_unassigned": 0,
+    "direct_detection_task_response_matches": 0,
+    "dispatch_policy": "react",
+    "fleet_idle_no_task_fraction_so_far": 1.0,
+    "fleet_moving_fraction_so_far": 0.0,
+    "fleet_task_engagement_fraction_so_far": 0.0,
+    "forecast_lead_time_s": "NaN",
+    "forecast_precision_at_k": 0.0,
+    "forecast_recall_at_k": "NaN",
+    "intervention_msg_dropped_debounce": 0,
+    "intervention_msg_dropped_low_weight": 0,
+    "mean_response_time_s": "NaN",
+    "model_deterring_accepted": 0,
+    "model_deterring_accepted_by_source": {},
+    "model_deterring_budget_mode": "count_per_hour",
+    "model_deterring_candidates_by_source": {
+      "model_hotspot": 6,
+      "total": 6
+    },
+    "model_deterring_candidates_total": 6,
+    "model_deterring_capacity_pending": 0,
+    "model_deterring_cluster_key_churn": 0,
+    "model_deterring_cluster_key_new": 0,
+    "model_deterring_cluster_key_reused": 0,
+    "model_deterring_cluster_key_total": 0,
+    "model_deterring_deltaJ_per_cost_mean": 0.0,
+    "model_deterring_gate_policy": "heuristic",
+    "model_deterring_generated": 0,
+    "model_deterring_generated_by_source": {},
+    "model_deterring_llr_max": "NaN",
+    "model_deterring_llr_mean": "NaN",
+    "model_deterring_llr_p50": "NaN",
+    "model_deterring_llr_p75": "NaN",
+    "model_deterring_llr_p90": "NaN",
+    "model_deterring_not_selected": 0,
+    "model_deterring_not_selected_by_source": {},
+    "model_deterring_p_event_mean": 0.899814549237,
+    "model_deterring_pass_capacity": 0,
+    "model_deterring_pass_chance": 0,
+    "model_deterring_pass_field": 6,
+    "model_deterring_pass_predicted_deltaJ": 0,
+    "model_deterring_pass_risk": 0,
+    "model_deterring_pass_selection_weight": 0,
+    "model_deterring_pass_sprt": 0,
+    "model_deterring_pass_support": 0,
+    "model_deterring_pass_utility_ratio": 0,
+    "model_deterring_rejected_budget": 0,
+    "model_deterring_rejected_budget_count_mode": 0,
+    "model_deterring_rejected_budget_utility_mode": 0,
+    "model_deterring_rejected_busy": 0,
+    "model_deterring_rejected_capacity": 0,
+    "model_deterring_rejected_chance": 0,
+    "model_deterring_rejected_cooldown": 0,
+    "model_deterring_rejected_eta": 0,
+    "model_deterring_rejected_field": 0,
+    "model_deterring_rejected_margin": 0,
+    "model_deterring_rejected_persistence": 0,
+    "model_deterring_rejected_predicted_deltaJ": 0,
+    "model_deterring_rejected_repeat_no_new_support": 0,
+    "model_deterring_rejected_risk": 6,
+    "model_deterring_rejected_selection_weight": 0,
+    "model_deterring_rejected_sprt_margin": 0,
+    "model_deterring_rejected_sprt_negative": 0,
+    "model_deterring_rejected_sprt_pending": 0,
+    "model_deterring_rejected_support": 0,
+    "model_deterring_rejected_utility_ratio": 0,
+    "model_vs_direct_suppression_yield_ratio": "NaN",
+    "planner_accepted_model_det_busy_primary": 0,
+    "planner_accepted_model_det_idle_primary": 0,
+    "planner_rejected_model_det_busy_fallback_quality": 0,
+    "planner_rejected_model_det_busy_primary": 0,
+    "planner_rejected_model_det_cap": 0,
+    "planner_rejected_model_det_cycle_cap": 0,
+    "planner_rejected_model_det_direct_conflict": 0,
+    "planner_rejected_patrol_cap": 0,
+    "planner_rejected_patrol_locked_model_det": 0,
+    "planner_rejected_task_cap": 0,
+    "planner_rejected_unassigned": 0,
+    "planner_replaced_patrol": 0,
+    "predictive_admitted_total": 0,
+    "predictive_completed_fraction": 0.0,
+    "predictive_completed_total": 0,
+    "predictive_dispatched_total": 0,
+    "predictive_generated_total": 18,
+    "predictive_selection_policy": "utility",
+    "preventive_capacity_remaining_per_robot_mean": 4.0,
+    "preventive_direct_arrival_rate_per_robot_mean": 0.0,
+    "preventive_policy": "heuristic",
+    "preventive_policy_source": "legacy",
+    "preventive_service_rate_per_robot_mean": 0.0,
+    "reactive_admitted_total": 0,
+    "reactive_completed_fraction": "NaN",
+    "reactive_completed_total": 0,
+    "reactive_dispatched_total": 0,
+    "reactive_generated_total": 0,
+    "reactive_load_factor_estimate": "NaN",
+    "reactive_override_slack_s": 90.0,
+    "reservation_fraction": 0.0,
+    "reservation_window_s": 600.0,
+    "robot_idle_fraction_mean": 1.0,
+    "robot_longest_idle_s_max": 11.0,
+    "robot_moving_with_task_fraction_mean": 0.0,
+    "robot_predictive_fraction_mean": 0.0,
+    "robot_reactive_fraction_mean": 0.0,
+    "robot_tail_idle_s_max": 11.0,
+    "robot_task_utilization_mean": 0.0,
+    "robots_zero_distance_count": 6,
+    "selected_calibration_config_id": "",
+    "selected_calibration_nll_improvement_pct_mean": "NaN",
+    "selected_calibration_proposed_field_brier_mean": "NaN",
+    "selected_calibration_proposed_field_logloss_mean": "NaN",
+    "selected_calibration_proposed_nll_mean": "NaN",
+    "selected_calibration_rank": "NaN",
+    "selected_calibration_source": "disabled",
+    "selective_preventive_enabled": 0,
+    "stale_goal_clears": 0,
+    "suppression_per_deterring_action": "NaN",
+    "suppression_per_direct_deterring_action": "NaN",
+    "suppression_per_model_deterring_action": "NaN",
+    "travel_distance_total": 0.0,
+    "truth_accepted_events": 0,
+    "truth_candidate_events": 0,
+    "truth_candidate_events_last_hour": 0,
+    "truth_detection_opportunities": 0,
+    "truth_detections_missed_false_negative": 0,
+    "truth_detections_missed_range": 0,
+    "truth_detections_observed": 0,
+    "truth_suppressed_events": 0,
+    "truth_suppressed_events_last_hour": 0,
+    "truth_suppression_effect_mean": "NaN",
+    "truth_suppression_effect_sum": 0.0,
+    "truth_suppression_rate": "NaN",
+    "truth_suppression_rate_last_hour": "NaN",
+    "urgent_reactive_override_total": 0,
+    "use_frozen_calibration": 0,
+    "value_weighted_exposure": 0.0
+  },
+  "frames": [
+    {
+      "t": 0.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": true,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 5,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 1.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 2.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 3.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 4.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 5.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 6.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 7.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 8.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 9.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 6,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 10.0,
+      "poses": {
+        "r1": [
+          138.082187,
+          26.27446
+        ],
+        "r2": [
+          61.393259,
+          38.238778
+        ],
+        "r3": [
+          175.19513,
+          48.104291
+        ],
+        "r4": [
+          170.043475,
+          71.271105
+        ],
+        "r5": [
+          159.933206,
+          41.94877
+        ],
+        "r6": [
+          130.010792,
+          111.885911
+        ]
+      },
+      "robot_states": {
+        "r1": "idle",
+        "r2": "idle",
+        "r3": "idle",
+        "r4": "idle",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": null,
+        "r2": null,
+        "r3": null,
+        "r4": null,
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 12,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 12,
+        "accepted_count": 0,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_busy_fallback_quality": 0,
+          "model_det_busy_primary": 0,
+          "model_det_cap": 0,
+          "model_det_cycle_cap": 0,
+          "model_det_direct_conflict": 0,
+          "patrol_cap": 0,
+          "patrol_locked_model_det": 0,
+          "policy_blocked_predictive": 12,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 0,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "display": {
+    "title": "Thesis Dispatch Reservation Sweep: Res(0.10) vs Res(0.25) vs Res(0.40)"
+  },
+  "metrics": [
+    {
+      "key": "value_weighted_exposure",
+      "label": "Value-Weighted Exposure",
+      "goal": "lower"
+    },
+    {
+      "key": "predictive_admitted_total",
+      "label": "Predictive Admitted",
+      "goal": "higher"
+    },
+    {
+      "key": "robot_predictive_fraction_mean",
+      "label": "Predictive Time Fraction",
+      "goal": "higher"
+    },
+    {
+      "key": "urgent_reactive_override_total",
+      "label": "Urgent Overrides",
+      "goal": "lower"
+    }
+  ],
+  "systems": [
+    {
+      "key": "res_0p10",
+      "title": "Reserved 0.10",
+      "mode": "proposed",
+      "color": "#2ca02c",
+      "line_style": "-",
+      "marker": "o",
+      "short_label": "10",
+      "overrides": {
+        "planner_profile": "thesis_calibrated_selective_proposed",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.10,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility"
+      }
+    },
+    {
+      "key": "res_0p25",
+      "title": "Reserved 0.25",
+      "mode": "proposed",
+      "color": "#ff7f0e",
+      "line_style": "--",
+      "marker": "s",
+      "short_label": "25",
+      "overrides": {
+        "planner_profile": "thesis_calibrated_selective_proposed",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility"
+      }
+    },
+    {
+      "key": "res_0p40",
+      "title": "Reserved 0.40",
+      "mode": "proposed",
+      "color": "#d62728",
+      "line_style": "-.",
+      "marker": "^",
+      "short_label": "40",
+      "overrides": {
+        "planner_profile": "thesis_calibrated_selective_proposed",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.40,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility"
+      }
+    }
+  ]
+}

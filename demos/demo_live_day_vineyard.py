@@ -10,6 +10,12 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.collections import LineCollection
 from matplotlib.patches import Circle, Polygon as MplPolygon
 
+try:
+    from demos._bootstrap import REPO_ROOT
+except ModuleNotFoundError:
+    from _bootstrap import REPO_ROOT
+
+from calibration_config import DEFAULT_CALIBRATION_MANIFEST_PATH
 import DeterrentSystem as ds
 
 
@@ -79,6 +85,8 @@ def run_demo(
 
     frames = ds.run_simulation_frames_persistent(
         simulation_mode="proposed",
+        use_frozen_calibration=True,
+        calibration_manifest_path=str(DEFAULT_CALIBRATION_MANIFEST_PATH),
         T_end=24 * 3600,  # full simulated day
         dt=dt,
         seed=seed,

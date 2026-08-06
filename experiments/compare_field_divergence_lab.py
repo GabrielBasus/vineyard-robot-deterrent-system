@@ -51,6 +51,10 @@ FIELD_DIVERGENCE_CONFIG_ALIASES = {
     "ground_truth.truth_omega_scale": "truth_omega_scale",
     "ground_truth.truth_sigma_scale": "truth_sigma_scale",
     "model.model_beta_scale": "model_beta_scale",
+    "calibration.use_frozen_calibration": "use_frozen_calibration",
+    "calibration.ranking_path": "calibration_ranking_path",
+    "calibration.manifest_path": "calibration_manifest_path",
+    "calibration.config_id": "calibration_config_id",
 }
 
 # These thresholds turn the existing lab narrative into explicit acceptance guards.
@@ -490,6 +494,10 @@ def _summary_row(per_time_df: pd.DataFrame, final_metrics_by_baseline: Dict[str,
     }
     m_pred = final_metrics_by_baseline.get("prediction_only", {})
     m_prop = final_metrics_by_baseline.get("proposed", {})
+    row["prediction_only_use_frozen_calibration"] = int(bool(m_pred.get("use_frozen_calibration", 0)))
+    row["proposed_use_frozen_calibration"] = int(bool(m_prop.get("use_frozen_calibration", 0)))
+    row["prediction_only_selected_calibration_config_id"] = str(m_pred.get("selected_calibration_config_id", ""))
+    row["proposed_selected_calibration_config_id"] = str(m_prop.get("selected_calibration_config_id", ""))
     exp_pred = float(m_pred.get("value_weighted_exposure", np.nan))
     exp_prop = float(m_prop.get("value_weighted_exposure", np.nan))
     resp_pred = float(m_pred.get("mean_response_time_s", np.nan))
@@ -710,6 +718,10 @@ def main() -> None:
     parser.add_argument("--truth-omega-scale", type=float, default=1.0)
     parser.add_argument("--truth-sigma-scale", type=float, default=1.0)
     parser.add_argument("--model-beta-scale", type=float, default=1.0)
+    parser.add_argument("--use-frozen-calibration", action="store_true")
+    parser.add_argument("--calibration-ranking-path", type=str, default="")
+    parser.add_argument("--calibration-manifest-path", type=str, default="")
+    parser.add_argument("--calibration-config-id", type=str, default="")
     parser.add_argument("--outdir", type=str, default="results/field_divergence_lab")
     args, config_meta = parse_args_with_config(parser, aliases=FIELD_DIVERGENCE_CONFIG_ALIASES)
 
@@ -755,6 +767,10 @@ def main() -> None:
         "omega_true": 600.0 * float(args.truth_omega_scale),
         "sigma_true": 12.0 * float(args.truth_sigma_scale),
         "deterring_modes": deterring_modes,
+        "use_frozen_calibration": bool(args.use_frozen_calibration),
+        "calibration_ranking_path": (None if str(args.calibration_ranking_path).strip() == "" else str(args.calibration_ranking_path)),
+        "calibration_manifest_path": (None if str(args.calibration_manifest_path).strip() == "" else str(args.calibration_manifest_path)),
+        "calibration_config_id": (None if str(args.calibration_config_id).strip() == "" else str(args.calibration_config_id)),
         "telemetry_clear_on_start": False,
         "telemetry_prompt_save": False,
         "T_end": float(args.t_end),

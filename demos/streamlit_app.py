@@ -20,6 +20,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+try:
+    from demos._bootstrap import REPO_ROOT, resolve_repo_path
+except ModuleNotFoundError:
+    from _bootstrap import REPO_ROOT, resolve_repo_path
+
 st.set_page_config(page_title="Vineyard Multi-Robot — Live Monitor",
                    layout="wide")
 
@@ -41,17 +46,18 @@ def _read_csv(path, cols):
         return _empty_df(cols)
 
 def load_data(data_dir: str):
-    poses = _read_csv(os.path.join(data_dir, "robot_poses.csv"),
+    resolved_dir = str(resolve_repo_path(data_dir))
+    poses = _read_csv(os.path.join(resolved_dir, "robot_poses.csv"),
                       ["t", "rid", "x", "y"])
-    zones = _read_csv(os.path.join(data_dir, "zones.csv"),
+    zones = _read_csv(os.path.join(resolved_dir, "zones.csv"),
                       ["t", "rid", "poly"])
-    tasks = _read_csv(os.path.join(data_dir, "tasks.csv"),
+    tasks = _read_csv(os.path.join(resolved_dir, "tasks.csv"),
                       ["t", "event", "id", "rid_primary", "rid_secondary",
                        "type", "x", "y", "score", "extra"])
-    hots  = _read_csv(os.path.join(data_dir, "hotspots.csv"),
+    hots  = _read_csv(os.path.join(resolved_dir, "hotspots.csv"),
                       ["t", "rid", "rank", "x", "y", "score"])
     rdiag = _read_csv(
-        os.path.join(data_dir, "robot_diagnostics.csv"),
+        os.path.join(resolved_dir, "robot_diagnostics.csv"),
         [
             "t", "rid", "battery", "state", "task",
             "goal_x", "goal_y", "eff_goal_x", "eff_goal_y",
@@ -171,7 +177,7 @@ def make_map(zones, poses, tasks, hots, rdiag):
 
 st.title("🍇 Vineyard Multi-Robot — Live Monitor")
 
-data_dir = st.sidebar.text_input("Telemetry folder", value="telemetry_live")
+data_dir = st.sidebar.text_input("Telemetry folder", value=str(REPO_ROOT / "telemetry_live"))
 refresh_ms = st.sidebar.slider("Refresh every (ms)", 200, 3000, 800, 50)
 target_sim_s = st.sidebar.number_input("Target sim time (s)", min_value=1, value=24 * 3600, step=60)
 

@@ -1,6 +1,7 @@
 import inspect
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -97,10 +98,18 @@ class AssignmentMethodMigrationTests(unittest.TestCase):
             argv=["--config", str(ROOT / "configs" / "run_assignment_tuning_sweep_lab.yaml")],
         )
         self.assertEqual(args_cfg.methods, "hungarian")
+        self.assertTrue(args_cfg.use_frozen_calibration)
+        self.assertEqual(
+            args_cfg.calibration_manifest_path,
+            "results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json",
+        )
 
         expected_values = {
             ROOT / "configs" / "compare_field_divergence_lab.yaml": {"planner.assignment_method": "hungarian"},
-            ROOT / "configs" / "run_assignment_tuning_sweep_lab.yaml": {"runner.methods": ["hungarian"]},
+            ROOT / "configs" / "run_assignment_tuning_sweep_lab.yaml": {
+                "runner.methods": ["hungarian"],
+                "calibration.use_frozen_calibration": True,
+            },
             ROOT / "configs" / "run_field_divergence_confirm_lab.yaml": {"planner.assignment_method": "hungarian"},
             ROOT / "configs" / "run_field_divergence_filter_sweep_lab.yaml": {"planner.assignment_method": "hungarian"},
         }
@@ -138,6 +147,66 @@ class AssignmentMethodMigrationTests(unittest.TestCase):
         deltas_df = tuning.build_method_deltas_vs_frozen(runs_df)
         self.assertTrue(deltas_df.empty)
         self.assertEqual(list(deltas_df.columns), tuning.METHOD_DELTA_COLUMNS)
+
+    def test_assignment_tuning_combo_job_forwards_frozen_calibration(self):
+        captured = {}
+
+        def fake_run_metrics_experiments(**kwargs):
+            captured.update(kwargs)
+            return {
+                "runs": [
+                    {
+                        "use_frozen_calibration": 1,
+                        "selected_calibration_config_id": "C030",
+                        "selected_calibration_source": "argument",
+                    }
+                ]
+            }
+
+        payload = {
+            "scenario_id": "scenario",
+            "baseline": "prediction_only",
+            "method": "hungarian",
+            "assignment_distance_cost_per_m": 0.006,
+            "assignment_switch_penalty": 1.0,
+            "task_replan_period_s": 60.0,
+            "assigner_w_task_value": 0.0,
+            "model_deterring_gate_policy": "sprt_capacity",
+            "model_deterring_sprt_alpha": 0.05,
+            "model_deterring_sprt_beta": 0.20,
+            "model_deterring_chance_threshold": 0.20,
+            "model_deterring_min_deltaJ_per_cost": 0.15,
+            "model_deterring_capacity_rho_max": 0.85,
+            "model_deterring_risk_threshold": 0.35,
+            "model_deterring_min_persistence_replans": 2,
+            "model_deterring_max_eta_s": 120.0,
+            "model_deterring_score_margin": 0.05,
+            "model_deterring_budget_per_robot_per_hr": 4,
+            "model_deterring_budget_mode": "count_per_hour",
+            "model_deterring_budget_utility_per_robot_per_hr": 5.0,
+            "model_deterring_window_s": 90.0,
+            "min_predicted_deltaJ_for_model_deterring": 0.0,
+            "beta_true": 0.35,
+            "base_params": {},
+            "use_frozen_calibration": True,
+            "calibration_manifest_path": "results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json",
+            "calibration_config_id": "C030",
+            "num_runs": 1,
+            "seed_start": 2000,
+        }
+
+        with patch.object(ds, "run_metrics_experiments", side_effect=fake_run_metrics_experiments):
+            result = tuning._run_combo_job(payload)
+
+        self.assertTrue(captured["use_frozen_calibration"])
+        self.assertEqual(
+            captured["calibration_manifest_path"],
+            "results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json",
+        )
+        self.assertEqual(captured["calibration_config_id"], "C030")
+        self.assertEqual(result["rows"][0]["selected_calibration_config_id"], "C030")
+        self.assertEqual(result["rows"][0]["selected_calibration_source"], "argument")
+        self.assertEqual(result["rows"][0]["use_frozen_calibration"], 1)
 
 
 if __name__ == "__main__":

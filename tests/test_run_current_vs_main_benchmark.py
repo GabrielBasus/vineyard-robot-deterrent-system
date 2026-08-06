@@ -34,6 +34,24 @@ class BenchmarkCollectorTests(unittest.TestCase):
         self.assertEqual(summary["final_active_tasks"], 0)
         self.assertTrue(math.isfinite(summary["tasks_per_km_travel"]))
 
+    def test_collector_exports_optional_native_metrics_from_metrics_compact(self):
+        collector = bench.BenchmarkCollector(sample_every_s=10.0)
+        collector.consume(
+            {
+                "t": 0.0,
+                "poses": {"r1": (0.0, 0.0)},
+                "tasks_active": [],
+                "tasks_done": [],
+                "metrics_compact": {
+                    "mean_response_time_s": 22.0,
+                    "reactive_mean_response_time_s": 11.0,
+                },
+            }
+        )
+        summary = collector.finalize()
+        self.assertEqual(summary["native_mean_response_time_s"], 22.0)
+        self.assertEqual(summary["native_reactive_mean_response_time_s"], 11.0)
+
 
 class SummarizeBenchmarkTests(unittest.TestCase):
     def test_summary_marks_current_as_winner_for_higher_and_lower_metrics(self):

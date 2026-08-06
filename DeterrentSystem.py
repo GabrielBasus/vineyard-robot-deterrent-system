@@ -198,6 +198,17 @@ class EventBus:
             "last_intervention_key_preview": list(self._last_intervention_key_t.items())[: max(int(max_items), 0)],
         }
 
+def _sync_partitioner_healths_from_profiles(partitioner, profiles):
+    """Copy live RobotProfile health values into a zone partitioner."""
+    set_health = getattr(partitioner, "set_health", None)
+    if set_health is None:
+        return
+    for rid in getattr(partitioner, "ids", []):
+        profile = profiles.get(rid)
+        if profile is None:
+            continue
+        set_health(rid, float(profile.health))
+
 
 # ============================================================================
 # Task ordering and policy resolution helpers
@@ -4250,6 +4261,7 @@ def run_simulation_frames_persistent(
         if not any(profiles[rid].health <= health_threshold for rid in profiles):
             return False
 
+        _sync_partitioner_healths_from_profiles(partitioner, profiles)
         partitioner.recompute(force=True)
         cells = partitioner.cells_for_ids()
         id_to_cell = {rid: cells[i] for i, rid in enumerate(partitioner.ids)}

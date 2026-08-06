@@ -1,38 +1,58 @@
 {
   "display": {
     "title": "Reactive vs Prediction Only vs Proposed",
-    "figure_width": 19.0,
-    "figure_height": 10.5,
+    "figure_width": 19.5,
+    "figure_height": 10.8,
     "fps": 10,
+    "live_tracking_fps": 30,
+    "motion_smoothing": true,
+    "motion_easing": "smoothstep",
     "steps_per_frame": 1,
     "goal_match_radius_m": 25.0,
     "task_line_alpha": 0.75,
     "queued_task_line_alpha": 0.5,
-    "label_fontsize": 8
+    "label_fontsize": 9,
+    "status_fontsize": 8,
+    "legend_fontsize": 8,
+    "metric_title_fontsize": 9,
+    "metric_tick_fontsize": 8,
+    "map_tick_fontsize": 8,
+    "metric_columns": 4,
+    "map_view_mode": "full_field",
+    "map_full_margin_m": 8.0,
+    "map_zoom_rows": 14,
+    "map_zoom_min_rows": 10,
+    "map_zoom_max_rows": 20,
+    "map_zoom_width_m": 170.0,
+    "map_zoom_max_width_m": 230.0,
+    "map_zoom_margin_m": 10.0,
+    "map_zoom_smoothing": 0.18
   },
   "robot_rendering": {
     "husky_length_m": 0.99,
     "husky_width_m": 0.67,
-    "heading_line_m": 2.0,
-    "label_offset_m": 2.0,
-    "body_alpha": 0.9
+    "display_length_m": 6.0,
+    "display_width_m": 3.4,
+    "heading_line_m": 4.0,
+    "label_offset_m": 3.4,
+    "body_alpha": 0.95
   },
   "vineyard": {
-    "W": 500.0,
-    "H": 500.0,
+    "W": 240.0,
+    "H": 96.0,
     "row_spacing_m": 4.8,
     "row_width_m": 3.2,
-    "headland_space_m": 10.0,
-    "turn_space_m": 20.0
+    "headland_space_m": 8.0,
+    "turn_space_m": 10.0
   },
   "scenario": {
     "duration_s": 1800.0,
     "dt": 5.0,
     "seed": 321,
     "fps": 1,
-    "NX": 90,
-    "NY": 72,
-    "Nrobots": 6,
+    "NX": 54,
+    "NY": 24,
+    "Nrobots": 4,
     "uav_fraction": 0.0,
     "warmup_s": 600.0,
     "task_replan_period_s": 20.0,
@@ -52,7 +72,17 @@
     "event_viz_window_s": 10.0,
     "telemetry_clear_on_start": false,
     "telemetry_prompt_save": false,
-    "report_metrics_end": false
+    "report_metrics_end": false,
+    "motion_planning_mode": "graph",
+    "motion_orchestration_mode": "local",
+    "graph_row_node_spacing_m": 12.0,
+    "graph_headland_node_spacing_m": 8.0,
+    "graph_passing_bay_spacing_m": 36.0,
+    "graph_anchor_snap_radius_m": 18.0,
+    "graph_replan_period_s": 10.0,
+    "graph_reservation_horizon_s": 180.0,
+    "graph_max_detour_ratio": 1.75,
+    "graph_wait_retry_period_s": 10.0
   },
   "tracking": {
     "emit_tracking_state": true,
@@ -101,7 +131,10 @@
       "line_style": "--",
       "marker": "s",
       "short_label": "P",
-      "overrides": {}
+      "overrides": {
+        "use_frozen_calibration": true,
+        "calibration_manifest_path": "results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json"
+      }
     },
     {
       "key": "proposed",
@@ -112,7 +145,10 @@
       "marker": "^",
       "short_label": "T",
       "stage": "s5_current_thesis_profile",
-      "overrides": {}
+      "overrides": {
+        "use_frozen_calibration": true,
+        "calibration_manifest_path": "results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json"
+      }
     }
   ]
 }

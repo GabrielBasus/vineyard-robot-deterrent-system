@@ -23,6 +23,7 @@ from Robot import Robot, RobotProfile
 from labs.TaskGenerator_lab import TaskGenerator, TaskAssigner
 import labs.assignment_methods_lab as aml
 from planner_profiles import canonicalize_planner_profile_name, get_planner_profile_values
+from calibration_config import load_frozen_sestpp_calibration
 
 class EventBus:
     def __init__(self, robots: Dict[str, Robot], bytes_per_boundary_msg: int = 64, bytes_per_intervention_msg: int = 72):
@@ -142,7 +143,8 @@ def build_fleet_and_zones(W, H, rng, Nrobots=None,
                           mode="direct", scale=800.0, gamma=1.0,
                           NX=100, NY=80,
                           sigma=15.0, omega=600.0,
-                          alpha_in=0.25, alpha_cross=0.10,
+                          omega_inhib=900.0,
+                          alpha_in=None, alpha_cross=None, alpha_inhib=0.45,
                           mu_base=1e-4, bg_ema=1e-6,
                           border_radius_m=None):
     """
@@ -183,9 +185,13 @@ def build_fleet_and_zones(W, H, rng, Nrobots=None,
     Y_MIN, Y_MAX = 0.0, H
     robots = {}
     for i, r in enumerate(robots_def):
+        if alpha_in is None:
+            alpha_in = 0.6 / max(float(omega), 1e-9)
+        if alpha_cross is None:
+            alpha_cross = 0.4 * float(alpha_in)
         model = OnlineSESTPP(X_MIN, X_MAX, Y_MIN, Y_MAX, NX, NY,
-                             sigma=sigma, omega=omega,
-                             alpha_in=alpha_in, alpha_cross=alpha_cross,
+                             sigma=sigma, omega=omega, omega_inhib=omega_inhib,
+                             alpha_in=alpha_in, alpha_cross=alpha_cross, alpha_inhib=alpha_inhib,
                              mu_base=mu_base, bg_ema=bg_ema)
         neighbors = [robots_def[j]['id'] for j in nbrs[i]]
 
@@ -232,8 +238,17 @@ def run_simulation_frames_persistent(
     mode="direct", scale=1500.0, gamma=1.0,
     health_threshold=0.25,   # trigger-only partitioning (optional)
     debug_zone_areas=False,
-    # SESTPP
-    NX=120, NY=96, sigma=16.0, omega=700.0, mu_base=1e-4, bg_ema=3e-4,
+    # SESTPP grid / calibration-managed model fallback
+    NX=120, NY=96, sigma=16.0, omega=700.0, omega_inhib=900.0, mu_base=1e-4, bg_ema=3e-4,
+    alpha_in=None, alpha_cross=None, alpha_inhib=0.45,
+    use_frozen_calibration=False,
+    calibration_ranking_path=None,
+    calibration_manifest_path=None,
+    calibration_config_id=None,
+    prediction_only_model_overrides=None,
+    proposed_model_overrides=None,
+    model_feedback_sigma_scale=1.0,
+    model_feedback_omega_scale=1.0,
     # Detections near robots
     detect_rate_per_robot=0.01, detect_sigma_m=10.0,
 
@@ -252,6 +267,12 @@ def run_simulation_frames_persistent(
     patrol_mc_rollouts=64,
     patrol_mc_max_events_per_rollout=24,
     patrol_mc_use_excess=True,
+    patrol_scoring_mode="legacy_field_benefit",
+    patrol_shared_detection_range_m=None,
+    patrol_shared_detection_prob_per_step=None,
+    patrol_shared_detection_dwell_s=None,
+    patrol_shared_followup_success_prob=0.75,
+    patrol_shared_response_eta_decay_s=None,
     # Dynamic task suppression near deterrence
     deterring_suppress_radius_m=20.0,
     deterring_suppress_window_s=60.0,
@@ -368,6 +389,7 @@ def run_simulation_frames_persistent(
     idle_roam_jitter_m=25.0,
 ):
     rng = np.random.default_rng(seed)
+    random.seed(int(seed))
     boundary = [(0,0),(W,0),(W,H),(0,H)]
 
     mode_key = str(simulation_mode).lower().strip()
@@ -450,6 +472,82 @@ def run_simulation_frames_persistent(
             )
         )
 
+    selected_calibration_config_id = ""
+    selected_calibration_source = "disabled"
+    if bool(use_frozen_calibration):
+        selected_config = load_frozen_sestpp_calibration(
+            ranking_path=calibration_ranking_path,
+            manifest_path=calibration_manifest_path,
+            config_id=calibration_config_id,
+        )
+        selected_calibration_config_id = str(selected_config.config_id)
+        selected_calibration_source = "argument"
+        selected_model_params = selected_config.params_for_mode(mode_key)
+        runtime_overrides = selected_model_params.to_runtime_overrides()
+        if "sigma" in runtime_overrides:
+            sigma = float(runtime_overrides["sigma"])
+        if "omega" in runtime_overrides:
+            omega = float(runtime_overrides["omega"])
+        if "alpha_in" in runtime_overrides:
+            alpha_in = float(runtime_overrides["alpha_in"])
+        if "alpha_cross" in runtime_overrides:
+            alpha_cross = float(runtime_overrides["alpha_cross"])
+        alpha_inhib = float(runtime_overrides["alpha_inhib"])
+        omega_inhib = float(runtime_overrides["omega_inhib"])
+        mu_base = float(runtime_overrides["mu_base"])
+        bg_ema = float(runtime_overrides["bg_ema"])
+        model_feedback_sigma_scale = float(runtime_overrides["model_feedback_sigma_scale"])
+        model_feedback_omega_scale = float(runtime_overrides["model_feedback_omega_scale"])
+    mode_overrides_raw = (
+        proposed_model_overrides
+        if mode_key == "proposed"
+        else prediction_only_model_overrides
+    )
+    if isinstance(mode_overrides_raw, dict):
+        for key in (
+            "sigma",
+            "omega",
+            "alpha_in",
+            "alpha_cross",
+            "alpha_inhib",
+            "omega_inhib",
+            "mu_base",
+            "bg_ema",
+            "model_feedback_sigma_scale",
+            "model_feedback_omega_scale",
+        ):
+            value = mode_overrides_raw.get(key)
+            if value in (None, ""):
+                continue
+            if key == "sigma":
+                sigma = float(value)
+            elif key == "omega":
+                omega = float(value)
+            elif key == "alpha_in":
+                alpha_in = float(value)
+            elif key == "alpha_cross":
+                alpha_cross = float(value)
+            elif key == "alpha_inhib":
+                alpha_inhib = float(value)
+            elif key == "omega_inhib":
+                omega_inhib = float(value)
+            elif key == "mu_base":
+                mu_base = float(value)
+            elif key == "bg_ema":
+                bg_ema = float(value)
+            elif key == "model_feedback_sigma_scale":
+                model_feedback_sigma_scale = float(value)
+            elif key == "model_feedback_omega_scale":
+                model_feedback_omega_scale = float(value)
+    if alpha_in is None:
+        alpha_in = 0.6 / max(float(omega), 1e-9)
+    else:
+        alpha_in = float(alpha_in)
+    if alpha_cross is None:
+        alpha_cross = 0.4 * float(alpha_in)
+    else:
+        alpha_cross = float(alpha_cross)
+
     # --- Seed robots & profiles (types/kinematics) ---
     robots_def = []
     if Nrobots is None:
@@ -492,15 +590,13 @@ def run_simulation_frames_persistent(
 
     #  --- SESTPP models + Robot wrappers ---
     X_MIN, X_MAX = 0.0, W; Y_MIN, Y_MAX = 0.0, H
-    alpha_in = 0.6 / omega
-    alpha_cross = 0.4 * alpha_in
     robots = {}
 
     for r in robots_def:
         rid = r['id']
         m = OnlineSESTPP(X_MIN, X_MAX, Y_MIN, Y_MAX, NX, NY,
-            sigma=sigma, omega=omega,
-            alpha_in=alpha_in, alpha_cross=alpha_cross,
+            sigma=sigma, omega=omega, omega_inhib=omega_inhib,
+            alpha_in=alpha_in, alpha_cross=alpha_cross, alpha_inhib=alpha_inhib,
             mu_base=mu_base, bg_ema=bg_ema)
 
         neighbors = partitioner.neighbors_for_id(rid)  # returns [] for UAVs if you applied the ZonePartitioner fix
@@ -1009,6 +1105,28 @@ def run_simulation_frames_persistent(
                                         patrol_mc_rollouts=int(patrol_mc_rollouts),
                                         patrol_mc_max_events_per_rollout=int(patrol_mc_max_events_per_rollout),
                                         patrol_mc_use_excess=bool(patrol_mc_use_excess),
+                                        patrol_scoring_mode=str(patrol_scoring_mode),
+                                        patrol_shared_detection_range_m=(
+                                            float(detect_range_m)
+                                            if patrol_shared_detection_range_m is None
+                                            else float(patrol_shared_detection_range_m)
+                                        ),
+                                        patrol_shared_detection_prob_per_step=(
+                                            float(bird_detection_prob)
+                                            if patrol_shared_detection_prob_per_step is None
+                                            else float(patrol_shared_detection_prob_per_step)
+                                        ),
+                                        patrol_shared_detection_dwell_s=(
+                                            float(bird_stay_mean_s)
+                                            if patrol_shared_detection_dwell_s is None
+                                            else float(patrol_shared_detection_dwell_s)
+                                        ),
+                                        patrol_shared_followup_success_prob=float(patrol_shared_followup_success_prob),
+                                        patrol_shared_response_eta_decay_s=(
+                                            max(float(bird_stay_mean_s), float(task_replan_period_s), 1.0)
+                                            if patrol_shared_response_eta_decay_s is None
+                                            else float(patrol_shared_response_eta_decay_s)
+                                        ),
                                         horizon_s=float(forecast_horizon_s),
                                         profiles=profiles,
                                         spinup_by_type={"UAV": 8.0, "UGV": 0.0},
@@ -1258,6 +1376,9 @@ def run_simulation_frames_persistent(
                         "y": float(t.get("y", 0.0)),
                         "score": float(t.get("score", 0.0)),
                         "utility": float(t_utility),
+                        "predicted_deltaJ": float(t.get("predicted_deltaJ", 0.0)),
+                        "deltaJ_per_cost": float(t.get("deltaJ_per_cost", 0.0)),
+                        "scoring_mode": t.get("scoring_mode"),
                         "time": float(t.get("time", now_t)),
                         "assigned_primary": assigned_primary,
                     }
@@ -1973,8 +2094,8 @@ def run_simulation_frames_persistent(
                                     "omega": omega_u,
                                 })
                                 feedback_beta = float(params.get("beta", 1.0))
-                                feedback_omega = float(params.get("omega", robots[rid].m.omega_inhib))
-                                feedback_sigma = float(params.get("sigma", robots[rid].m.sigma))
+                                feedback_omega = float(params.get("omega", robots[rid].m.omega_inhib)) * float(model_feedback_omega_scale)
+                                feedback_sigma = float(params.get("sigma", robots[rid].m.sigma)) * float(model_feedback_sigma_scale)
                                 if enable_intervention_feedback:
                                     robots[rid].ingest_intervention_event(
                                         tr["x"],
@@ -2408,6 +2529,11 @@ def run_simulation_frames_persistent(
         })
 
         metrics = {
+            "use_frozen_calibration": int(bool(use_frozen_calibration)),
+            "selected_calibration_config_id": str(selected_calibration_config_id),
+            "selected_calibration_source": str(selected_calibration_source),
+            "patrol_scoring_mode": str(patrol_scoring_mode),
+            "patrol_shared_followup_success_prob": float(patrol_shared_followup_success_prob),
             "value_weighted_exposure": float(value_weighted_exposure),
             "mean_response_time_s": float(np.mean(response_times)) if response_times else float("nan"),
             "response_samples": int(len(response_times)),
@@ -2558,6 +2684,11 @@ def run_simulation_frames_persistent(
             "forecast_samples": int(len(forecast_precision_vals)),
         }
         final_metrics = {
+            "use_frozen_calibration": int(bool(use_frozen_calibration)),
+            "selected_calibration_config_id": str(selected_calibration_config_id),
+            "selected_calibration_source": str(selected_calibration_source),
+            "patrol_scoring_mode": str(patrol_scoring_mode),
+            "patrol_shared_followup_success_prob": float(patrol_shared_followup_success_prob),
             "value_weighted_exposure": float(value_weighted_exposure),
             "mean_response_time_s": float(np.mean(response_times)) if response_times else float("nan"),
             "completed_tasks_total": int(total_completed),

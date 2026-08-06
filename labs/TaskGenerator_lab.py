@@ -378,6 +378,12 @@ class TaskGenerator:
                              patrol_mc_rollouts: int = 64,
                              patrol_mc_max_events_per_rollout: int = 24,
                              patrol_mc_use_excess: bool = True,
+                             patrol_scoring_mode: str = "legacy_field_benefit",
+                             patrol_shared_detection_range_m: float | None = None,
+                             patrol_shared_detection_prob_per_step: float = 0.10,
+                             patrol_shared_detection_dwell_s: float = 20.0,
+                             patrol_shared_followup_success_prob: float = 0.75,
+                             patrol_shared_response_eta_decay_s: float | None = None,
                              hotspot_spacing_m: float = 25.0,
                              jitter_m: float = 4.0,
                              horizon_s: float = 300.0,
@@ -435,6 +441,9 @@ class TaskGenerator:
         point_generation_mode = str(patrol_point_generation_mode).strip().lower()
         if point_generation_mode not in ("hotspots", "monte_carlo"):
             point_generation_mode = "hotspots"
+        patrol_scoring_mode = str(patrol_scoring_mode).strip().lower()
+        if patrol_scoring_mode not in ("legacy_field_benefit", "shared_response_reduction"):
+            patrol_scoring_mode = "legacy_field_benefit"
         self._debug_patrol_pipeline = {}
 
         for rid, rob in robots.items():
@@ -684,13 +693,117 @@ class TaskGenerator:
                         spin = float(spinup_by_type.get(prof.type, 0.0))
                 return float(dist / max(speed, 1e-6) + spin)
 
-            def _action_score_patrol(x, y):
-                # Patrol: use local field as benefit proxy.
-                omega_u = float(rob.m.omega_inhib)
-                time_factor = omega_u * (1.0 - math.exp(-horizon_s / max(omega_u, 1e-9)))
+            def _local_followup_eta_seconds(x, y, wx, wy):
+                dist = math.hypot(float(wx) - float(x), float(wy) - float(y))
+                speed = 1.0
+                if profiles is not None and rid in profiles:
+                    speed = max(float(profiles[rid].speed_mps), 1e-6)
+                return float(dist / max(speed, 1e-6))
+
+            shared_detect_range = (
+                max(float(patrol_shared_detection_range_m), 1e-6)
+                if patrol_shared_detection_range_m is not None
+                else max(float(self.merge_radius_m), 1.5 * max(float(rob.m.sigma), 1e-6))
+            )
+            shared_detect_sigma = max(
+                0.5 * float(shared_detect_range),
+                max(float(rob.m.dx), float(rob.m.dy), 1e-6),
+            )
+            shared_detect_prob_step = min(max(float(patrol_shared_detection_prob_per_step), 0.0), 1.0)
+            shared_detect_dwell_s = max(float(patrol_shared_detection_dwell_s), 1e-6)
+            shared_followup_success = min(max(float(patrol_shared_followup_success_prob), 0.0), 1.0)
+            shared_detect_prob_effective = 1.0 - math.exp(-shared_detect_prob_step * shared_detect_dwell_s)
+            shared_response_eta_decay_s = (
+                max(float(patrol_shared_response_eta_decay_s), 1e-6)
+                if patrol_shared_response_eta_decay_s is not None
+                else max(shared_detect_dwell_s, 0.10 * float(horizon_s), 1.0)
+            )
+            patrol_time_factor = float(rob.m.omega_inhib) * (
+                1.0 - math.exp(-float(horizon_s) / max(float(rob.m.omega_inhib), 1e-9))
+            )
+            patrol_available_integral_grid = np.clip(
+                np.asarray(rob.m.lam, dtype=float) - np.asarray(rob.m.mu, dtype=float),
+                0.0,
+                None,
+            ) * patrol_time_factor
+
+            def _patrol_candidate_metrics(x, y):
+                cost_eta = _cost_eta(x, y)
                 delta_a = float(rob.m.dx * rob.m.dy)
-                benefit = _field_score(x, y) * time_factor * delta_a
-                return benefit - _cost_eta(x, y)
+                if patrol_scoring_mode == "shared_response_reduction":
+                    rad = int(math.ceil(shared_detect_range / max(rob.m.dx, rob.m.dy, 1e-9)))
+                    iy, ix = rob.m.world_to_idx(x, y)
+                    y0 = max(0, iy - rad); y1 = min(rob.m.ny, iy + rad + 1)
+                    x0 = max(0, ix - rad); x1 = min(rob.m.nx, ix + rad + 1)
+                    detect_r2 = float(shared_detect_range) ** 2
+                    sigma2 = max(shared_detect_sigma ** 2, 1e-9)
+                    entries = []
+                    kernel_mass = 0.0
+                    for yy in range(y0, y1):
+                        wy = float(rob.m.ys[yy])
+                        for xx in range(x0, x1):
+                            wx = float(rob.m.xs[xx])
+                            if mask is not None and (not point_in_polygon(wx, wy, mask)):
+                                continue
+                            dxw = float(wx - x)
+                            dyw = float(wy - y)
+                            dist2 = dxw * dxw + dyw * dyw
+                            if dist2 > detect_r2:
+                                continue
+                            available_here = float(patrol_available_integral_grid[yy, xx])
+                            if available_here <= 0.0:
+                                continue
+                            kernel_raw = math.exp(-0.5 * dist2 / sigma2)
+                            if kernel_raw <= 0.0:
+                                continue
+                            entries.append((wx, wy, available_here, kernel_raw))
+                            kernel_mass += kernel_raw
+
+                    predicted_deltaJ = 0.0
+                    if kernel_mass > 0.0:
+                        response_scale = shared_detect_prob_effective * shared_followup_success
+                        weighted_capture_sum = 0.0
+                        for (wx, wy, available_here, kernel_raw) in entries:
+                            eta_followup = _local_followup_eta_seconds(x, y, wx, wy)
+                            eta_factor = math.exp(-eta_followup / max(shared_response_eta_decay_s, 1e-9))
+                            if eta_factor <= 0.0:
+                                continue
+                            weighted_capture_sum += (
+                                _weight_at(wx, wy)
+                                * available_here
+                                * float(kernel_raw)
+                                * eta_factor
+                                * delta_a
+                            )
+                        predicted_deltaJ = max(0.0, response_scale * weighted_capture_sum / max(math.sqrt(kernel_mass), 1e-6))
+                    utility = float(predicted_deltaJ - cost_eta)
+                    return {
+                        "benefit": float(predicted_deltaJ),
+                        "cost_eta": float(cost_eta),
+                        "utility": float(utility),
+                        "score": float(utility),
+                        "predicted_deltaJ": float(predicted_deltaJ),
+                        "deltaJ_per_cost": float(predicted_deltaJ / max(cost_eta, 1e-6)),
+                        "effective_detect_prob": float(shared_detect_prob_effective),
+                        "coverage_kernel_mass": float(kernel_mass),
+                        "covered_cells": int(len(entries)),
+                        "scoring_mode": str(patrol_scoring_mode),
+                    }
+
+                benefit = _field_score(x, y) * patrol_time_factor * delta_a
+                utility = float(benefit - cost_eta)
+                return {
+                    "benefit": float(benefit),
+                    "cost_eta": float(cost_eta),
+                    "utility": float(utility),
+                    "score": float(utility),
+                    "predicted_deltaJ": 0.0,
+                    "deltaJ_per_cost": 0.0,
+                    "effective_detect_prob": float("nan"),
+                    "coverage_kernel_mass": float("nan"),
+                    "covered_cells": 0,
+                    "scoring_mode": str(patrol_scoring_mode),
+                }
 
             def _event_probability(x, y, sigma_u):
                 lam_patch = _patch_expectation_horizon(x, y, sigma_u, "lam")
@@ -963,9 +1076,19 @@ class TaskGenerator:
                         score = _action_score_deterrence(x, y, cand["mode"])
                         det_eligible += 1
                     else:
-                        score = _action_score_patrol(x, y)
+                        patrol_metrics = _patrol_candidate_metrics(x, y)
+                        score = float(patrol_metrics["score"])
                     cand_scored = dict(cand)
                     cand_scored["score"] = float(score)
+                    if ttype == "patrolling":
+                        cand_scored["utility"] = float(patrol_metrics["utility"])
+                        cand_scored["predicted_deltaJ"] = float(patrol_metrics["predicted_deltaJ"])
+                        cand_scored["deltaJ_per_cost"] = float(patrol_metrics["deltaJ_per_cost"])
+                        cand_scored["cost_eta"] = float(patrol_metrics["cost_eta"])
+                        cand_scored["scoring_mode"] = str(patrol_metrics["scoring_mode"])
+                        cand_scored["effective_detect_prob"] = float(patrol_metrics["effective_detect_prob"])
+                        cand_scored["coverage_kernel_mass"] = float(patrol_metrics["coverage_kernel_mass"])
+                        cand_scored["covered_cells"] = int(patrol_metrics["covered_cells"])
                     if best is None or float(score) > float(best["score"]):
                         best = cand_scored
                     if ttype == "patrolling":
@@ -1001,14 +1124,17 @@ class TaskGenerator:
                         'origin': origin,
                         'mode': mode,
                         'score': float(_score),
+                        'utility': float(best.get("utility", _score)),
                         'support': int(support),
                         'risk_conf': float(best.get("risk_conf", 0.0)),
                         'eta_s': float(best.get("eta_s", 0.0)),
+                        'cost_eta': float(best.get("cost_eta", 0.0)),
                         'persistence': int(best.get("persistence", 0)),
                         'predicted_deltaJ': float(best.get("predicted_deltaJ", _score if ttype == "deterring" else 0.0)),
                         'p_event': float(best.get("p_event", 0.0)),
                         'deltaJ_per_cost': float(best.get("deltaJ_per_cost", 0.0)),
                         'llr': float(best.get("llr", 0.0)),
+                        'scoring_mode': best.get("scoring_mode"),
                     })
                     if ttype == "deterring":
                         self.diag_counts["model_deterring_generated"] += 1
@@ -1075,11 +1201,13 @@ class TaskGenerator:
             'support': int(task.get('support', 0)),
             'risk_conf': float(task.get('risk_conf', 0.0)),
             'eta_s': float(task.get('eta_s', 0.0)),
+            'cost_eta': float(task.get('cost_eta', 0.0)),
             'persistence': int(task.get('persistence', 0)),
             'predicted_deltaJ': float(task.get('predicted_deltaJ', 0.0)),
             'p_event': float(task.get('p_event', 0.0)),
             'deltaJ_per_cost': float(task.get('deltaJ_per_cost', 0.0)),
             'llr': float(task.get('llr', 0.0)),
+            'scoring_mode': task.get('scoring_mode'),
         })
 
 class TaskAssigner:

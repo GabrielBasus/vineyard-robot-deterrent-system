@@ -2,9 +2,18 @@ import unittest
 
 from DeterrentSystem import (
     _build_dispatch_order_preview,
+    _dispatch_priority_sort_key,
     _ordered_dispatch_candidates,
     _select_patrol_replacement_task,
 )
+from action_schema import task_action
+
+
+_DETER_MODES = {
+    "formation": {"beta": 0.30, "omega": 800.0, "sigma": 18.0},
+    "laser": {"beta": 0.45, "omega": 400.0, "sigma": 10.0},
+    "biosonic": {"beta": 0.25, "omega": 600.0, "sigma": 20.0},
+}
 
 
 def _task(
@@ -25,7 +34,7 @@ def _task(
     state=None,
     task_id=None,
 ):
-    return {
+    task = {
         "id": task_id,
         "type": str(task_type),
         "origin": str(origin),
@@ -42,6 +51,12 @@ def _task(
         "assigned_primary": assigned_primary,
         "state": state,
     }
+    task["action"] = task_action(
+        task,
+        deterring_modes=_DETER_MODES,
+        default_service_time_s=20.0,
+    )
+    return task
 
 
 class DispatchPriorityOrderingTests(unittest.TestCase):
@@ -84,6 +99,8 @@ class DispatchPriorityOrderingTests(unittest.TestCase):
         preview = _build_dispatch_order_preview([low_patrol, high_preventive, direct_detection], preview_limit=3)
         self.assertEqual(preview[0]["ordering_bucket"], "direct_detection")
         self.assertEqual(preview[1]["ordering_bucket"], "regular_competition")
+        self.assertEqual(preview[0]["action"]["name"], "direct_detection")
+        self.assertEqual(preview[1]["action"]["name"], "laser")
 
         active_tasks = [
             _task(
@@ -153,6 +170,55 @@ class DispatchPriorityOrderingTests(unittest.TestCase):
         ordered = _ordered_dispatch_candidates([slower, faster])
         self.assertEqual(ordered[0]["mode"], "biosonic")
         self.assertEqual(ordered[1]["mode"], "laser")
+
+    def test_regular_order_uses_tighter_predictive_deadline_before_eta(self):
+        loose_deadline = _task(
+            task_type="deterring",
+            origin="model_hotspot",
+            mode="laser",
+            score=10.0,
+            utility=10.0,
+            predicted_deltaJ=12.0,
+            deltaJ_per_cost=3.0,
+            eta_s=5.0,
+            time=10.0,
+        )
+        tight_deadline = _task(
+            task_type="deterring",
+            origin="model_hotspot",
+            mode="biosonic",
+            score=10.0,
+            utility=10.0,
+            predicted_deltaJ=12.0,
+            deltaJ_per_cost=3.0,
+            eta_s=8.0,
+            time=10.0,
+        )
+        loose_deadline["required_arrival_by_t"] = 80.0
+        loose_deadline["event_time"] = 80.0
+        tight_deadline["required_arrival_by_t"] = 40.0
+        tight_deadline["event_time"] = 40.0
+
+        ordered = _ordered_dispatch_candidates([loose_deadline, tight_deadline])
+        self.assertEqual(ordered[0]["mode"], "biosonic")
+        self.assertEqual(ordered[1]["mode"], "laser")
+
+    def test_deadline_urgency_tightens_as_now_advances(self):
+        predictive = _task(
+            task_type="deterring",
+            origin="model_hotspot",
+            mode="laser",
+            score=10.0,
+            utility=10.0,
+            predicted_deltaJ=12.0,
+            deltaJ_per_cost=3.0,
+            eta_s=5.0,
+            time=10.0,
+        )
+        predictive["required_arrival_by_t"] = 80.0
+        early_key = _dispatch_priority_sort_key(predictive, now_t=10.0)
+        late_key = _dispatch_priority_sort_key(predictive, now_t=40.0)
+        self.assertGreater(late_key[3], early_key[3])
 
 
 if __name__ == "__main__":

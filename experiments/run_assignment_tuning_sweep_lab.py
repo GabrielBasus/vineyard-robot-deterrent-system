@@ -61,6 +61,9 @@ ASSIGNMENT_TUNING_CONFIG_ALIASES = {
     "gating.deterring_windows": "deterring_windows",
     "gating.min_predicted_deltaj_values": "min_predicted_deltaj_values",
     "ground_truth.beta_true_values": "beta_true_values",
+    "calibration.use_frozen_calibration": "use_frozen_calibration",
+    "calibration.manifest_path": "calibration_manifest_path",
+    "calibration.config_id": "calibration_config_id",
     "inputs.phase1_manifest": "phase1_manifest",
     "inputs.use_phase1_winner": "use_phase1_winner",
 }
@@ -155,6 +158,12 @@ def _build_base_params(t_end: float, dt: float) -> dict:
         "T_end": float(t_end),
         "dt": float(dt),
     }
+
+
+def _sanitize_scenario_token(text: object) -> str:
+    raw = "".join(ch if str(ch).isalnum() else "_" for ch in str(text))
+    compact = "_".join(part for part in raw.split("_") if part)
+    return compact[:48] if compact else "frozen"
 
 
 def _empty_runs_df() -> pd.DataFrame:
@@ -259,6 +268,9 @@ def _empty_runs_df() -> pd.DataFrame:
             "assignment_solver_message_passes",
             "assignment_solver_failures",
             "assignment_solver_feasible_edge_rate",
+            "use_frozen_calibration",
+            "selected_calibration_config_id",
+            "selected_calibration_source",
             "model_deterring_calibration_bin_0_count",
             "model_deterring_calibration_bin_0_hits",
             "model_deterring_calibration_bin_0_hit_rate",
@@ -357,6 +369,14 @@ def _run_combo_job(payload: dict) -> dict:
 
     kwargs = dict(payload["base_params"])
     kwargs.update(_baseline_cfg(baseline))
+    if baseline in ("prediction_only", "proposed") and bool(payload.get("use_frozen_calibration", False)):
+        kwargs["use_frozen_calibration"] = True
+        manifest_path = str(payload.get("calibration_manifest_path", "") or "").strip()
+        config_id = str(payload.get("calibration_config_id", "") or "").strip()
+        if manifest_path:
+            kwargs["calibration_manifest_path"] = manifest_path
+        if config_id:
+            kwargs["calibration_config_id"] = config_id
     kwargs.update(
         {
             "assignment_method": method,
@@ -509,6 +529,9 @@ def _run_combo_job(payload: dict) -> dict:
                 "assignment_solver_message_passes": float(m.get("assignment_solver_message_passes", np.nan)),
                 "assignment_solver_failures": float(m.get("assignment_solver_failures", np.nan)),
                 "assignment_solver_feasible_edge_rate": float(m.get("assignment_solver_feasible_edge_rate", np.nan)),
+                "use_frozen_calibration": int(bool(m.get("use_frozen_calibration", 0))),
+                "selected_calibration_config_id": str(m.get("selected_calibration_config_id", "")),
+                "selected_calibration_source": str(m.get("selected_calibration_source", "")),
                 "model_deterring_calibration_bin_0_count": float(m.get("model_deterring_calibration_bin_0_count", np.nan)),
                 "model_deterring_calibration_bin_0_hits": float(m.get("model_deterring_calibration_bin_0_hits", np.nan)),
                 "model_deterring_calibration_bin_0_hit_rate": float(m.get("model_deterring_calibration_bin_0_hit_rate", np.nan)),
@@ -560,6 +583,9 @@ def run_sweep(
     min_predicted_deltaJ_values: List[float],
     beta_true_values: List[float],
     base_params: dict,
+    use_frozen_calibration: bool = False,
+    calibration_manifest_path: str | None = None,
+    calibration_config_id: str | None = None,
     checkpoint_path: Path | None = None,
     resume: bool = True,
     max_workers: int = 1,
@@ -634,6 +660,9 @@ def run_sweep(
             f"_bu{budget_utility_hr:g}"
             f"_dw{det_window_s:g}_mdj{min_pred_dj:g}_bt{beta_true:g}"
         )
+        if bool(use_frozen_calibration):
+            calib_token = str(calibration_config_id or calibration_manifest_path or "frozen").strip()
+            scenario_id += f"_cal{_sanitize_scenario_token(calib_token)}"
         jobs = []
         for baseline in baselines:
             for method in methods:
@@ -671,6 +700,13 @@ def run_sweep(
                         "min_predicted_deltaJ_for_model_deterring": float(min_pred_dj),
                         "beta_true": float(beta_true),
                         "base_params": dict(base_params),
+                        "use_frozen_calibration": bool(use_frozen_calibration),
+                        "calibration_manifest_path": (
+                            None if calibration_manifest_path in (None, "") else str(calibration_manifest_path)
+                        ),
+                        "calibration_config_id": (
+                            None if calibration_config_id in (None, "") else str(calibration_config_id)
+                        ),
                         "num_runs": int(num_runs),
                         "seed_start": int(seed_start),
                     }
@@ -1272,6 +1308,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--deterring-windows", type=str, default="")
     parser.add_argument("--min-predicted-deltaj-values", type=str, default="")
     parser.add_argument("--beta-true-values", type=str, default="")
+    parser.add_argument(
+        "--use-frozen-calibration",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Forward frozen calibration into prediction_only/proposed tuning runs.",
+    )
+    parser.add_argument("--calibration-manifest-path", type=str, default="")
+    parser.add_argument("--calibration-config-id", type=str, default="")
     parser.add_argument("--phase1-manifest", type=str, default="")
     parser.add_argument(
         "--use-phase1-winner",
@@ -1317,6 +1361,16 @@ def main(argv: list[str] | None = None) -> None:
         stringify=True,
     )
     args.planner_profile = planner_profile
+
+    use_frozen_calibration = bool(args.use_frozen_calibration) or bool(
+        planner_profile_values.get("use_frozen_calibration", False)
+    )
+    calibration_manifest_path = str(args.calibration_manifest_path).strip() or str(
+        planner_profile_values.get("calibration_manifest_path", "")
+    ).strip()
+    calibration_config_id = str(args.calibration_config_id).strip() or str(
+        planner_profile_values.get("calibration_config_id", "")
+    ).strip()
 
     if getattr(ds, "mon", None) is not None:
         ds.mon.enabled = False
@@ -1567,6 +1621,9 @@ def main(argv: list[str] | None = None) -> None:
         min_predicted_deltaJ_values=min_predicted_deltaJ_values,
         beta_true_values=beta_true_values,
         base_params=base_params,
+        use_frozen_calibration=use_frozen_calibration,
+        calibration_manifest_path=(calibration_manifest_path or None),
+        calibration_config_id=(calibration_config_id or None),
         checkpoint_path=checkpoint_path,
         resume=bool(args.resume),
         max_workers=int(args.max_workers),
@@ -1628,6 +1685,9 @@ def main(argv: list[str] | None = None) -> None:
         "model_deterring_window_s": deterring_window_s,
         "min_predicted_deltaJ_for_model_deterring": min_predicted_deltaJ_values,
         "beta_true_values": beta_true_values,
+        "use_frozen_calibration": bool(use_frozen_calibration),
+        "calibration_manifest_path": calibration_manifest_path,
+        "calibration_config_id": calibration_config_id,
         "phase1_manifest": str(args.phase1_manifest),
         "use_phase1_winner": bool(args.use_phase1_winner),
         "planner_profile": planner_profile,

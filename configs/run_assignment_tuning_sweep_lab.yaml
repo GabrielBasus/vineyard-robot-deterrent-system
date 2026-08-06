@@ -37,6 +37,11 @@ gating:
 ground_truth:
   beta_true_values: [0.25, 0.35]
 
+calibration:
+  use_frozen_calibration: true
+  manifest_path: results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json
+  # config_id: C030
+
 inputs:
   use_phase1_winner: true
   phase1_manifest: results/assignment_tuning_sweep_lab_phase1_fast/assignment_tuning_manifest_lab.json

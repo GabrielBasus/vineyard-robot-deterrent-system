@@ -17,6 +17,7 @@ from diagnostics.diagnostic_sestpp_subsystem import (
     SubsystemConfig,
     _build_model,
     _make_value_sampler,
+    _model_intervention_replay_params,
     _sample_from_value_map,
     _suppression_keep_prob,
 )
@@ -64,8 +65,8 @@ def _probability_metrics(prob: np.ndarray, occ_grid: np.ndarray, count_grid: np.
 
 def simulate_one_run(run_idx: int, seed: int, cfg: SubsystemConfig):
     rng = np.random.default_rng(seed)
-    pred = _build_model(cfg)
-    prop = _build_model(cfg)
+    pred = _build_model(cfg, mode="prediction_only")
+    prop = _build_model(cfg, mode="proposed")
 
     xs, ys, cdf, dx_cell, dy_cell = _make_value_sampler(cfg)
     cell_area = float(dx_cell * dy_cell)
@@ -101,12 +102,13 @@ def simulate_one_run(run_idx: int, seed: int, cfg: SubsystemConfig):
 
         while model_intervention_queue and model_intervention_queue[0][0] <= t_abs + 1e-9:
             ti, xi, yi = heapq.heappop(model_intervention_queue)
+            replay = _model_intervention_replay_params(cfg, mode="proposed")
             prop.add_intervention_event(
                 xi,
                 yi,
-                weight=1.0,
-                sigma=cfg.intervention_sigma,
-                omega_inhib=cfg.intervention_omega,
+                weight=replay["weight"],
+                sigma=replay["sigma"],
+                omega_inhib=replay["omega_inhib"],
             )
             if ti >= cfg.warmup_s:
                 intervention_events_rel.append((float(xi), float(yi), float(ti - cfg.warmup_s)))
@@ -475,10 +477,16 @@ def main():
     parser.add_argument("--intervention-shuffle", choices=["none", "space", "time", "spacetime"], default="none")
     parser.add_argument("--shuffle-time-window-s", type=float, default=300.0)
     parser.add_argument("--beta-true", type=float, default=0.30)
+    parser.add_argument("--model-sigma", type=float, default=SubsystemConfig.model_sigma)
+    parser.add_argument("--model-omega", type=float, default=SubsystemConfig.model_omega)
     parser.add_argument("--model-omega-inhib", type=float, default=SubsystemConfig.model_omega_inhib)
+    parser.add_argument("--model-alpha-in", type=float, default=SubsystemConfig.model_alpha_in)
+    parser.add_argument("--model-alpha-cross", type=float, default=SubsystemConfig.model_alpha_cross)
     parser.add_argument("--model-alpha-inhib", type=float, default=SubsystemConfig.model_alpha_inhib)
     parser.add_argument("--model-mu-base", type=float, default=SubsystemConfig.model_mu_base)
     parser.add_argument("--model-bg-ema", type=float, default=SubsystemConfig.model_bg_ema)
+    parser.add_argument("--model-feedback-sigma-scale", type=float, default=SubsystemConfig.model_feedback_sigma_scale)
+    parser.add_argument("--model-feedback-omega-scale", type=float, default=SubsystemConfig.model_feedback_omega_scale)
     args = parser.parse_args()
 
     cfg = SubsystemConfig(
@@ -495,10 +503,16 @@ def main():
         intervention_shuffle=str(args.intervention_shuffle),
         shuffle_time_window_s=float(args.shuffle_time_window_s),
         beta_true=float(args.beta_true),
+        model_sigma=float(args.model_sigma),
+        model_omega=float(args.model_omega),
         model_omega_inhib=float(args.model_omega_inhib),
+        model_alpha_in=float(args.model_alpha_in),
+        model_alpha_cross=float(args.model_alpha_cross),
         model_alpha_inhib=float(args.model_alpha_inhib),
         model_mu_base=float(args.model_mu_base),
         model_bg_ema=float(args.model_bg_ema),
+        model_feedback_sigma_scale=float(args.model_feedback_sigma_scale),
+        model_feedback_omega_scale=float(args.model_feedback_omega_scale),
     )
 
     outdir = Path(args.outdir)

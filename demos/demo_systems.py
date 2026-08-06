@@ -50,12 +50,34 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.widgets import Button
+
+from calibration_config import DEFAULT_CALIBRATION_MANIFEST_PATH
+try:
+    from demos._bootstrap import REPO_ROOT, resolve_repo_path
+except ModuleNotFoundError:
+    from _bootstrap import REPO_ROOT, resolve_repo_path
 
 import DeterrentSystem as ds
+from planner_profiles import get_planner_profile_values
 from simplification.stages import get_stage
 
 
-DEFAULT_CONFIG_PATH = Path("configs/demo_config.json")
+DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "demo_config.json"
+PATH_KWARG_KEYS = ("calibration_ranking_path", "calibration_manifest_path", "telemetry_dir")
+DEFAULT_CALIBRATION_MANIFEST = str(DEFAULT_CALIBRATION_MANIFEST_PATH)
+CALIBRATION_MANAGED_MODEL_KWARGS = (
+    "sigma",
+    "omega",
+    "omega_inhib",
+    "alpha_in",
+    "alpha_cross",
+    "alpha_inhib",
+    "mu_base",
+    "bg_ema",
+    "model_feedback_sigma_scale",
+    "model_feedback_omega_scale",
+)
 
 
 SYSTEM_MODE_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -86,38 +108,58 @@ SYSTEM_MODE_DEFAULTS: dict[str, dict[str, Any]] = {
 DEFAULT_CONFIG: dict[str, Any] = {
     "display": {
         "title": "Reactive vs Prediction Only vs Proposed",
-        "figure_width": 19.0,
-        "figure_height": 10.5,
+        "figure_width": 19.5,
+        "figure_height": 10.8,
         "fps": 10,
+        "live_tracking_fps": 30,
+        "motion_smoothing": True,
+        "motion_easing": "smoothstep",
         "steps_per_frame": 1,
         "goal_match_radius_m": 25.0,
         "task_line_alpha": 0.75,
         "queued_task_line_alpha": 0.50,
-        "label_fontsize": 8,
+        "label_fontsize": 9,
+        "status_fontsize": 8,
+        "legend_fontsize": 8,
+        "metric_title_fontsize": 9,
+        "metric_tick_fontsize": 8,
+        "map_tick_fontsize": 8,
+        "metric_columns": 4,
+        "map_view_mode": "full_field",
+        "map_full_margin_m": 8.0,
+        "map_zoom_rows": 14,
+        "map_zoom_min_rows": 10,
+        "map_zoom_max_rows": 20,
+        "map_zoom_width_m": 170.0,
+        "map_zoom_max_width_m": 230.0,
+        "map_zoom_margin_m": 10.0,
+        "map_zoom_smoothing": 0.18,
     },
     "robot_rendering": {
         "husky_length_m": 0.99,
         "husky_width_m": 0.67,
-        "heading_line_m": 2.0,
-        "label_offset_m": 2.0,
-        "body_alpha": 0.90,
+        "display_length_m": 6.0,
+        "display_width_m": 3.4,
+        "heading_line_m": 4.0,
+        "label_offset_m": 3.4,
+        "body_alpha": 0.95,
     },
     "vineyard": {
-        "W": 500.0,
-        "H": 500.0,
+        "W": 240.0,
+        "H": 96.0,
         "row_spacing_m": 4.8,
         "row_width_m": 3.2,
-        "headland_space_m": 10.0,
-        "turn_space_m": 20.0,
+        "headland_space_m": 8.0,
+        "turn_space_m": 10.0,
     },
     "scenario": {
         "duration_s": 1800.0,
         "dt": 5.0,
         "seed": 321,
         "fps": 1,
-        "NX": 90,
-        "NY": 72,
-        "Nrobots": 6,
+        "NX": 54,
+        "NY": 24,
+        "Nrobots": 4,
         "uav_fraction": 0.0,
         "warmup_s": 600.0,
         "task_replan_period_s": 20.0,
@@ -170,7 +212,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "line_style": "--",
             "marker": "s",
             "short_label": "P",
-            "overrides": {},
+            "overrides": {
+                "use_frozen_calibration": True,
+                "calibration_manifest_path": DEFAULT_CALIBRATION_MANIFEST,
+            },
         },
         {
             "key": "proposed",
@@ -181,7 +226,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "marker": "^",
             "short_label": "T",
             "stage": "s5_current_thesis_profile",
-            "overrides": {},
+            "overrides": {
+                "use_frozen_calibration": True,
+                "calibration_manifest_path": DEFAULT_CALIBRATION_MANIFEST,
+            },
         },
     ],
 }
@@ -211,6 +259,7 @@ class SystemSpec:
 @dataclass
 class MapArtists:
     axis: Any
+    status_axis: Any
     boundary_line: Any
     row_patches: list[Any]
     row_lines: Any
@@ -226,6 +275,7 @@ class MapArtists:
     robot_patches: dict[str, Any]
     robot_heading_lines: dict[str, Any]
     robot_labels: dict[str, Any]
+    robot_colors: dict[str, Any]
     info_text: Any
 
 
@@ -243,9 +293,25 @@ class SystemRun:
     frames: Iterator[dict[str, Any]]
     snapshot: dict[str, Any]
     previous_poses: dict[str, tuple[float, float]] = field(default_factory=dict)
+    previous_t_s: float = 0.0
+    display_headings: dict[str, float] = field(default_factory=dict)
     history_t_min: list[float] = field(default_factory=list)
     history_metrics: dict[str, list[float]] = field(default_factory=dict)
     map_artists: MapArtists | None = None
+
+
+@dataclass
+class MapViewState:
+    center_x: float
+    center_y: float
+    width: float
+    height: float
+
+
+@dataclass
+class PlaybackControls:
+    paused: bool = False
+    button: Any | None = None
 
 
 def _deep_merge(base: Any, override: Any) -> Any:
@@ -310,6 +376,21 @@ def _scenario_sim_kwargs(config: dict[str, Any]) -> dict[str, Any]:
     return sim_kwargs
 
 
+def _normalize_sim_path_kwargs(sim_kwargs: dict[str, Any]) -> None:
+    for key in PATH_KWARG_KEYS:
+        value = sim_kwargs.get(key)
+        if value in (None, ""):
+            continue
+        sim_kwargs[key] = str(resolve_repo_path(str(value)))
+
+
+def _drop_calibration_managed_model_kwargs(sim_kwargs: dict[str, Any]) -> None:
+    if not bool(sim_kwargs.get("use_frozen_calibration", False)):
+        return
+    for key in CALIBRATION_MANAGED_MODEL_KWARGS:
+        sim_kwargs.pop(key, None)
+
+
 def _resolve_system_specs(config: dict[str, Any]) -> list[SystemSpec]:
     base_sim_kwargs = _scenario_sim_kwargs(config)
     specs: list[SystemSpec] = []
@@ -327,6 +408,17 @@ def _resolve_system_specs(config: dict[str, Any]) -> list[SystemSpec]:
             stage = get_stage(str(stage_name))
             spec_kwargs.update(stage.overrides)
         spec_kwargs.update(dict(raw_system.get("overrides", {})))
+        if mode in ("prediction_only", "proposed"):
+            spec_kwargs.setdefault("use_frozen_calibration", True)
+            spec_kwargs.setdefault("calibration_manifest_path", DEFAULT_CALIBRATION_MANIFEST)
+        planner_profile = str(spec_kwargs.get("planner_profile", "")).strip()
+        if planner_profile:
+            profile_values = get_planner_profile_values(planner_profile)
+            for key in PATH_KWARG_KEYS:
+                if spec_kwargs.get(key) in (None, "") and profile_values.get(key) not in (None, ""):
+                    spec_kwargs[key] = profile_values.get(key)
+        _normalize_sim_path_kwargs(spec_kwargs)
+        _drop_calibration_managed_model_kwargs(spec_kwargs)
         spec_kwargs["report_metrics_end"] = False
         specs.append(
             SystemSpec(
@@ -418,6 +510,17 @@ def _row_lines_for_vineyard(
     return row_polygons, center_lines
 
 
+def _row_span_height_m(rows_visible: int, row_spacing_m: float, row_width_m: float) -> float:
+    rows_visible = max(int(rows_visible), 1)
+    return max(float(row_width_m), float(row_width_m) + float(max(rows_visible - 1, 0)) * float(row_spacing_m))
+
+
+def _robot_display_dimensions(robot_cfg: dict[str, Any]) -> tuple[float, float]:
+    length_m = float(robot_cfg.get("display_length_m", robot_cfg.get("husky_length_m", 1.0)))
+    width_m = float(robot_cfg.get("display_width_m", robot_cfg.get("husky_width_m", 1.0)))
+    return length_m, width_m
+
+
 def _vehicle_polygon(cx: float, cy: float, heading_rad: float, length_m: float, width_m: float) -> np.ndarray:
     half_length = 0.5 * float(length_m)
     half_width = 0.5 * float(width_m)
@@ -443,24 +546,70 @@ def _current_heading(
     snapshot: dict[str, Any],
     previous_pose: dict[str, tuple[float, float]],
     robot_id: str,
+    fallback_heading: float = 0.0,
 ) -> float:
     pose = snapshot.get("poses", {}).get(robot_id)
     if pose is None:
-        return 0.0
+        return float(fallback_heading)
     x, y = pose
-    goal = snapshot.get("robot_goals", {}).get(robot_id)
-    if goal is not None:
-        dx = float(goal[0]) - float(x)
-        dy = float(goal[1]) - float(y)
-        if (dx * dx + dy * dy) > 1.0e-9:
-            return math.atan2(dy, dx)
     prev = previous_pose.get(robot_id)
     if prev is not None:
         dx = float(x) - float(prev[0])
         dy = float(y) - float(prev[1])
         if (dx * dx + dy * dy) > 1.0e-9:
             return math.atan2(dy, dx)
-    return 0.0
+    goal = snapshot.get("robot_goals", {}).get(robot_id)
+    if goal is not None:
+        dx = float(goal[0]) - float(x)
+        dy = float(goal[1]) - float(y)
+        if (dx * dx + dy * dy) > 1.0e-9:
+            return math.atan2(dy, dx)
+    return float(fallback_heading)
+
+
+def _ease_motion_alpha(alpha: float, easing: str) -> float:
+    alpha = min(max(float(alpha), 0.0), 1.0)
+    mode = str(easing).strip().lower()
+    if mode in {"smoothstep", "ease", "ease_in_out"}:
+        return alpha * alpha * (3.0 - 2.0 * alpha)
+    return alpha
+
+
+def _interpolated_snapshot(run: SystemRun, alpha: float, config: dict[str, Any]) -> dict[str, Any]:
+    snapshot = run.snapshot
+    poses = snapshot.get("poses", {}) or {}
+    if not poses or not run.previous_poses:
+        return snapshot
+
+    display_cfg = config.get("display", {})
+    if not bool(display_cfg.get("motion_smoothing", True)):
+        return snapshot
+
+    alpha_eased = _ease_motion_alpha(alpha, str(display_cfg.get("motion_easing", "smoothstep")))
+    merged_ids = sorted({str(robot_id) for robot_id in poses} | set(run.previous_poses.keys()))
+    interp_poses: dict[str, tuple[float, float]] = {}
+    for robot_id in merged_ids:
+        current_pose = poses.get(robot_id)
+        previous_pose = run.previous_poses.get(robot_id)
+        if current_pose is None and previous_pose is None:
+            continue
+        if current_pose is None:
+            interp_poses[robot_id] = (float(previous_pose[0]), float(previous_pose[1]))
+            continue
+        if previous_pose is None:
+            interp_poses[robot_id] = (float(current_pose[0]), float(current_pose[1]))
+            continue
+        interp_poses[robot_id] = (
+            float(previous_pose[0]) + (float(current_pose[0]) - float(previous_pose[0])) * alpha_eased,
+            float(previous_pose[1]) + (float(current_pose[1]) - float(previous_pose[1])) * alpha_eased,
+        )
+
+    previous_t = float(run.previous_t_s)
+    current_t = float(snapshot.get("t", previous_t))
+    display_snapshot = dict(snapshot)
+    display_snapshot["poses"] = interp_poses
+    display_snapshot["t"] = previous_t + (current_t - previous_t) * alpha_eased
+    return display_snapshot
 
 
 def _task_buckets(
@@ -557,6 +706,111 @@ def _task_buckets(
     }
 
 
+def _focus_points_from_snapshot(snapshot: dict[str, Any]) -> np.ndarray:
+    poses = snapshot.get("poses", {}) or {}
+    active_tasks = [
+        task
+        for task in snapshot.get("tasks_active", [])
+        if str(task.get("state", "")).strip().lower() == "active"
+    ]
+    focus_points: list[tuple[float, float]] = []
+    seen_robot_ids: set[str] = set()
+    if active_tasks:
+        for task in active_tasks:
+            focus_points.append((float(task.get("x", 0.0)), float(task.get("y", 0.0))))
+            robot_id = str(task.get("assigned_primary", ""))
+            pose = poses.get(robot_id)
+            if pose is not None and robot_id not in seen_robot_ids:
+                focus_points.append((float(pose[0]), float(pose[1])))
+                seen_robot_ids.add(robot_id)
+    if focus_points:
+        return np.array(focus_points, dtype=float)
+    pose_points = np.array(
+        [(float(x), float(y)) for x, y in poses.values()],
+        dtype=float,
+    )
+    if pose_points.size == 0 or len(pose_points) <= 3:
+        return pose_points.reshape((-1, 2))
+    center = np.median(pose_points, axis=0)
+    ranked = sorted(
+        pose_points.tolist(),
+        key=lambda point: math.hypot(float(point[0]) - float(center[0]), float(point[1]) - float(center[1])),
+    )
+    return np.array(ranked[: min(len(ranked), 4)], dtype=float)
+
+
+def _target_map_view(runs: list[SystemRun], config: dict[str, Any]) -> MapViewState:
+    display_cfg = config["display"]
+    vineyard_cfg = config["vineyard"]
+    W = float(vineyard_cfg.get("W", 0.0))
+    H = float(vineyard_cfg.get("H", 0.0))
+    view_mode = str(display_cfg.get("map_view_mode", "auto_zoom")).strip().lower()
+    if view_mode in {"full_field", "full", "field"}:
+        snapshot = runs[0].snapshot if runs else {}
+        W = float(snapshot.get("W", W))
+        H = float(snapshot.get("H", H))
+        margin_m = max(0.0, float(display_cfg.get("map_full_margin_m", 0.0)))
+        return MapViewState(
+            center_x=0.5 * W,
+            center_y=0.5 * H,
+            width=max(W + 2.0 * margin_m, 1.0),
+            height=max(H + 2.0 * margin_m, 1.0),
+        )
+    row_spacing_m = float(vineyard_cfg.get("row_spacing_m", 0.0))
+    row_width_m = float(vineyard_cfg.get("row_width_m", 0.0))
+    target_rows = int(display_cfg.get("map_zoom_rows", 14))
+    min_rows = int(display_cfg.get("map_zoom_min_rows", 10))
+    max_rows = int(display_cfg.get("map_zoom_max_rows", 20))
+    target_rows = min(max(target_rows, min_rows), max_rows)
+    min_height = _row_span_height_m(min_rows, row_spacing_m, row_width_m)
+    target_height = _row_span_height_m(target_rows, row_spacing_m, row_width_m)
+    max_height = _row_span_height_m(max_rows, row_spacing_m, row_width_m)
+    base_width = float(display_cfg.get("map_zoom_width_m", max(target_height * 2.3, 120.0)))
+    max_width = max(base_width, float(display_cfg.get("map_zoom_max_width_m", base_width * 1.35)))
+    margin_m = float(display_cfg.get("map_zoom_margin_m", 10.0))
+
+    point_sets = [_focus_points_from_snapshot(run.snapshot) for run in runs]
+    non_empty = [pts for pts in point_sets if pts.size > 0]
+    if not non_empty:
+        return MapViewState(center_x=0.5 * W, center_y=0.5 * H, width=base_width, height=target_height)
+
+    pts = np.vstack(non_empty)
+    center_x = float(np.median(pts[:, 0]))
+    center_y = float(np.median(pts[:, 1]))
+    span_x = float(np.ptp(pts[:, 0])) if len(pts) > 1 else 0.0
+    span_y = float(np.ptp(pts[:, 1])) if len(pts) > 1 else 0.0
+    width = min(max(base_width, span_x + 2.0 * margin_m), max_width, max(W, base_width))
+    height = min(max(target_height, span_y + 2.0 * margin_m, min_height), max_height, max(H, target_height))
+    width = min(width, W if W > 0.0 else width)
+    height = min(height, H if H > 0.0 else height)
+    half_width = 0.5 * width
+    half_height = 0.5 * height
+    center_x = min(max(center_x, half_width), max(half_width, W - half_width))
+    center_y = min(max(center_y, half_height), max(half_height, H - half_height))
+    return MapViewState(center_x=center_x, center_y=center_y, width=width, height=height)
+
+
+def _update_shared_map_view_state(
+    current_view: MapViewState | None,
+    runs: list[SystemRun],
+    config: dict[str, Any],
+) -> MapViewState:
+    target_view = _target_map_view(runs, config)
+    if current_view is None:
+        return target_view
+    alpha = min(max(float(config["display"].get("map_zoom_smoothing", 0.18)), 0.0), 1.0)
+    if alpha <= 0.0:
+        return current_view
+    if alpha >= 1.0:
+        return target_view
+    return MapViewState(
+        center_x=(1.0 - alpha) * current_view.center_x + alpha * target_view.center_x,
+        center_y=(1.0 - alpha) * current_view.center_y + alpha * target_view.center_y,
+        width=(1.0 - alpha) * current_view.width + alpha * target_view.width,
+        height=(1.0 - alpha) * current_view.height + alpha * target_view.height,
+    )
+
+
 def _scatter_points(tasks: list[dict[str, Any]]) -> np.ndarray:
     if not tasks:
         return np.empty((0, 2), dtype=float)
@@ -570,18 +824,208 @@ def _set_scatter_points(scatter_artist: Any, pts: np.ndarray) -> None:
         scatter_artist.set_offsets(pts)
 
 
-def _configure_map_axis(ax: Any, title: str, color: str, W: float, H: float, turn_space_m: float) -> None:
+def _polygon_centroid(poly: list[tuple[float, float]]) -> tuple[float, float]:
+    if not poly:
+        return 0.0, 0.0
+    area_twice = 0.0
+    cx = 0.0
+    cy = 0.0
+    for idx, (x0, y0) in enumerate(poly):
+        x1, y1 = poly[(idx + 1) % len(poly)]
+        cross = float(x0) * float(y1) - float(x1) * float(y0)
+        area_twice += cross
+        cx += (float(x0) + float(x1)) * cross
+        cy += (float(y0) + float(y1)) * cross
+    if abs(area_twice) < 1.0e-9:
+        xs = [float(x) for x, _ in poly]
+        ys = [float(y) for _, y in poly]
+        return float(np.mean(xs)), float(np.mean(ys))
+    return cx / (3.0 * area_twice), cy / (3.0 * area_twice)
+
+
+def _point_in_polygon(x: float, y: float, poly: list[tuple[float, float]]) -> bool:
+    inside = False
+    n = len(poly)
+    if n < 3:
+        return False
+    j = n - 1
+    for i in range(n):
+        xi, yi = float(poly[i][0]), float(poly[i][1])
+        xj, yj = float(poly[j][0]), float(poly[j][1])
+        intersects = ((yi > y) != (yj > y)) and (x < ((xj - xi) * (y - yi) / max(yj - yi, 1.0e-12) + xi))
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _robot_ids_by_cell(snapshot: dict[str, Any]) -> list[str | None]:
+    poses = {
+        str(robot_id): (float(pose[0]), float(pose[1]))
+        for robot_id, pose in (snapshot.get("poses", {}) or {}).items()
+    }
+    remaining = set(poses.keys())
+    cell_robot_ids: list[str | None] = []
+    for cell in snapshot.get("cells", []):
+        if not cell:
+            cell_robot_ids.append(None)
+            continue
+        matched_robot: str | None = None
+        for robot_id in sorted(remaining):
+            px, py = poses[robot_id]
+            if _point_in_polygon(px, py, cell):
+                matched_robot = robot_id
+                break
+        if matched_robot is None and remaining:
+            cx, cy = _polygon_centroid(cell)
+            matched_robot = min(remaining, key=lambda robot_id: math.hypot(poses[robot_id][0] - cx, poses[robot_id][1] - cy))
+        if matched_robot is not None:
+            remaining.discard(matched_robot)
+        cell_robot_ids.append(matched_robot)
+    return cell_robot_ids
+
+
+def _label_rect(x: float, y: float, ha: str, va: str, width_m: float, height_m: float) -> tuple[float, float, float, float]:
+    if ha == "center":
+        x0 = x - 0.5 * width_m
+    elif ha == "left":
+        x0 = x
+    else:
+        x0 = x - width_m
+    if va == "center":
+        y0 = y - 0.5 * height_m
+    elif va == "bottom":
+        y0 = y
+    else:
+        y0 = y - height_m
+    return (x0, y0, x0 + width_m, y0 + height_m)
+
+
+def _rects_overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float], padding_m: float) -> bool:
+    return not (
+        a[2] + padding_m <= b[0]
+        or b[2] + padding_m <= a[0]
+        or a[3] + padding_m <= b[1]
+        or b[3] + padding_m <= a[1]
+    )
+
+
+def _visible_row_range(y_min: float, y_max: float, snapshot: dict[str, Any], config: dict[str, Any]) -> tuple[int, int] | None:
+    vineyard_cfg = config["vineyard"]
+    row_spacing_m = float(vineyard_cfg.get("row_spacing_m", 0.0))
+    row_width_m = float(vineyard_cfg.get("row_width_m", 0.0))
+    headland_space_m = float(vineyard_cfg.get("headland_space_m", 0.0))
+    H = float(snapshot.get("H", vineyard_cfg.get("H", 0.0)))
+    if row_spacing_m <= 0.0 or row_width_m <= 0.0:
+        return None
+    visible_rows: list[int] = []
+    row_idx = 0
+    while True:
+        y_center = headland_space_m + row_idx * row_spacing_m
+        if y_center - 0.5 * row_width_m > (H - headland_space_m):
+            break
+        if (y_center + 0.5 * row_width_m) >= y_min and (y_center - 0.5 * row_width_m) <= y_max:
+            visible_rows.append(row_idx + 1)
+        row_idx += 1
+    if not visible_rows:
+        return None
+    return visible_rows[0], visible_rows[-1]
+
+
+def _place_robot_labels(
+    artists: MapArtists,
+    snapshot: dict[str, Any],
+    robot_cfg: dict[str, Any],
+    view_state: MapViewState,
+) -> None:
+    length_m, width_m = _robot_display_dimensions(robot_cfg)
+    label_pad_m = float(robot_cfg.get("label_offset_m", 3.4))
+    label_width_m = min(max(0.085 * float(view_state.width), 8.0), 13.0)
+    label_height_m = min(max(0.080 * float(view_state.height), 3.2), 5.4)
+    x_min = float(view_state.center_x) - 0.5 * float(view_state.width)
+    x_max = float(view_state.center_x) + 0.5 * float(view_state.width)
+    y_min = float(view_state.center_y) - 0.5 * float(view_state.height)
+    y_max = float(view_state.center_y) + 0.5 * float(view_state.height)
+    placed_rects: list[tuple[float, float, float, float]] = []
+    poses = snapshot.get("poses", {}) or {}
+    ordered_ids = sorted(
+        poses.keys(),
+        key=lambda robot_id: (-float(poses[robot_id][1]), float(poses[robot_id][0]), str(robot_id)),
+    )
+    for robot_id in artists.robot_labels.keys():
+        artists.robot_labels[robot_id].set_visible(False)
+    for robot_id in ordered_ids:
+        if robot_id not in artists.robot_labels:
+            continue
+        x, y = float(poses[robot_id][0]), float(poses[robot_id][1])
+        in_view = (
+            (x >= (x_min - length_m))
+            and (x <= (x_max + length_m))
+            and (y >= (y_min - width_m))
+            and (y <= (y_max + width_m))
+        )
+        if not in_view:
+            continue
+        candidates = [
+            (x, y + 0.5 * width_m + label_pad_m, "center", "bottom"),
+            (x + 0.5 * length_m + label_pad_m, y, "left", "center"),
+            (x - 0.5 * length_m - label_pad_m, y, "right", "center"),
+            (x, y - 0.5 * width_m - label_pad_m, "center", "top"),
+            (x + 0.35 * length_m + label_pad_m, y + 0.35 * width_m + label_pad_m, "left", "bottom"),
+            (x - 0.35 * length_m - label_pad_m, y + 0.35 * width_m + label_pad_m, "right", "bottom"),
+        ]
+        chosen: tuple[float, float, str, str] | None = None
+        chosen_rect: tuple[float, float, float, float] | None = None
+        for cand_x, cand_y, ha, va in candidates:
+            rect = _label_rect(cand_x, cand_y, ha, va, label_width_m, label_height_m)
+            inside_view = (
+                rect[0] >= (x_min + 1.0)
+                and rect[2] <= (x_max - 1.0)
+                and rect[1] >= (y_min + 1.0)
+                and rect[3] <= (y_max - 1.0)
+            )
+            overlaps = any(_rects_overlap(rect, other, padding_m=0.9) for other in placed_rects)
+            if inside_view and not overlaps:
+                chosen = (cand_x, cand_y, ha, va)
+                chosen_rect = rect
+                break
+            if chosen is None and inside_view:
+                chosen = (cand_x, cand_y, ha, va)
+                chosen_rect = rect
+        if chosen is None or chosen_rect is None:
+            chosen = (x, y + 0.5 * width_m + label_pad_m, "center", "bottom")
+            chosen_rect = _label_rect(chosen[0], chosen[1], chosen[2], chosen[3], label_width_m, label_height_m)
+        label = artists.robot_labels[robot_id]
+        label.set_position((chosen[0], chosen[1]))
+        label.set_ha(chosen[2])
+        label.set_va(chosen[3])
+        label.set_visible(True)
+        placed_rects.append(chosen_rect)
+
+
+def _configure_map_axis(
+    ax: Any,
+    title: str,
+    color: str,
+    W: float,
+    H: float,
+    turn_space_m: float,
+    display_cfg: dict[str, Any],
+) -> None:
     ax.set_title(title, color=color, fontsize=12, fontweight="bold")
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(-turn_space_m - 10.0, W + turn_space_m + 10.0)
     ax.set_ylim(-turn_space_m - 10.0, H + turn_space_m + 10.0)
-    ax.set_xlabel("X (m)")
-    ax.set_ylabel("Y (m)")
-    ax.grid(alpha=0.12)
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.tick_params(axis="both", labelsize=int(display_cfg.get("map_tick_fontsize", 8)))
+    ax.grid(alpha=0.10, linewidth=0.6)
+    ax.set_facecolor("#fbfaf7")
 
 
 def _create_map_artists(
     ax: Any,
+    status_ax: Any,
     title: str,
     system_color: str,
     snapshot: dict[str, Any],
@@ -594,7 +1038,7 @@ def _create_map_artists(
     H = float(snapshot["H"])
     turn_space_m = float(vineyard_cfg.get("turn_space_m", 20.0))
 
-    _configure_map_axis(ax, title, system_color, W, H, turn_space_m)
+    _configure_map_axis(ax, title, system_color, W, H, turn_space_m, display_cfg)
 
     boundary = snapshot["boundary"]
     bx, by = zip(*(boundary + [boundary[0]]))
@@ -609,14 +1053,14 @@ def _create_map_artists(
         row_width_m=float(vineyard_cfg.get("row_width_m", 0.0)),
         headland_space_m=float(vineyard_cfg.get("headland_space_m", 0.0)),
     )
-    for row_polygon in row_polygons:
+    for row_idx, row_polygon in enumerate(row_polygons):
         patch = MplPolygon(
             row_polygon,
             closed=True,
             fill=True,
-            alpha=0.15,
+            alpha=0.55,
             edgecolor="none",
-            facecolor="#6f8f5e",
+            facecolor=("#e3edd8" if (row_idx % 2 == 0) else "#d7e5ca"),
             zorder=0.1,
         )
         ax.add_patch(patch)
@@ -624,41 +1068,45 @@ def _create_map_artists(
     if row_center_lines:
         row_lines = LineCollection(
             row_center_lines,
-            colors="#557148",
-            linewidths=0.35,
-            alpha=0.30,
+            colors="#8aa07d",
+            linewidths=0.60,
+            alpha=0.60,
             zorder=0.2,
         )
         ax.add_collection(row_lines)
 
     zone_patches: list[Any] = []
+    robot_ids = sorted(snapshot["poses"].keys())
+    robot_palette = plt.get_cmap("tab10")(np.linspace(0.0, 1.0, max(len(robot_ids), 1)))
+    robot_colors = {robot_id: robot_palette[idx % len(robot_palette)] for idx, robot_id in enumerate(robot_ids)}
+    cell_robot_ids = _robot_ids_by_cell(snapshot)
     zone_colors = plt.get_cmap("tab20")(np.linspace(0.0, 1.0, max(len(snapshot["cells"]), 1)))
     for idx, cell in enumerate(snapshot["cells"]):
         if not cell:
             zone_patches.append(None)
             continue
-        zone_color = zone_colors[idx % len(zone_colors)]
+        zone_color = robot_colors.get(cell_robot_ids[idx], zone_colors[idx % len(zone_colors)])
         patch = MplPolygon(
             cell,
             closed=True,
             fill=True,
-            alpha=0.10,
+            alpha=0.12,
             edgecolor=zone_color,
             facecolor=zone_color,
-            linewidth=1.0,
+            linewidth=1.3,
             zorder=0.4,
         )
         ax.add_patch(patch)
         zone_patches.append(patch)
 
-    truth_scatter = ax.scatter([], [], s=36, c="#2ca02c", marker="x", zorder=4)
-    detection_scatter = ax.scatter([], [], s=36, c="#ff7f0e", marker="x", zorder=5)
-    deterring_active_scatter = ax.scatter([], [], s=70, c="#d62728", marker="o", edgecolors="black", linewidths=0.4, zorder=6)
-    deterring_queued_scatter = ax.scatter([], [], s=58, facecolors="none", edgecolors="#d62728", marker="o", linewidths=1.1, zorder=5.5)
-    patrol_active_scatter = ax.scatter([], [], s=72, c="#1f77b4", marker="D", edgecolors="black", linewidths=0.3, zorder=6)
-    patrol_queued_scatter = ax.scatter([], [], s=60, facecolors="none", edgecolors="#1f77b4", marker="D", linewidths=1.0, zorder=5.5)
-    active_line_collection = LineCollection([], colors="#444444", linewidths=1.2, alpha=float(display_cfg["task_line_alpha"]), zorder=3)
-    queued_line_collection = LineCollection([], colors="#777777", linewidths=1.0, alpha=float(display_cfg["queued_task_line_alpha"]), zorder=2.8)
+    truth_scatter = ax.scatter([], [], s=44, c="#2ca02c", marker="x", zorder=4)
+    detection_scatter = ax.scatter([], [], s=44, c="#ff7f0e", marker="x", zorder=5)
+    deterring_active_scatter = ax.scatter([], [], s=84, c="#d62728", marker="o", edgecolors="black", linewidths=0.4, zorder=6)
+    deterring_queued_scatter = ax.scatter([], [], s=70, facecolors="none", edgecolors="#d62728", marker="o", linewidths=1.2, zorder=5.5)
+    patrol_active_scatter = ax.scatter([], [], s=84, c="#1f77b4", marker="D", edgecolors="black", linewidths=0.3, zorder=6)
+    patrol_queued_scatter = ax.scatter([], [], s=72, facecolors="none", edgecolors="#1f77b4", marker="D", linewidths=1.1, zorder=5.5)
+    active_line_collection = LineCollection([], colors="#444444", linewidths=1.4, alpha=float(display_cfg["task_line_alpha"]), zorder=3)
+    queued_line_collection = LineCollection([], colors="#7b7b7b", linewidths=1.1, alpha=float(display_cfg["queued_task_line_alpha"]), zorder=2.8)
     queued_line_collection.set_linestyle("dashed")
     ax.add_collection(active_line_collection)
     ax.add_collection(queued_line_collection)
@@ -666,56 +1114,63 @@ def _create_map_artists(
     robot_patches: dict[str, Any] = {}
     robot_heading_lines: dict[str, Any] = {}
     robot_labels: dict[str, Any] = {}
-    robot_colors = plt.get_cmap("tab10")(np.linspace(0.0, 1.0, max(len(snapshot["poses"]), 1)))
-    for idx, robot_id in enumerate(sorted(snapshot["poses"].keys())):
+    display_length_m, display_width_m = _robot_display_dimensions(robot_cfg)
+    for robot_id in robot_ids:
         x, y = snapshot["poses"][robot_id]
-        robot_color = robot_colors[idx % len(robot_colors)]
+        robot_color = robot_colors[robot_id]
         body = MplPolygon(
             _vehicle_polygon(
                 float(x),
                 float(y),
                 0.0,
-                float(robot_cfg["husky_length_m"]),
-                float(robot_cfg["husky_width_m"]),
+                display_length_m,
+                display_width_m,
             ),
             closed=True,
             fill=True,
             edgecolor="black",
             facecolor=robot_color,
-            linewidth=0.7,
+            linewidth=1.2,
             alpha=float(robot_cfg["body_alpha"]),
             zorder=7,
         )
         ax.add_patch(body)
         robot_patches[robot_id] = body
-        (heading_line,) = ax.plot([], [], color="black", linewidth=0.9, zorder=7.1)
+        (heading_line,) = ax.plot([], [], color="black", linewidth=1.2, zorder=7.1)
         robot_heading_lines[robot_id] = heading_line
         label = ax.text(
-            float(x) + float(robot_cfg["label_offset_m"]),
-            float(y) + float(robot_cfg["label_offset_m"]),
+            float(x),
+            float(y),
             str(robot_id),
             fontsize=int(display_cfg["label_fontsize"]),
-            color="black",
+            color="#111111",
+            ha="center",
+            va="bottom",
+            clip_on=False,
             zorder=8,
-            bbox={"boxstyle": "round,pad=0.18", "fc": "white", "ec": "none", "alpha": 0.8},
+            bbox={"boxstyle": "round,pad=0.24", "fc": "white", "ec": robot_color, "alpha": 0.96},
         )
         robot_labels[robot_id] = label
 
-    info_text = ax.text(
-        0.02,
-        0.98,
+    status_ax.set_facecolor("#fbfaf7")
+    status_ax.set_axis_off()
+    status_ax.axhline(0.98, color="#d7d3cb", linewidth=0.8, xmin=0.0, xmax=1.0)
+    info_text = status_ax.text(
+        0.00,
+        0.82,
         "",
-        transform=ax.transAxes,
+        transform=status_ax.transAxes,
         va="top",
         ha="left",
-        fontsize=9,
+        fontsize=int(display_cfg.get("status_fontsize", 8)),
         family="monospace",
-        bbox={"boxstyle": "round,pad=0.30", "fc": "white", "ec": "#cccccc", "alpha": 0.90},
+        color="#1f1f1f",
         zorder=9,
     )
 
     return MapArtists(
         axis=ax,
+        status_axis=status_ax,
         boundary_line=boundary_line,
         row_patches=row_patches,
         row_lines=row_lines,
@@ -731,17 +1186,25 @@ def _create_map_artists(
         robot_patches=robot_patches,
         robot_heading_lines=robot_heading_lines,
         robot_labels=robot_labels,
+        robot_colors=robot_colors,
         info_text=info_text,
     )
 
 
-def _update_map(run: SystemRun, config: dict[str, Any]) -> None:
+def _update_map(run: SystemRun, config: dict[str, Any], view_state: MapViewState, interpolation_alpha: float = 1.0) -> None:
     assert run.map_artists is not None
     artists = run.map_artists
-    snapshot = run.snapshot
+    snapshot = _interpolated_snapshot(run, interpolation_alpha, config)
     display_cfg = config["display"]
     robot_cfg = config["robot_rendering"]
     buckets = _task_buckets(snapshot, goal_match_radius_m=float(display_cfg["goal_match_radius_m"]))
+    display_length_m, display_width_m = _robot_display_dimensions(robot_cfg)
+    x_min = float(view_state.center_x) - 0.5 * float(view_state.width)
+    x_max = float(view_state.center_x) + 0.5 * float(view_state.width)
+    y_min = float(view_state.center_y) - 0.5 * float(view_state.height)
+    y_max = float(view_state.center_y) + 0.5 * float(view_state.height)
+    artists.axis.set_xlim(x_min, x_max)
+    artists.axis.set_ylim(y_min, y_max)
 
     for patch, cell in zip(artists.zone_patches, snapshot["cells"]):
         if patch is not None and cell:
@@ -760,28 +1223,38 @@ def _update_map(run: SystemRun, config: dict[str, Any]) -> None:
 
     for robot_id, pose in snapshot.get("poses", {}).items():
         x, y = float(pose[0]), float(pose[1])
-        heading = _current_heading(snapshot, run.previous_poses, robot_id)
+        heading = _current_heading(
+            snapshot,
+            run.previous_poses,
+            robot_id,
+            fallback_heading=float(run.display_headings.get(robot_id, 0.0)),
+        )
+        run.display_headings[robot_id] = float(heading)
+        in_view = (
+            (x >= (x_min - display_length_m))
+            and (x <= (x_max + display_length_m))
+            and (y >= (y_min - display_width_m))
+            and (y <= (y_max + display_width_m))
+        )
         artists.robot_patches[robot_id].set_xy(
             _vehicle_polygon(
                 x,
                 y,
                 heading,
-                float(robot_cfg["husky_length_m"]),
-                float(robot_cfg["husky_width_m"]),
+                display_length_m,
+                display_width_m,
             )
         )
-        heading_len = 0.5 * float(robot_cfg["husky_length_m"]) + float(robot_cfg["heading_line_m"])
+        artists.robot_patches[robot_id].set_visible(in_view)
+        heading_len = 0.5 * display_length_m + float(robot_cfg["heading_line_m"])
         artists.robot_heading_lines[robot_id].set_data(
             [x, x + heading_len * math.cos(heading)],
             [y, y + heading_len * math.sin(heading)],
         )
-        artists.robot_labels[robot_id].set_position(
-            (
-                x + float(robot_cfg["label_offset_m"]),
-                y + float(robot_cfg["label_offset_m"]),
-            )
-        )
+        artists.robot_heading_lines[robot_id].set_visible(in_view)
         artists.robot_labels[robot_id].set_text(str(robot_id))
+
+    _place_robot_labels(artists, snapshot, robot_cfg, view_state)
 
     metrics = snapshot.get("metrics", {}) or {}
     robot_states = snapshot.get("robot_states", {}) or {}
@@ -789,17 +1262,17 @@ def _update_map(run: SystemRun, config: dict[str, Any]) -> None:
     holding_count = sum(1 for state in robot_states.values() if state == "holding")
     idle_count = sum(1 for state in robot_states.values() if state == "idle")
     completed_by_type = metrics.get("completed_tasks_by_type", {}) or {}
+    visible_rows = _visible_row_range(y_min, y_max, snapshot, config)
+    row_text = "--" if visible_rows is None else f"{visible_rows[0]}-{visible_rows[1]}"
     info_lines = [
-        f"t       {_fmt_hms(snapshot.get('t', 0.0))}",
-        f"m/h/i   {moving_count}/{holding_count}/{idle_count}",
-        f"cur D/P {len(buckets['current_deterring'])}/{len(buckets['current_patrol'])}",
-        f"qed D/P {len(buckets['queued_deterring'])}/{len(buckets['queued_patrol'])}",
-        f"done    {int(_safe_float(metrics.get('completed_tasks_total', 0.0))):d}",
-        f"done D  {int(_safe_float(completed_by_type.get('deterring', 0.0))):d}",
-        f"exp     {_fmt_metric(metrics.get('value_weighted_exposure'), '{:.1f}')}",
-        f"resp    {_fmt_metric(metrics.get('mean_response_time_s'), '{:.1f}')}",
-        f"birds%  {_fmt_metric(metrics.get('birds_deterred_pct_last_hour'), '{:.1f}')}",
-        f"msgs    {int(_safe_float(metrics.get('boundary_message_count', 0.0))):d}",
+        f"Time {_fmt_hms(snapshot.get('t', 0.0))} | Rows {row_text} | M/H/I {moving_count}/{holding_count}/{idle_count}",
+        (
+            f"Cur D/P {len(buckets['current_deterring'])}/{len(buckets['current_patrol'])} | "
+            f"Q D/P {len(buckets['queued_deterring'])}/{len(buckets['queued_patrol'])} | "
+            f"Done {int(_safe_float(metrics.get('completed_tasks_total', 0.0))):d} | "
+            f"Exp {_fmt_metric(metrics.get('value_weighted_exposure'), '{:.1f}')} | "
+            f"Resp {_fmt_metric(metrics.get('mean_response_time_s'), '{:.1f}')}"
+        ),
     ]
     artists.info_text.set_text("\n".join(info_lines))
 
@@ -814,6 +1287,7 @@ def _record_history(run: SystemRun, metric_specs: list[MetricSpec]) -> None:
 def _advance_runs(runs: list[SystemRun], metric_specs: list[MetricSpec], steps_per_frame: int) -> bool:
     for _ in range(max(int(steps_per_frame), 1)):
         for run in runs:
+            run.previous_t_s = float(run.snapshot.get("t", run.previous_t_s))
             run.previous_poses = {
                 str(robot_id): (float(px), float(py))
                 for robot_id, (px, py) in run.snapshot.get("poses", {}).items()
@@ -853,17 +1327,31 @@ def _stack_metric_label_positions(points: list[dict[str, Any]], y_min: float, y_
     return adjusted
 
 
-def _create_metric_axes(fig: Any, parent_spec: Any, metric_specs: list[MetricSpec], systems: list[SystemRun], duration_min: float) -> dict[str, MetricArtists]:
-    rows = int(math.ceil(len(metric_specs) / 2.0))
-    cols = min(2, len(metric_specs))
-    subgrid = parent_spec.subgridspec(rows, cols, hspace=0.35, wspace=0.22)
+def _create_metric_axes(
+    fig: Any,
+    parent_spec: Any,
+    metric_specs: list[MetricSpec],
+    systems: list[SystemRun],
+    duration_min: float,
+    config: dict[str, Any],
+) -> dict[str, MetricArtists]:
+    display_cfg = config["display"]
+    cols = min(max(1, int(display_cfg.get("metric_columns", len(metric_specs)))), len(metric_specs))
+    rows = int(math.ceil(len(metric_specs) / float(cols)))
+    subgrid = parent_spec.subgridspec(rows, cols, hspace=(0.62 if rows > 1 else 0.0), wspace=0.28)
     artists: dict[str, MetricArtists] = {}
     for idx, metric in enumerate(metric_specs):
         ax = fig.add_subplot(subgrid[idx // cols, idx % cols])
-        ax.set_title(f"{metric.label} ({metric.goal} better)", fontsize=10)
+        ax.set_title(
+            f"{metric.label}\n({metric.goal} better)",
+            fontsize=int(display_cfg.get("metric_title_fontsize", 9)),
+            pad=8,
+        )
         ax.set_xlim(0.0, max(duration_min * 1.12, 1.0))
-        ax.set_xlabel("Sim Time (min)")
+        ax.set_xlabel("Sim Time (min)" if (idx // cols) == (rows - 1) else "")
         ax.grid(alpha=0.25)
+        ax.tick_params(axis="both", labelsize=int(display_cfg.get("metric_tick_fontsize", 8)))
+        ax.set_facecolor("#fbfbfb")
         line_map: dict[str, Any] = {}
         marker_map: dict[str, Any] = {}
         label_map: dict[str, Any] = {}
@@ -902,13 +1390,23 @@ def _create_metric_axes(fig: Any, parent_spec: Any, metric_specs: list[MetricSpe
                 zorder=5.0,
                 bbox={"boxstyle": "round,pad=0.18", "fc": "white", "ec": "none", "alpha": 0.75},
             )
-        if idx == 0:
-            ax.legend(loc="best", fontsize=8)
         artists[metric.key] = MetricArtists(axis=ax, lines=line_map, markers=marker_map, labels=label_map)
     return artists
 
 
-def _update_metric_axes(metric_axes: dict[str, MetricArtists], systems: list[SystemRun], metric_specs: list[MetricSpec], duration_min: float) -> None:
+def _update_metric_axes(
+    metric_axes: dict[str, MetricArtists],
+    systems: list[SystemRun],
+    metric_specs: list[MetricSpec],
+    duration_min: float,
+) -> None:
+    max_history_t_min = max(
+        (max(run.history_t_min) if run.history_t_min else 0.0)
+        for run in systems
+    ) if systems else 0.0
+    visible_duration_min = max(float(duration_min), float(max_history_t_min), 1.0)
+    axis_x_max = max(visible_duration_min * 1.12, 1.0)
+    label_x = visible_duration_min * 1.015
     for metric in metric_specs:
         metric_artist = metric_axes[metric.key]
         ax = metric_artist.axis
@@ -936,12 +1434,11 @@ def _update_metric_axes(metric_axes: dict[str, MetricArtists], systems: list[Sys
             else:
                 metric_artist.markers[run.spec.key].set_data([], [])
                 metric_artist.labels[run.spec.key].set_text("")
-        ax.set_xlim(0.0, max(duration_min * 1.12, 1.0))
+        ax.set_xlim(0.0, axis_x_max)
         ax.relim()
         ax.autoscale_view(scalex=False, scaley=True)
         y_min, y_max = ax.get_ylim()
         label_positions = _stack_metric_label_positions(last_points, y_min=y_min, y_max=y_max)
-        label_x = max(duration_min, 1.0) * 1.015
         for run in systems:
             label_artist = metric_artist.labels[run.spec.key]
             match = next((item for item in last_points if item["key"] == run.spec.key), None)
@@ -952,16 +1449,35 @@ def _update_metric_axes(metric_axes: dict[str, MetricArtists], systems: list[Sys
             label_artist.set_text(f"{run.spec.short_label} {match['y']:.1f}")
 
 
-def _legend_handles() -> list[Any]:
+def _map_legend_handles() -> list[Any]:
     return [
-        Line2D([], [], color="black", linewidth=1.2, label="Current task link"),
-        Line2D([], [], color="#777777", linewidth=1.0, linestyle="dashed", label="Queued task link"),
-        Line2D([], [], marker="o", color="w", markerfacecolor="#d62728", markeredgecolor="black", markersize=8, label="Deterring current"),
-        Line2D([], [], marker="o", color="w", markerfacecolor="none", markeredgecolor="#d62728", markersize=8, label="Deterring queued"),
-        Line2D([], [], marker="D", color="w", markerfacecolor="#1f77b4", markeredgecolor="black", markersize=8, label="Patrol current"),
-        Line2D([], [], marker="D", color="w", markerfacecolor="none", markeredgecolor="#1f77b4", markersize=8, label="Patrol queued"),
+        Line2D([], [], color="black", linewidth=1.4, label="Current task"),
+        Line2D([], [], color="#7b7b7b", linewidth=1.1, linestyle="dashed", label="Queued task"),
+        Line2D([], [], marker="o", color="w", markerfacecolor="#d62728", markeredgecolor="black", markersize=8, label="Deterring"),
+        Line2D([], [], marker="o", color="w", markerfacecolor="none", markeredgecolor="#d62728", markersize=8, label="Queued deterrence"),
+        Line2D([], [], marker="D", color="w", markerfacecolor="#1f77b4", markeredgecolor="black", markersize=8, label="Patrol"),
+        Line2D([], [], marker="D", color="w", markerfacecolor="none", markeredgecolor="#1f77b4", markersize=8, label="Queued patrol"),
         Line2D([], [], marker="x", color="#2ca02c", linestyle="none", markersize=8, label="Truth"),
         Line2D([], [], marker="x", color="#ff7f0e", linestyle="none", markersize=8, label="Detection"),
+    ]
+
+
+def _system_legend_handles(runs: list[SystemRun]) -> list[Any]:
+    return [
+        Line2D(
+            [],
+            [],
+            color=run.spec.color,
+            linewidth=2.2,
+            linestyle=run.spec.line_style,
+            marker=run.spec.marker,
+            markersize=6.0,
+            markerfacecolor="white",
+            markeredgecolor=run.spec.color,
+            markeredgewidth=1.2,
+            label=run.spec.title,
+        )
+        for run in runs
     ]
 
 
@@ -973,10 +1489,47 @@ def _build_runs(config: dict[str, Any], metric_specs: list[MetricSpec]) -> list[
     for spec in _resolve_system_specs(config):
         frames = ds.run_simulation_frames_persistent(**spec.sim_kwargs)
         first_snapshot = next(frames)
-        run = SystemRun(spec=spec, frames=frames, snapshot=first_snapshot)
+        initial_poses = {
+            str(robot_id): (float(px), float(py))
+            for robot_id, (px, py) in first_snapshot.get("poses", {}).items()
+        }
+        run = SystemRun(
+            spec=spec,
+            frames=frames,
+            snapshot=first_snapshot,
+            previous_poses=dict(initial_poses),
+            previous_t_s=float(first_snapshot.get("t", 0.0)),
+        )
+        for robot_id in initial_poses:
+            run.display_headings[robot_id] = _current_heading(first_snapshot, initial_poses, robot_id, 0.0)
         _record_history(run, metric_specs)
         runs.append(run)
     return runs
+
+
+def _make_playback_controls(fig: Any) -> PlaybackControls:
+    controls = PlaybackControls()
+    button_ax = fig.add_axes([0.905, 0.845, 0.08, 0.04])
+    button = Button(button_ax, "Pause", color="#f4f4f4", hovercolor="#e6e6e6")
+    button.label.set_fontsize(9)
+
+    def _set_paused(paused: bool) -> None:
+        controls.paused = bool(paused)
+        button.label.set_text("Resume" if controls.paused else "Pause")
+        fig.canvas.draw_idle()
+
+    def _toggle(_event: Any) -> None:
+        _set_paused(not controls.paused)
+
+    def _on_key_press(event: Any) -> None:
+        if getattr(event, "key", None) in {" ", "space"}:
+            _toggle(event)
+
+    button.on_clicked(_toggle)
+    fig.canvas.mpl_connect("key_press_event", _on_key_press)
+    controls.button = button
+    fig._demo_playback_controls = controls
+    return controls
 
 
 def _make_figure(config: dict[str, Any], runs: list[SystemRun], metric_specs: list[MetricSpec]) -> tuple[Any, dict[str, MetricArtists]]:
@@ -987,33 +1540,64 @@ def _make_figure(config: dict[str, Any], runs: list[SystemRun], metric_specs: li
     )
     gs = fig.add_gridspec(
         2,
-        6,
-        height_ratios=[2.55, 1.85],
-        left=0.04,
-        right=0.99,
-        top=0.91,
+        1,
+        height_ratios=[3.30, 1.25],
+        left=0.035,
+        right=0.995,
+        top=0.84,
         bottom=0.06,
-        hspace=0.28,
-        wspace=0.22,
+        hspace=0.34,
     )
-    fig.suptitle(str(display_cfg["title"]), fontsize=16, fontweight="bold")
+    fig.suptitle(str(display_cfg["title"]), fontsize=16, fontweight="bold", y=0.975)
 
+    map_grid = gs[0].subgridspec(
+        2,
+        3,
+        height_ratios=[12.0, 1.55],
+        hspace=0.05,
+        wspace=0.14,
+    )
     for idx, run in enumerate(runs):
-        ax = fig.add_subplot(gs[0, 2 * idx : 2 * (idx + 1)])
-        run.map_artists = _create_map_artists(ax, run.spec.title, run.spec.color, run.snapshot, config)
+        ax = fig.add_subplot(map_grid[0, idx])
+        status_ax = fig.add_subplot(map_grid[1, idx])
+        run.map_artists = _create_map_artists(ax, status_ax, run.spec.title, run.spec.color, run.snapshot, config)
+        if idx == 0:
+            ax.set_ylabel("Y (m)")
+        else:
+            ax.tick_params(axis="y", labelleft=False)
 
-    runs[0].map_artists.axis.legend(handles=_legend_handles(), loc="lower left", fontsize=7, frameon=True)
+    legend_handles = _system_legend_handles(runs) + _map_legend_handles()
+    fig.legend(
+        handles=legend_handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.935),
+        ncol=6,
+        fontsize=int(display_cfg.get("legend_fontsize", 8)),
+        frameon=True,
+        handlelength=2.4,
+        columnspacing=1.2,
+        handletextpad=0.6,
+    )
 
     duration_min = float(config["scenario"]["duration_s"]) / 60.0
-    metric_axes = _create_metric_axes(fig, gs[1, :], metric_specs, runs, duration_min)
+    metric_axes = _create_metric_axes(fig, gs[1], metric_specs, runs, duration_min, config)
     return fig, metric_axes
 
 
-def _render_once(runs: list[SystemRun], config: dict[str, Any], metric_axes: dict[str, MetricArtists], metric_specs: list[MetricSpec]) -> None:
+def _render_once(
+    runs: list[SystemRun],
+    config: dict[str, Any],
+    metric_axes: dict[str, MetricArtists],
+    metric_specs: list[MetricSpec],
+    map_view_state: MapViewState | None,
+    interpolation_alpha: float = 1.0,
+) -> MapViewState:
     duration_min = float(config["scenario"]["duration_s"]) / 60.0
+    map_view_state = _update_shared_map_view_state(map_view_state, runs, config)
     for run in runs:
-        _update_map(run, config)
+        _update_map(run, config, map_view_state, interpolation_alpha=interpolation_alpha)
     _update_metric_axes(metric_axes, runs, metric_specs, duration_min)
+    return map_view_state
 
 
 def run_demo(
@@ -1024,14 +1608,24 @@ def run_demo(
     save_figure: Path | None = None,
 ) -> None:
     metric_specs = _metric_specs(config)
-    runs = _build_runs(config, metric_specs)
+    continuous_run = (not no_show) and max_frames is None and save_figure is None
+    run_config = deepcopy(config)
+    if continuous_run:
+        run_config.setdefault("scenario", {})
+        run_config["scenario"]["duration_s"] = float("inf")
+    runs = _build_runs(run_config, metric_specs)
     fig, metric_axes = _make_figure(config, runs, metric_specs)
 
     steps_per_frame = int(config["display"]["steps_per_frame"])
     fps = max(1, int(config["display"]["fps"]))
     frame_interval_s = 1.0 / float(fps)
+    live_tracking_fps = max(float(fps), float(config["display"].get("live_tracking_fps", fps)))
+    interpolation_subframes = 1 if no_show else max(1, int(math.ceil(live_tracking_fps / float(fps))))
+    subframe_interval_s = frame_interval_s / float(interpolation_subframes)
+    map_view_state: MapViewState | None = None
+    playback_controls = _make_playback_controls(fig) if continuous_run else None
 
-    _render_once(runs, config, metric_axes, metric_specs)
+    map_view_state = _render_once(runs, config, metric_axes, metric_specs, map_view_state, interpolation_alpha=1.0)
     if not no_show:
         plt.ion()
         fig.show()
@@ -1044,15 +1638,45 @@ def run_demo(
             break
         if not no_show and not plt.fignum_exists(fig.number):
             break
+        if playback_controls is not None and playback_controls.paused:
+            fig.canvas.draw_idle()
+            fig.canvas.flush_events()
+            plt.pause(frame_interval_s)
+            continue
         if not _advance_runs(runs, metric_specs, steps_per_frame):
             break
-        _render_once(runs, config, metric_axes, metric_specs)
         rendered_frames += 1
         if no_show:
+            map_view_state = _render_once(runs, config, metric_axes, metric_specs, map_view_state, interpolation_alpha=1.0)
             continue
-        fig.canvas.draw_idle()
-        fig.canvas.flush_events()
-        plt.pause(frame_interval_s)
+        window_closed = False
+        for subframe_idx in range(interpolation_subframes):
+            if not plt.fignum_exists(fig.number):
+                window_closed = True
+                break
+            while playback_controls is not None and playback_controls.paused:
+                if not plt.fignum_exists(fig.number):
+                    window_closed = True
+                    break
+                fig.canvas.draw_idle()
+                fig.canvas.flush_events()
+                plt.pause(frame_interval_s)
+            if window_closed:
+                break
+            alpha = float(subframe_idx + 1) / float(interpolation_subframes)
+            map_view_state = _render_once(
+                runs,
+                config,
+                metric_axes,
+                metric_specs,
+                map_view_state,
+                interpolation_alpha=alpha,
+            )
+            fig.canvas.draw_idle()
+            fig.canvas.flush_events()
+            plt.pause(subframe_interval_s)
+        if window_closed:
+            break
 
     if save_figure is not None:
         save_figure.parent.mkdir(parents=True, exist_ok=True)
@@ -1080,7 +1704,7 @@ def parse_args() -> argparse.Namespace:
         "--max-frames",
         type=int,
         default=None,
-        help="Optional limit for rendered frames. Useful for smoke tests.",
+        help="Optional limit for rendered frames. Useful for smoke tests; interactive runs continue until the window is closed when omitted.",
     )
     parser.add_argument(
         "--save-figure",
@@ -1093,9 +1717,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    config_path = Path(args.config).expanduser().resolve()
+    config_path = resolve_repo_path(args.config)
     config = load_config(config_path)
-    save_figure = Path(args.save_figure).expanduser().resolve() if str(args.save_figure).strip() else None
+    save_figure = resolve_repo_path(args.save_figure) if str(args.save_figure).strip() else None
     run_demo(
         config,
         no_show=bool(args.no_show),

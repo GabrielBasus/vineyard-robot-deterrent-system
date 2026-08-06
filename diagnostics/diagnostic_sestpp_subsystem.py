@@ -64,6 +64,30 @@ class SubsystemConfig:
     model_alpha_inhib: float = 0.45
     model_mu_base: float = 5.0e-5
     model_bg_ema: float = 1.0e-6
+    model_feedback_sigma_scale: float = 1.0
+    model_feedback_omega_scale: float = 1.0
+
+    # Optional model-specific overrides used by joint calibration.
+    prediction_only_model_sigma: float | None = None
+    prediction_only_model_omega: float | None = None
+    prediction_only_model_omega_inhib: float | None = None
+    prediction_only_model_alpha_in: float | None = None
+    prediction_only_model_alpha_cross: float | None = None
+    prediction_only_model_alpha_inhib: float | None = None
+    prediction_only_model_mu_base: float | None = None
+    prediction_only_model_bg_ema: float | None = None
+    prediction_only_model_feedback_sigma_scale: float | None = None
+    prediction_only_model_feedback_omega_scale: float | None = None
+    proposed_model_sigma: float | None = None
+    proposed_model_omega: float | None = None
+    proposed_model_omega_inhib: float | None = None
+    proposed_model_alpha_in: float | None = None
+    proposed_model_alpha_cross: float | None = None
+    proposed_model_alpha_inhib: float | None = None
+    proposed_model_mu_base: float | None = None
+    proposed_model_bg_ema: float | None = None
+    proposed_model_feedback_sigma_scale: float | None = None
+    proposed_model_feedback_omega_scale: float | None = None
 
     # Multi-run
     runs: int = 8
@@ -169,7 +193,38 @@ def _forecast_metrics_for_snapshot(t_eval, hotspots, truth_times, truth_xy, cfg:
     }
 
 
-def _build_model(cfg: SubsystemConfig):
+def _resolve_model_params(cfg: SubsystemConfig, mode: str) -> dict[str, float]:
+    prefix = f"{str(mode).strip().lower()}_"
+    sigma = getattr(cfg, f"{prefix}model_sigma", None)
+    omega = getattr(cfg, f"{prefix}model_omega", None)
+    omega_inhib = getattr(cfg, f"{prefix}model_omega_inhib", None)
+    alpha_in = getattr(cfg, f"{prefix}model_alpha_in", None)
+    alpha_cross = getattr(cfg, f"{prefix}model_alpha_cross", None)
+    alpha_inhib = getattr(cfg, f"{prefix}model_alpha_inhib", None)
+    mu_base = getattr(cfg, f"{prefix}model_mu_base", None)
+    bg_ema = getattr(cfg, f"{prefix}model_bg_ema", None)
+    feedback_sigma_scale = getattr(cfg, f"{prefix}model_feedback_sigma_scale", None)
+    feedback_omega_scale = getattr(cfg, f"{prefix}model_feedback_omega_scale", None)
+    return {
+        "sigma": float(cfg.model_sigma if sigma is None else sigma),
+        "omega": float(cfg.model_omega if omega is None else omega),
+        "omega_inhib": float(cfg.model_omega_inhib if omega_inhib is None else omega_inhib),
+        "alpha_in": float(cfg.model_alpha_in if alpha_in is None else alpha_in),
+        "alpha_cross": float(cfg.model_alpha_cross if alpha_cross is None else alpha_cross),
+        "alpha_inhib": float(cfg.model_alpha_inhib if alpha_inhib is None else alpha_inhib),
+        "mu_base": float(cfg.model_mu_base if mu_base is None else mu_base),
+        "bg_ema": float(cfg.model_bg_ema if bg_ema is None else bg_ema),
+        "model_feedback_sigma_scale": float(
+            cfg.model_feedback_sigma_scale if feedback_sigma_scale is None else feedback_sigma_scale
+        ),
+        "model_feedback_omega_scale": float(
+            cfg.model_feedback_omega_scale if feedback_omega_scale is None else feedback_omega_scale
+        ),
+    }
+
+
+def _build_model(cfg: SubsystemConfig, mode: str = "prediction_only"):
+    model_params = _resolve_model_params(cfg, mode)
     return OnlineSESTPP(
         x_min=0.0,
         x_max=cfg.W,
@@ -177,21 +232,30 @@ def _build_model(cfg: SubsystemConfig):
         y_max=cfg.H,
         nx=cfg.NX,
         ny=cfg.NY,
-        sigma=cfg.model_sigma,
-        omega=cfg.model_omega,
-        omega_inhib=cfg.model_omega_inhib,
-        alpha_in=cfg.model_alpha_in,
-        alpha_cross=cfg.model_alpha_cross,
-        alpha_inhib=cfg.model_alpha_inhib,
-        mu_base=cfg.model_mu_base,
-        bg_ema=cfg.model_bg_ema,
+        sigma=model_params["sigma"],
+        omega=model_params["omega"],
+        omega_inhib=model_params["omega_inhib"],
+        alpha_in=model_params["alpha_in"],
+        alpha_cross=model_params["alpha_cross"],
+        alpha_inhib=model_params["alpha_inhib"],
+        mu_base=model_params["mu_base"],
+        bg_ema=model_params["bg_ema"],
     )
+
+
+def _model_intervention_replay_params(cfg: SubsystemConfig, mode: str = "proposed") -> dict[str, float]:
+    model_params = _resolve_model_params(cfg, mode)
+    return {
+        "weight": float(cfg.beta_true),
+        "sigma": max(float(cfg.intervention_sigma) * float(model_params["model_feedback_sigma_scale"]), 1e-9),
+        "omega_inhib": max(float(cfg.intervention_omega) * float(model_params["model_feedback_omega_scale"]), 1e-9),
+    }
 
 
 def simulate_one_run(run_idx: int, seed: int, cfg: SubsystemConfig):
     rng = np.random.default_rng(seed)
-    pred = _build_model(cfg)
-    prop = _build_model(cfg)
+    pred = _build_model(cfg, mode="prediction_only")
+    prop = _build_model(cfg, mode="proposed")
     models = {"prediction_only": pred, "proposed": prop}
 
     xs, ys, cdf, dx_cell, dy_cell = _make_value_sampler(cfg)
@@ -248,12 +312,13 @@ def simulate_one_run(run_idx: int, seed: int, cfg: SubsystemConfig):
         # Activate due model interventions (affect proposed model only).
         while model_intervention_queue and model_intervention_queue[0][0] <= t_abs + 1e-9:
             ti, xi, yi = heapq.heappop(model_intervention_queue)
+            replay = _model_intervention_replay_params(cfg, mode="proposed")
             prop.add_intervention_event(
                 xi,
                 yi,
-                weight=1.0,
-                sigma=cfg.intervention_sigma,
-                omega_inhib=cfg.intervention_omega,
+                weight=replay["weight"],
+                sigma=replay["sigma"],
+                omega_inhib=replay["omega_inhib"],
             )
             if ti >= cfg.warmup_s:
                 intervention_events_rel.append((float(xi), float(yi), float(ti - cfg.warmup_s)))
@@ -665,10 +730,16 @@ def main():
     parser.add_argument("--intervention-shuffle", choices=["none", "space", "time", "spacetime"], default="none")
     parser.add_argument("--shuffle-time-window-s", type=float, default=300.0)
     parser.add_argument("--beta-true", type=float, default=0.30)
+    parser.add_argument("--model-sigma", type=float, default=SubsystemConfig.model_sigma)
+    parser.add_argument("--model-omega", type=float, default=SubsystemConfig.model_omega)
     parser.add_argument("--model-omega-inhib", type=float, default=SubsystemConfig.model_omega_inhib)
+    parser.add_argument("--model-alpha-in", type=float, default=SubsystemConfig.model_alpha_in)
+    parser.add_argument("--model-alpha-cross", type=float, default=SubsystemConfig.model_alpha_cross)
     parser.add_argument("--model-alpha-inhib", type=float, default=SubsystemConfig.model_alpha_inhib)
     parser.add_argument("--model-mu-base", type=float, default=SubsystemConfig.model_mu_base)
     parser.add_argument("--model-bg-ema", type=float, default=SubsystemConfig.model_bg_ema)
+    parser.add_argument("--model-feedback-sigma-scale", type=float, default=SubsystemConfig.model_feedback_sigma_scale)
+    parser.add_argument("--model-feedback-omega-scale", type=float, default=SubsystemConfig.model_feedback_omega_scale)
     args = parser.parse_args()
 
     cfg = SubsystemConfig(
@@ -683,10 +754,16 @@ def main():
         intervention_shuffle=str(args.intervention_shuffle),
         shuffle_time_window_s=float(args.shuffle_time_window_s),
         beta_true=float(args.beta_true),
+        model_sigma=float(args.model_sigma),
+        model_omega=float(args.model_omega),
         model_omega_inhib=float(args.model_omega_inhib),
+        model_alpha_in=float(args.model_alpha_in),
+        model_alpha_cross=float(args.model_alpha_cross),
         model_alpha_inhib=float(args.model_alpha_inhib),
         model_mu_base=float(args.model_mu_base),
         model_bg_ema=float(args.model_bg_ema),
+        model_feedback_sigma_scale=float(args.model_feedback_sigma_scale),
+        model_feedback_omega_scale=float(args.model_feedback_omega_scale),
     )
 
     outdir = Path(args.outdir)
