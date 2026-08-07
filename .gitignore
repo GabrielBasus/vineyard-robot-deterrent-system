@@ -1,22 +1,36 @@
 # Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
 
-# Telemetry output folders
-telemetry*
+# Local virtual environments
+.venv/
 
+# Generated telemetry and run outputs
+telemetry/
+telemetry_live/
+telemetry_*/
+results/
+testbench/generated/
+testbench/results/
+
+# Local archives and scratch material
 Backup/
 Spatio-Temporal-Point-Process-Simulator/
 etc/archive_outputs/
 etc/external/
 etc/tmp/
 
-# Data/outputs
+# Generated files
 *.csv
 *.log
 *.tmp
+*.zip
+.DS_Store
 
 # IDE files
 .vscode/
-.idea/# Local virtual environment
-.venv/
+.idea/
+
+# Local cleanup holding area
+cleanup_archive/
