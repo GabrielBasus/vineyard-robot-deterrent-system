@@ -15,6 +15,7 @@ from experiments.run_habituation_stl_production_ladder import (  # noqa: E402
     _habituation_delta_rows,
     _summarize,
     _write_csv,
+    _write_markdown_summary,
 )
 
 
@@ -45,6 +46,7 @@ def main() -> int:
     _write_csv(_summarize(rows), outdir / "summary_by_system.csv")
     _write_csv(_advantage_rows(rows), outdir / "advantage_vs_reference.csv")
     _write_csv(_habituation_delta_rows(rows), outdir / "habituation_on_vs_off.csv")
+    _write_markdown_summary(rows, outdir)
     print(f"[summarize] rows={len(rows)} outdir={outdir}")
     return 0
 

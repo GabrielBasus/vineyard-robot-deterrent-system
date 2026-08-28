@@ -59,6 +59,7 @@ Primary documentation:
 
 Primary result locations:
 
-- `results/testbench/habituation_stl_b0_b4_900s_10seed_v5/`
-- `results/testbench/habituation_stl_b3_b4_900s_10seed_v5/`
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/`
+- `results/testbench/habituation_stl_revised_calibration_1800s_3seed/`
+- `results/testbench/habituation_stl_revised_confirm_with_b2_1800s_10seed/`
+- B1/B3/B4-only confirmatory run: `results/testbench/habituation_stl_revised_confirm_1800s_10seed/`
+- Historical calibration: `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/`

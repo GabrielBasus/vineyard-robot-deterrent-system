@@ -6,7 +6,7 @@
 4. **Planner / assignment tuning** (`experiments/run_assignment_tuning_sweep_lab.py`): tune dispatch and gating only after field divergence is confirmed; reject solver failures and weak-gain/high-communication settings.
 5. **Assignment-method comparison** (`experiments/run_assignment_method_comparison_lab.py`, `plots/plot_assignment_method_comparison_lab.py`, optional): run only if solver choice still matters after the main tuning sweep.
 6. **Robot scaling / long-horizon confirmation** (`experiments/run_robot_scaling_experiment.py`): confirm exposure gains grow with robot count, response does not collapse, communication stays controlled, and model-scored deterring gain rises.
-7. **Habituation-aware STL addendum** (`experiments/run_habituation_stl_production_ladder.py`): run the B0-B4 ladder and B1/B3/B4 confirmatory batch when the thesis claim includes habituation-aware predictive value. Use paired habituation-on/off controls and summarize with `experiments/summarize_habituation_stl_ladder.py`.
+7. **Habituation-aware STL addendum** (`experiments/run_habituation_stl_production_ladder.py`): run the B0-B4 ladder and B1/B2/B3/B4 confirmatory batch when the thesis claim includes habituation-aware predictive value. Use paired habituation-on/off controls and summarize with `experiments/summarize_habituation_stl_ladder.py`.
 
 ## Habituation-Aware STL Addendum
 

@@ -428,22 +428,22 @@ $env:PYTHONPATH=(Resolve-Path .\habituation_stl).Path
 C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe habituation_stl\tests\test_spec_value.py
 ```
 
-Run the production B0-B4 ladder:
+Run the production B0-B4 revised ladder:
 
 ```powershell
-C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_b0_b4_900s_10seed_v5 --duration-s 900 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --max-workers 2
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_b0_b4_900s_10seed --duration-s 900 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --systems B0_reactive B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue --max-workers 2
 ```
 
-Run the confirmatory B1/B3/B4 batch:
+Run the revised confirmatory B1/B2/B3/B4 batch:
 
 ```powershell
-C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5 --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --systems B1_unc_legacy B3_res_stl_nohab B4_res_stl_full --max-workers 2
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue --max-workers 4
 ```
 
 Summarize ladder outputs:
 
 ```powershell
-C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --outdir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed
 ```
 
 Current thesis-facing STL documentation:
@@ -515,41 +515,44 @@ Most important plots to review:
 
 ### Habituation-Aware STL Testing
 
-The current STL proposal result comes from the production B1/B3/B4 confirmatory batch:
+The current STL proposal result uses the revised fixed-cue versus multi-cue production ladder. The current confirmatory run is:
 
-`results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5`
+`results/testbench/habituation_stl_revised_confirm_with_b2_1800s_10seed`
 
 Run shape:
 
 - duration: 1800 seconds
 - seeds: 125-134
-- systems: `B1_unc_legacy`, `B3_res_stl_nohab`, `B4_res_stl_full`
+- systems: `B1_greedy_fixedcue`, `B2_res_deltaJ_fixedcue`, `B3_res_stl_nohab_fixedcue`, `B4_res_stl_full_multicue`
 - controls: habituation on and habituation off
+- status: confirmatory
 
 Primary paired exposure results:
 
 | Comparison | Truth control | Mean paired delta in Jexp | 95% CI | Seeds improved |
 | --- | --- | ---: | ---: | ---: |
-| B4 - B1 | habituation on | -2298.52 | [-4184.21, -412.82] | 8/10 |
-| B4 - B3 | habituation on | -3288.10 | [-4112.47, -2463.73] | 10/10 |
+| B4 - B1 | habituation on | -3696.74 | [-5226.86, -2166.61] | 9/10 |
+| B4 - B3 | habituation on | -4277.35 | [-5791.31, -2763.40] | 10/10 |
+| B3 - B2 | habituation on | -689.90 | [-1537.63, +157.84] | 7/10 |
 | B4 - B3 | habituation off | 0.00 | [0.00, 0.00] | 0/10 |
 
 Mechanism check under habituating truth:
 
 | Metric | Mean paired delta B4 - B3 | 95% CI |
 | --- | ---: | ---: |
-| Truth suppression rate | +0.0630 | [+0.0467, +0.0793] |
-| Eta at apply | +0.1454 | [+0.0843, +0.2064] |
-| Variety index | +0.3072 | [+0.2390, +0.3755] |
+| Truth suppression rate | +0.0867 | [+0.0596, +0.1139] |
+| Truth suppression effect sum | +1901.7389 | [+1346.1216, +2457.3562] |
+| Eta at apply | +0.1559 | [+0.1012, +0.2106] |
+| Variety index | +0.3634 | [+0.2498, +0.4770] |
 
-Interpretation: B4 reduced value-weighted exposure relative to both the legacy unconstrained baseline and the STL-without-habituation baseline when truth habituated. When habituation was disabled, B4 collapsed to B3, which isolates the advantage to the habituation-aware STL clause.
+Interpretation: B4 reduced value-weighted exposure relative to both the greedy fixed-cue baseline and the STL-without-habituation fixed-cue baseline when truth habituated. When habituation was disabled, B4 collapsed exactly to B3, which isolates the advantage to the habituation-aware STL cue-variety clause. B3 also improved over B2 on mean exposure, but that comparison is directional because the confidence interval crosses zero.
 
 STL result artifacts:
 
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/THESIS_RESULTS_SUMMARY.md`
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/exposure_mean_ci_by_system.png`
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/hab_on_b4_paired_exposure_deltas.png`
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/hab_on_b4_b3_mechanism_deltas.png`
+- `results/testbench/habituation_stl_revised_confirm_with_b2_1800s_10seed/THESIS_RESULTS_SUMMARY.md`
+- `results/testbench/habituation_stl_revised_confirm_with_b2_1800s_10seed/CLAIMS_SUMMARY.md`
+- `results/testbench/habituation_stl_revised_confirm_with_b2_1800s_10seed/summary_by_system.csv`
+- `results/testbench/habituation_stl_revised_confirm_with_b2_1800s_10seed/advantage_vs_reference.csv`
 
 ### Key Plots
 

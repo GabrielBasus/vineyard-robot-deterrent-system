@@ -555,6 +555,7 @@ class TaskGenerator:
                              predictive_lead_time_risk_power: float | None = None,
                              predictive_timing_mode: str | None = None,
                              predictive_utility_mode: str = "legacy",
+                             predictive_fixed_deterring_mode: str | None = None,
                              stl_hab=None,
                              stl_spec_params=None,
                              stl_dynamics=None,
@@ -751,6 +752,19 @@ class TaskGenerator:
                     "laser":     {"beta": 0.45, "omega": 400.0, "sigma": 10.0, "w_eta": 1.5, "fixed_cost": 0.0},
                     "biosonic":  {"beta": 0.25, "omega": 600.0, "sigma": 20.0, "w_eta": 1.2, "fixed_cost": 0.0},
                 }
+            fixed_deterring_mode = str(predictive_fixed_deterring_mode or "").strip()
+            if fixed_deterring_mode.lower() in {"", "none", "auto", "best", "multi", "multicue"}:
+                fixed_deterring_mode = ""
+            if fixed_deterring_mode and fixed_deterring_mode not in deterring_modes:
+                raise ValueError(
+                    "predictive_fixed_deterring_mode must be empty/auto or one of "
+                    f"{list(deterring_modes.keys())!r}, got: {predictive_fixed_deterring_mode!r}"
+                )
+            candidate_deterring_modes = (
+                [fixed_deterring_mode]
+                if fixed_deterring_mode
+                else list(deterring_modes.keys())
+            )
 
             def _weight_at(x, y):
                 """Evaluate the optional spatial value weight at a candidate point."""
@@ -1299,7 +1313,7 @@ class TaskGenerator:
                     best_mode_predicted_deltaJ = None
                     best_mode_score = None
                     mode_variants: list[dict[str, Any]] = []
-                    for mode in deterring_modes.keys():
+                    for mode in candidate_deterring_modes:
                         mode_metrics = _deterrence_candidate_metrics(dx, dy, mode)
                         params = deterring_modes.get(mode, {})
                         mode_cost = float(mode_metrics["cost_eta"])
@@ -1415,6 +1429,7 @@ class TaskGenerator:
                             "predictive_action_variants": list(mode_variants),
                             "predictive_mode_variant_count": int(len(mode_variants)),
                             "predictive_generation_best_mode": best_mode,
+                            "predictive_fixed_deterring_mode": fixed_deterring_mode or None,
                         })
 
                 stale_cluster = [
@@ -1809,6 +1824,7 @@ class TaskGenerator:
             'predictive_action_variants': list(task.get('predictive_action_variants', []) or []),
             'predictive_mode_variant_count': int(task.get('predictive_mode_variant_count', 0)),
             'predictive_generation_best_mode': task.get('predictive_generation_best_mode'),
+            'predictive_fixed_deterring_mode': task.get('predictive_fixed_deterring_mode'),
             'predictive_dispatch_resolved_mode': task.get('predictive_dispatch_resolved_mode'),
             'predictive_dispatch_eta_basis': str(task.get('predictive_dispatch_eta_basis', "")),
         })
@@ -1845,6 +1861,7 @@ class TaskAssigner:
         self.load_by_robot: dict[str, int] = {}
         self.robot_poses: dict[str, tuple[float, float]] = {}
         self.travel_time_fn: Callable[[str, float, float], float] | None = None
+        self.disabled_robot_ids: set[str] = set()
 
     def set_load(self, load_by_robot: dict[str, int]):
         """Update the per-robot active task load used by assignment scoring."""
@@ -1861,6 +1878,10 @@ class TaskAssigner:
     def set_travel_time_fn(self, travel_time_fn: Callable[[str, float, float], float] | None):
         """Install an optional travel-time callback for assignment scoring."""
         self.travel_time_fn = travel_time_fn
+
+    def set_disabled_robot_ids(self, robot_ids):
+        """Exclude robots that are temporarily out of service from assignment."""
+        self.disabled_robot_ids = {str(rid) for rid in (robot_ids or [])}
 
     # ---------- public API ----------
     def assign_task(self, task: dict, eligible_ids: list[str] | None = None) -> dict | None:
@@ -1917,6 +1938,8 @@ class TaskAssigner:
     def _eligible(self, prof: RobotProfile, task: dict) -> bool:
         # battery thresholds by task type
         """Return whether a robot can serve a task under capability and timing constraints."""
+        if str(prof.id) in self.disabled_robot_ids:
+            return False
         action_kind = task_action_kind(task)
         min_batt = self.w["min_batt_deterring"] if action_kind == "deterring" else self.w["min_batt_patrolling"]
         if prof.battery < min_batt or prof.health < 0.15:

@@ -44,15 +44,15 @@
 ## Acceptance Summary
 | Failure mode | Status | Evidence | Acceptance test | Note |
 | --- | --- | --- | --- | --- |
-| `no_meaningful_field_divergence` | PASS | `suppressed_area_fraction_mean`=0.4640 | `suppressed_area_fraction_mean` >= 0.1000 | Mean suppressed-area fraction clears the minimum field-divergence floor. |
-| `filter_collapse` | PASS | `local_hotspots_score_filtered_overlap_mean`=0.2051 | `local_hotspots_score_filtered_overlap_mean` <= 0.8000 | Filtered local hotspots still differ enough across baselines. |
-| `spacing_collapse` | PASS | `local_hotspots_spaced_overlap_mean`=0.2051 | `local_hotspots_spaced_overlap_mean` <= 0.8000 | Spacing/thinning keeps the filtered hotspot difference visible. |
-| `raw_patrol_candidate_collapse` | PASS | `raw_patrol_candidate_overlap_mean`=0.1923 | `raw_patrol_candidate_overlap_mean` <= 0.8000 | Raw patrol candidates remain distinct when the field differs. |
-| `selected_patrol_collapse` | PASS | `selected_patrol_overlap_mean`=0.2843 | `selected_patrol_overlap_mean` <= 0.8000 | Selected patrol tasks still reflect the upstream field difference. |
-| `active_patrol_collapse` | PASS | `patrol_overlap_mean`=0.2666 | `patrol_overlap_mean` <= 0.8000 | The active patrol queue still differs across baselines. |
+| `no_meaningful_field_divergence` | FAIL | `suppressed_area_fraction_mean`=0.0799 | `suppressed_area_fraction_mean` >= 0.1000 | Mean suppressed-area fraction stays below the minimum field-divergence floor. |
+| `filter_collapse` | WARN | `local_hotspots_score_filtered_overlap_mean`=0.4996 | `local_hotspots_score_filtered_overlap_mean` <= 0.8000 | Upstream field divergence is below the acceptance floor, so this downstream collapse check is inconclusive. |
+| `spacing_collapse` | WARN | `local_hotspots_spaced_overlap_mean`=0.5073 | `local_hotspots_spaced_overlap_mean` <= 0.8000 | Upstream field divergence is below the acceptance floor, so this downstream collapse check is inconclusive. |
+| `raw_patrol_candidate_collapse` | WARN | `raw_patrol_candidate_overlap_mean`=0.5022 | `raw_patrol_candidate_overlap_mean` <= 0.8000 | Upstream field divergence is below the acceptance floor, so this downstream collapse check is inconclusive. |
+| `selected_patrol_collapse` | WARN | `selected_patrol_overlap_mean`=0.5842 | `selected_patrol_overlap_mean` <= 0.8000 | Upstream field divergence is below the acceptance floor, so this downstream collapse check is inconclusive. |
+| `active_patrol_collapse` | WARN | `patrol_overlap_mean`=0.4919 | `patrol_overlap_mean` <= 0.8000 | Upstream field divergence is below the acceptance floor, so this downstream collapse check is inconclusive. |
 
 ## Interpretation
-- Likely bottleneck: No dominant collapse is visible: the field difference survives through the active patrol queue.
+- Likely bottleneck: The proposed field is not separating enough from prediction-only before the local patrol pipeline.
 
 ## Acceptance Logic
 - `suppressed_area_fraction_mean >= 0.10` establishes that the proposed field differs enough to interpret downstream planner stages.

@@ -34,11 +34,11 @@
 ## Acceptance Summary
 | Failure mode | Status | Evidence | Acceptance test | Note |
 | --- | --- | --- | --- | --- |
-| `no_meaningful_field_divergence` | PASS | `suppressed_area_fraction_mean`=0.4777 (CI95 [0.4249, 0.5304]) | `suppressed_area_fraction_mean` >= 0.1000 | Mean suppressed-area fraction clears the minimum field-divergence floor. |
-| `filter_collapse` | PASS | `local_hotspots_score_filtered_overlap_mean`=0.1718 (CI95 [0.1164, 0.2272]) | `local_hotspots_score_filtered_overlap_mean` <= 0.8000 | Filtered local hotspots still differ enough across baselines. |
-| `raw_patrol_candidate_collapse` | PASS | `raw_patrol_candidate_overlap_mean`=0.1615 (CI95 [0.1122, 0.2109]) | `raw_patrol_candidate_overlap_mean` <= 0.8000 | Raw patrol candidates remain distinct when the field differs. |
-| `selected_patrol_collapse` | PASS | `selected_patrol_overlap_mean`=0.2915 (CI95 [0.2066, 0.3764]) | `selected_patrol_overlap_mean` <= 0.8000 | Selected patrol tasks still reflect the upstream field difference. |
-| `active_patrol_collapse` | PASS | `patrol_overlap_mean`=0.2297 (CI95 [0.1321, 0.3273]) | `patrol_overlap_mean` <= 0.8000 | The active patrol queue still differs across baselines. |
+| `no_meaningful_field_divergence` | WARN | `suppressed_area_fraction_mean`=0.1042 (CI95 [0.0740, 0.1344]) | `suppressed_area_fraction_mean` >= 0.1000 | CI95 straddles the acceptance threshold, so the aggregate result is borderline. |
+| `filter_collapse` | WARN | `local_hotspots_score_filtered_overlap_mean`=0.4542 (CI95 [0.3394, 0.5691]) | `local_hotspots_score_filtered_overlap_mean` <= 0.8000 | Aggregate field-divergence evidence is not yet robust enough to interpret this downstream stage. |
+| `raw_patrol_candidate_collapse` | WARN | `raw_patrol_candidate_overlap_mean`=0.4434 (CI95 [0.3453, 0.5414]) | `raw_patrol_candidate_overlap_mean` <= 0.8000 | Aggregate field-divergence evidence is not yet robust enough to interpret this downstream stage. |
+| `selected_patrol_collapse` | WARN | `selected_patrol_overlap_mean`=0.5365 (CI95 [0.4197, 0.6533]) | `selected_patrol_overlap_mean` <= 0.8000 | Aggregate field-divergence evidence is not yet robust enough to interpret this downstream stage. |
+| `active_patrol_collapse` | WARN | `patrol_overlap_mean`=0.3764 (CI95 [0.2872, 0.4656]) | `patrol_overlap_mean` <= 0.8000 | Aggregate field-divergence evidence is not yet robust enough to interpret this downstream stage. |
 
 ## Interpretation
 - Likely bottleneck: Spacing/thinning is the first stage that removes the hotspot difference.

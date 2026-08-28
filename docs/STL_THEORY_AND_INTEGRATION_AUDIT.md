@@ -140,10 +140,11 @@ $env:PYTHONPATH=(Resolve-Path .).Path; C:\Users\gabri\AppData\Local\Programs\Pyt
 $env:PYTHONPATH=(Resolve-Path .\habituation_stl).Path; C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe habituation_stl\tests\test_spec_value.py
 ```
 
-Production evidence is summarized in `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`. The strongest current result is the 1800-second, 10-seed B1/B3/B4 confirmatory batch:
+Production evidence is summarized in `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`. The strongest current result is the 1800-second, 10-seed B1/B2/B3/B4 confirmatory batch:
 
-- B4 improves over B1 under habituation: mean paired exposure delta `-2298.52`, 95% CI `[-4184.21, -412.82]`.
-- B4 improves over B3 under habituation: mean paired exposure delta `-3288.10`, 95% CI `[-4112.47, -2463.73]`.
+- B4 improves over B1 under habituation: mean paired exposure delta `-3696.74`, 95% CI `[-5226.86, -2166.61]`.
+- B4 improves over B3 under habituation: mean paired exposure delta `-4277.35`, 95% CI `[-5791.31, -2763.40]`.
+- B3 improves over B2 directionally under habituation: mean paired exposure delta `-689.90`, 95% CI `[-1537.63, +157.84]`.
 - B4 and B3 are identical when habituation is disabled: exposure delta `0.00`.
 
 ## Known Scope Limits
@@ -152,6 +153,25 @@ Production evidence is summarized in `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.
 - `phi_react` is implemented but not the primary production predictive-score differentiator.
 - The counterfactual rollout is a local analytic approximation rather than a full future SESTPP simulation.
 - The global STL robustness metric is stricter for B4 because B4 includes the habituation clause; exposure and mechanism metrics are the primary thesis evidence.
+
+## Risks, Mitigations, and Threats to Validity
+
+Risks and mitigations:
+
+- Flat task values were the failure mode that motivated this revision. The integration mitigates that risk by replacing the hand-tuned scalar value with smooth STL robustness, AGM-style smooth aggregation, and per-clause normalization.
+- Habituation could be too weak to be visible in realized exposure. The experiment mitigates this through a concentrated high-value stress scenario, an explicit `habituation_kappa` setting, and paired habituation-off controls that bound the effect size.
+- Decentralized monitoring can miss cross-zone behavior at partition boundaries. The production simulator mitigates this through the existing `EventBus` boundary-event sharing path and robot-local STL monitors over each robot's local cells plus boundary-adjacent cells.
+- Horizon and monitor-period sensitivity are acknowledged secondary parameters. The headline experiments fix `stl_horizon_s` and `stl_monitor_dt_s` at documented defaults rather than sweeping them.
+
+Threats to validity:
+
+- The study is simulation-only and does not include physical-robot validation.
+- The simulator owns the ground-truth event process used for evaluation.
+- Detection noise is not the primary modeled uncertainty in the headline STL ladder.
+- The predictive workload generator is in-house.
+- The habituation law is a stylized abstraction and is not fitted to ecological field data.
+
+These limitations are framework-level limits on external validity. The supported claim is narrower: within the same production simulator, workload setting, SESTPP model, and dispatcher contract, changing the predictive value function to habituation-aware STL robustness improves performance under habituating truth. Claims about robustness across alternative workload generators, ecological parameterizations, or real deployments require additional validation.
 
 ## Files
 

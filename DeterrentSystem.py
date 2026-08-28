@@ -203,7 +203,7 @@ def _sync_partitioner_healths_from_profiles(partitioner, profiles):
     set_health = getattr(partitioner, "set_health", None)
     if set_health is None:
         return
-    for rid in getattr(partitioner, "ids", []):
+    for rid in getattr(partitioner, "all_ids", getattr(partitioner, "ids", [])):
         profile = profiles.get(rid)
         if profile is None:
             continue
@@ -1095,6 +1095,7 @@ def _select_dispatch_policy_task(
     predictive_deadline_weight: float = 2.0,
     predictive_eta_penalty_weight: float = 0.1,
     predictive_utility_mode: str = "legacy",
+    predictive_fixed_deterring_mode: str | None = None,
     predictive_confidence_source: str = "p_event_times_selection_weight",
     predictive_confidence_power: float = 1.0,
     predictive_time_score_deadline_scale_s: float = 120.0,
@@ -1839,6 +1840,9 @@ def run_simulation_frames_persistent(
     # Zones (health â†’ weight), anchored to **initial positions**
     mode="direct", scale=1500.0, gamma=1.0,
     health_threshold=0.25,   # trigger-only partitioning (optional)
+    health_retire_threshold=0.15,
+    health_recharge_time_s=900.0,
+    health_recovered_value=1.0,
     debug_zone_areas=False,
     # SESTPP grid / calibration-managed model fallback
     NX=120, NY=96, sigma=16.0, omega=700.0, omega_inhib=900.0, mu_base=5e-5, bg_ema=1e-6,
@@ -1951,6 +1955,7 @@ def run_simulation_frames_persistent(
     predictive_deadline_weight=2.0,
     predictive_eta_penalty_weight=0.1,
     predictive_utility_mode="legacy",
+    predictive_fixed_deterring_mode=None,
     predictive_confidence_source="p_event_times_selection_weight",
     predictive_confidence_power=1.0,
     confidence_source=None,
@@ -3699,6 +3704,7 @@ def run_simulation_frames_persistent(
                     "predictive_expected_deltaJ": row.get("predictive_expected_deltaJ"),
                     "predictive_mode_variant_count": int(row.get("predictive_mode_variant_count", 0)),
                     "predictive_generation_best_mode": row.get("predictive_generation_best_mode"),
+                    "predictive_fixed_deterring_mode": row.get("predictive_fixed_deterring_mode"),
                     "predictive_dispatch_resolved_mode": row.get("predictive_dispatch_resolved_mode"),
                     "predictive_dispatch_eta_basis": row.get("predictive_dispatch_eta_basis"),
                     "predictive_action_variants": _compact_action_variant_rows(row),
@@ -3799,6 +3805,12 @@ def run_simulation_frames_persistent(
     next_tid = 1
     active_tasks = []     # list of dicts: {id, type, x,y,time,origin,assigned_primary,assigned_secondary,state,started_hold}
     completed_tasks = []  # same schema + state='done'
+    retired_robot_ids = set()
+    retired_since_by_robot = {}
+    health_repartition_latched_ids = set()
+    zone_repartition_total = 0
+    health_retirement_total = 0
+    health_return_total = 0
     consumed_task_keys = set()
     recent_deterrences = deque(maxlen=200)  # {"x","y","t","mode","beta","sigma","omega"}
     model_deterring_accepted = 0
@@ -3948,6 +3960,30 @@ def run_simulation_frames_persistent(
     def _mode_id_for_label(mode_label):
         """Map a cue-mode label into the habituation/STL mode index."""
         return mode_to_id.get(str(mode_label))
+
+    def _active_robot_ids():
+        """Return robots currently available for planning and assignment."""
+        return [
+            str(rid)
+            for rid in robots
+            if str(rid) not in retired_robot_ids
+        ]
+
+    def _active_pose_map():
+        """Return display/planning poses for robots that are not retired."""
+        return {
+            str(rid): tuple(pose[rid])
+            for rid in pose
+            if str(rid) not in retired_robot_ids
+        }
+
+    def _active_goal_map():
+        """Return display/planning goals for robots that are not retired."""
+        return {
+            str(rid): (None if goal[rid] is None else tuple(goal[rid]))
+            for rid in goal
+            if str(rid) not in retired_robot_ids
+        }
 
     def _cell_id_for_xy(x, y):
         """Map a world point into a partition cell id."""
@@ -4152,6 +4188,11 @@ def run_simulation_frames_persistent(
         predictive_timing_mode=str(predictive_timing_mode),
         predictive_expiry_grace_s=float(predictive_expiry_grace_s),
         predictive_selection_policy=str(predictive_selection_policy),
+        zone_repartition_total=0,
+        health_retirement_total=0,
+        health_return_total=0,
+        active_robot_count=int(len(robots)),
+        retired_robot_count=0,
         habituation_eta_mean=float("nan"),
         habituation_eta_min=float("nan"),
         habituation_eta_at_apply_mean=float("nan"),
@@ -4258,11 +4299,58 @@ def run_simulation_frames_persistent(
     def _run_zone_partitioning_algorithm(now_t):
         """Health-aware zone partitioning and neighbor refresh."""
         nonlocal cells, id_to_cell, stl_monitors_by_robot
-        if not any(profiles[rid].health <= health_threshold for rid in profiles):
+        nonlocal zone_repartition_total, health_retirement_total, health_return_total
+        threshold = float(health_threshold)
+        retire_threshold = (
+            float("-inf")
+            if health_retire_threshold in (None, "")
+            else float(health_retire_threshold)
+        )
+        recharge_time_s = max(float(health_recharge_time_s), 0.0)
+        recovered_value = min(max(float(health_recovered_value), 0.0), 1.0)
+        returned_ids = set()
+        for rid in list(retired_robot_ids):
+            retired_since = float(retired_since_by_robot.get(str(rid), now_t))
+            if (float(now_t) - retired_since) >= recharge_time_s:
+                profiles[str(rid)].health = float(recovered_value)
+                retired_since_by_robot.pop(str(rid), None)
+                returned_ids.add(str(rid))
+        if returned_ids:
+            health_return_total += int(len(returned_ids))
+
+        below_threshold = {
+            str(rid)
+            for rid, profile in profiles.items()
+            if float(profile.health) <= threshold
+        }
+        current_retired = {
+            str(rid)
+            for rid, profile in profiles.items()
+            if float(profile.health) <= retire_threshold
+        }
+        newly_below = below_threshold - health_repartition_latched_ids
+        retired_changed = current_retired != retired_robot_ids
+        if not newly_below and not retired_changed:
             return False
 
         _sync_partitioner_healths_from_profiles(partitioner, profiles)
+        health_repartition_latched_ids.intersection_update(below_threshold)
+        health_repartition_latched_ids.update(below_threshold)
+        if retired_changed:
+            newly_retired = current_retired - retired_robot_ids
+            health_retirement_total += int(len(newly_retired))
+            for rid in newly_retired:
+                retired_since_by_robot[str(rid)] = float(now_t)
+            for rid in retired_robot_ids - current_retired:
+                retired_since_by_robot.pop(str(rid), None)
+            retired_robot_ids.clear()
+            retired_robot_ids.update(current_retired)
+            assigner.set_disabled_robot_ids(retired_robot_ids)
+            if hasattr(partitioner, "set_excluded_ids"):
+                partitioner.set_excluded_ids(retired_robot_ids)
+
         partitioner.recompute(force=True)
+        zone_repartition_total += 1
         cells = partitioner.cells_for_ids()
         id_to_cell = {rid: cells[i] for i, rid in enumerate(partitioner.ids)}
         if debug_zone_areas:
@@ -4287,12 +4375,24 @@ def run_simulation_frames_persistent(
             robots[rid].update_neighbors(partitioner.neighbors_for_id(rid))
             if mon is not None and getattr(mon, "enabled", False):
                 mon.set_zone(rid, id_to_cell.get(rid, []), t=now_t)
+        if retired_robot_ids:
+            active_tasks[:] = [
+                tr for tr in active_tasks
+                if str(tr.get("assigned_primary", "")) not in retired_robot_ids
+            ]
+            for rid in retired_robot_ids:
+                if rid in goal:
+                    goal[rid] = None
+                if rid in loiter_until:
+                    loiter_until[rid] = -1.0
         for cell_id in range(len(cells)):
             last_service_t_by_cell.setdefault(int(cell_id), 0.0)
-        stl_monitors_by_robot = {
-            str(rid): RobotMonitor(_local_cell_ids_for_robot(str(rid)), stl_spec_params)
-            for rid in robots
-        }
+        for rid in robots:
+            rid_key = str(rid)
+            local_cells = _local_cell_ids_for_robot(rid_key)
+            monitor = stl_monitors_by_robot.get(rid_key)
+            if monitor is None or list(getattr(monitor, "cells", [])) != list(local_cells):
+                stl_monitors_by_robot[rid_key] = RobotMonitor(local_cells, stl_spec_params)
         return True
 
     def _run_truth_generation_algorithm(now_t):
@@ -4342,6 +4442,7 @@ def run_simulation_frames_persistent(
             pending_event_onsets=pending_event_onsets,
             mon=mon,
             record_truth_window_event_fn=_record_truth_window_event,
+            robot_active_fn=lambda rid: str(rid) not in retired_robot_ids,
         )
         truth_candidate_events = int(truth_step.truth_candidate_events)
         truth_accepted_events = int(truth_step.truth_accepted_events)
@@ -4440,6 +4541,11 @@ def run_simulation_frames_persistent(
             if centralized_predictive_topology_enabled and centralized_planning_robots is not None
             else robots
         )
+        planning_robots = {
+            str(rid): rob
+            for rid, rob in planning_robots.items()
+            if str(rid) not in retired_robot_ids
+        }
         run_task_location_estimation(
             taskgen=taskgen,
             robots=planning_robots,
@@ -4517,6 +4623,7 @@ def run_simulation_frames_persistent(
             deterring_modes=deterring_modes,
             travel_time_fn=(_graph_eta_seconds if graph_motion_graph is not None else None),
             predictive_utility_mode=str(predictive_utility_mode),
+            predictive_fixed_deterring_mode=predictive_fixed_deterring_mode,
             stl_hab=hab,
             stl_spec_params=stl_spec_params,
             stl_dynamics=stl_dynamics,
@@ -4569,7 +4676,11 @@ def run_simulation_frames_persistent(
         return extract_task_candidates_from_sestpp(
             estimation_kwargs={
                 "taskgen": taskgen,
-                "robots": robots,
+                "robots": {
+                    str(rid): rob
+                    for rid, rob in robots.items()
+                    if str(rid) not in retired_robot_ids
+                },
                 "now_t": now_t,
                 "enable_patrolling": bool(enable_patrolling),
                 "enable_predictive_patrol_tasks": bool(enable_predictive_patrol_tasks),
@@ -4644,11 +4755,12 @@ def run_simulation_frames_persistent(
                 "deterring_modes": deterring_modes,
                 "travel_time_fn": (_graph_eta_seconds if graph_motion_graph is not None else None),
                 "predictive_utility_mode": str(predictive_utility_mode),
+                "predictive_fixed_deterring_mode": predictive_fixed_deterring_mode,
                 "stl_hab": hab,
                 "stl_spec_params": stl_spec_params,
                 "stl_dynamics": stl_dynamics,
                 "stl_cell_polys": cells,
-                "stl_local_cell_ids_by_robot": _local_cell_ids_by_robot(robots.keys()),
+                "stl_local_cell_ids_by_robot": _local_cell_ids_by_robot(_active_robot_ids()),
                 "stl_last_service_t_by_cell": last_service_t_by_cell,
                 "stl_mode_to_id": mode_to_id,
                 "stl_cell_id_for_xy_fn": _cell_id_for_xy,
@@ -4791,6 +4903,7 @@ def run_simulation_frames_persistent(
         replaced_patrol_count = 0
         rejected_model_det_tasks = []
         assigner.set_robot_poses(pose if bool(use_live_robot_pose_for_task_planning) else None)
+        assigner.set_disabled_robot_ids(retired_robot_ids)
         model_deterring_accepted_this_cycle = 0
         candidate_stream_counts = dict(task_stage.candidate_stream_counts)
         robot_predictive_share_snapshot = {
@@ -6424,6 +6537,7 @@ def run_simulation_frames_persistent(
             active_tasks=active_tasks,
             W=W,
             H=H,
+            robot_active_fn=lambda rid: str(rid) not in retired_robot_ids,
         )
         if graph_motion_graph is not None:
             for robot_id, route_info in (step_motion_feedback.route_progress_by_robot or {}).items():
@@ -6512,6 +6626,13 @@ def run_simulation_frames_persistent(
         graph_reservations_step = GraphReservationTable()
         for r in robots_def:
             rid = r['id']
+            if str(rid) in retired_robot_ids:
+                goal[rid] = None
+                loiter_until[rid] = -1.0
+                if str(rid) in graph_motion_states:
+                    graph_motion_states[str(rid)].clear()
+                current_task_by_robot[rid] = None
+                continue
             command_source = "holding"
             command_type = "hold"
             graph_plan_for_command = (graph_motion_states[str(rid)].plan if str(rid) in graph_motion_states else None)
@@ -6858,25 +6979,26 @@ def run_simulation_frames_persistent(
                     "trigger_sum": float("nan"),
                     "inhib_sum": float("nan"),
                 }
+        active_pose_ids = _active_robot_ids()
         robot_states_now = {
             rid: ("holding" if loiter_until[rid] > t else ("moving" if goal[rid] is not None else "idle"))
-            for rid in pose
+            for rid in active_pose_ids
         }
-        active_assigned_counts = {rid: 0 for rid in pose}
+        active_assigned_counts = {rid: 0 for rid in active_pose_ids}
         for tr in active_tasks:
             if tr.get("state") != "active":
                 continue
             rp = tr.get("assigned_primary")
             if rp in active_assigned_counts:
                 active_assigned_counts[rp] += 1
-        robot_has_task = {rid: (active_assigned_counts[rid] > 0) for rid in pose}
-        if pose:
-            n_robots = float(len(pose))
-            cur_task_fraction = float(sum(1 for rid in pose if robot_has_task[rid])) / n_robots
-            cur_moving_fraction = float(sum(1 for rid in pose if robot_states_now[rid] == "moving")) / n_robots
-            cur_idle_fraction = float(sum(1 for rid in pose if robot_states_now[rid] == "idle")) / n_robots
-            cur_idle_no_task_fraction = float(sum(1 for rid in pose if (robot_states_now[rid] == "idle" and not robot_has_task[rid]))) / n_robots
-            cur_idle_with_task_fraction = float(sum(1 for rid in pose if (robot_states_now[rid] == "idle" and robot_has_task[rid]))) / n_robots
+        robot_has_task = {rid: (active_assigned_counts[rid] > 0) for rid in active_pose_ids}
+        if active_pose_ids:
+            n_robots = float(len(active_pose_ids))
+            cur_task_fraction = float(sum(1 for rid in active_pose_ids if robot_has_task[rid])) / n_robots
+            cur_moving_fraction = float(sum(1 for rid in active_pose_ids if robot_states_now[rid] == "moving")) / n_robots
+            cur_idle_fraction = float(sum(1 for rid in active_pose_ids if robot_states_now[rid] == "idle")) / n_robots
+            cur_idle_no_task_fraction = float(sum(1 for rid in active_pose_ids if (robot_states_now[rid] == "idle" and not robot_has_task[rid]))) / n_robots
+            cur_idle_with_task_fraction = float(sum(1 for rid in active_pose_ids if (robot_states_now[rid] == "idle" and robot_has_task[rid]))) / n_robots
         else:
             cur_task_fraction = 0.0
             cur_moving_fraction = 0.0
@@ -6884,7 +7006,7 @@ def run_simulation_frames_persistent(
             cur_idle_no_task_fraction = 0.0
             cur_idle_with_task_fraction = 0.0
 
-        for rid in pose:
+        for rid in active_pose_ids:
             robot_time_total[rid] += float(dt)
             st = robot_states_now[rid]
             has_task = robot_has_task[rid]
@@ -7104,6 +7226,11 @@ def run_simulation_frames_persistent(
             "predictive_lead_time_risk_power": float(predictive_lead_time_risk_power),
             "predictive_expiry_grace_s": float(predictive_expiry_grace_s),
             "predictive_selection_policy": str(predictive_selection_policy),
+            "zone_repartition_total": int(zone_repartition_total),
+            "health_retirement_total": int(health_retirement_total),
+            "health_return_total": int(health_return_total),
+            "active_robot_count": int(len(_active_robot_ids())),
+            "retired_robot_count": int(len(retired_robot_ids)),
             **stl_hab_metrics,
             "zone_assignment_mode": str(zone_assignment_mode),
             "defer_predictive_action_selection": int(bool(defer_predictive_action_selection)),
@@ -7380,6 +7507,11 @@ def run_simulation_frames_persistent(
             "predictive_lead_time_risk_power": float(predictive_lead_time_risk_power),
             "predictive_expiry_grace_s": float(predictive_expiry_grace_s),
             "predictive_selection_policy": str(predictive_selection_policy),
+            "zone_repartition_total": int(zone_repartition_total),
+            "health_retirement_total": int(health_retirement_total),
+            "health_return_total": int(health_return_total),
+            "active_robot_count": int(len(_active_robot_ids())),
+            "retired_robot_count": int(len(retired_robot_ids)),
             **stl_hab_metrics,
             "zone_assignment_mode": str(zone_assignment_mode),
             "defer_predictive_action_selection": int(bool(defer_predictive_action_selection)),
@@ -7675,6 +7807,11 @@ def run_simulation_frames_persistent(
             predictive_timing_mode=str(predictive_timing_mode),
             predictive_expiry_grace_s=float(predictive_expiry_grace_s),
             predictive_selection_policy=str(predictive_selection_policy),
+            zone_repartition_total=int(final_metrics.get("zone_repartition_total", 0)),
+            health_retirement_total=int(final_metrics.get("health_retirement_total", 0)),
+            health_return_total=int(final_metrics.get("health_return_total", 0)),
+            active_robot_count=int(final_metrics.get("active_robot_count", len(robots))),
+            retired_robot_count=int(final_metrics.get("retired_robot_count", 0)),
             habituation_eta_mean=float(final_metrics.get("habituation_eta_mean", float("nan"))),
             habituation_eta_min=float(final_metrics.get("habituation_eta_min", float("nan"))),
             habituation_eta_at_apply_mean=float(
@@ -7794,8 +7931,8 @@ def run_simulation_frames_persistent(
             tracking_runtime_state = {
                 "robots": robots,
                 "profiles": profiles,
-                "pose": pose,
-                "goal": goal,
+                "pose": _active_pose_map(),
+                "goal": _active_goal_map(),
                 "cells": cells,
                 "active_tasks": active_tasks,
                 "completed_tasks": completed_tasks,
@@ -7842,6 +7979,7 @@ def run_simulation_frames_persistent(
                 "graph_motion_states": {
                     str(robot_id): state.to_public_dict()
                     for robot_id, state in graph_motion_states.items()
+                    if str(robot_id) not in retired_robot_ids
                 },
                 "graph_reservations": graph_reservations_snapshot.to_public_dict(),
                 "metrics": metrics,
@@ -7877,8 +8015,8 @@ def run_simulation_frames_persistent(
                 )
         system_state_structured = build_production_runtime_snapshot(
             sim_time_s=(t - t_report_offset),
-            poses={rid: tuple(pose[rid]) for rid in pose},
-            goals={rid: (None if goal[rid] is None else tuple(goal[rid])) for rid in goal},
+            poses=_active_pose_map(),
+            goals=_active_goal_map(),
             robot_states=robot_states_now,
             active_tasks=active_tasks,
             completed_tasks=completed_tasks,
@@ -7929,9 +8067,9 @@ def run_simulation_frames_persistent(
             "t": (t - t_report_offset),
             "W": W, "H": H, "boundary": boundary,
             "cells": list(cells),
-            "poses": {rid: tuple(pose[rid]) for rid in pose},
+            "poses": _active_pose_map(),
             "robot_states": robot_states_now,
-            "robot_goals": {rid: (None if goal[rid] is None else tuple(goal[rid])) for rid in goal},
+            "robot_goals": _active_goal_map(),
             "profiles": profiles,
             "truth_pts": truth_pts,
             "det_pts": det_pts,
@@ -7944,6 +8082,7 @@ def run_simulation_frames_persistent(
             "motion_graph_states": {
                 str(robot_id): state.to_public_dict()
                 for robot_id, state in graph_motion_states.items()
+                if str(robot_id) not in retired_robot_ids
             },
             "motion_graph_reservations": graph_reservations_snapshot.to_public_dict(),
             "system_config_structured": (

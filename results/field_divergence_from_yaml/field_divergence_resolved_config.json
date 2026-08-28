@@ -31,6 +31,10 @@
     "truth_omega_scale": 1.0,
     "truth_sigma_scale": 1.0,
     "model_beta_scale": 1.0,
+    "use_frozen_calibration": true,
+    "calibration_ranking_path": "",
+    "calibration_manifest_path": "results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json",
+    "calibration_config_id": "",
     "outdir": "results/field_divergence_from_yaml"
   },
   "config": {
@@ -81,6 +85,10 @@
       },
       "model": {
         "model_beta_scale": 1.0
+      },
+      "calibration": {
+        "use_frozen_calibration": true,
+        "manifest_path": "results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json"
       }
     },
     "config_overrides": {
@@ -113,7 +121,9 @@
       "truth_beta_scale": 1.0,
       "truth_omega_scale": 1.0,
       "truth_sigma_scale": 1.0,
-      "model_beta_scale": 1.0
+      "model_beta_scale": 1.0,
+      "use_frozen_calibration": true,
+      "calibration_manifest_path": "results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json"
     }
   },
   "extra": {
@@ -170,6 +180,10 @@
           "fixed_cost": 0.0
         }
       },
+      "use_frozen_calibration": true,
+      "calibration_ranking_path": null,
+      "calibration_manifest_path": "results/sestpp_calibration_sweep/sestpp_calibration_sweep_manifest.json",
+      "calibration_config_id": null,
       "telemetry_clear_on_start": false,
       "telemetry_prompt_save": false,
       "T_end": 3600.0,

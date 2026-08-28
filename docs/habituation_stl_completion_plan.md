@@ -27,10 +27,10 @@ Complete in the production path:
 | ID | Meaning | Production configuration |
 | --- | --- | --- |
 | B0 | Reactive-only reference | Predictive patrol/model-scored deterrence/fallback disabled. |
-| B1 | Legacy unconstrained baseline | `dispatch_policy="unc"`, legacy predictive utility. |
-| B2 | Prior SESTPP deltaJ value | Reserved dispatcher, `predictive_utility_mode="deltaJ"`. |
-| B3 | STL without habituation clause | Reserved dispatcher, `predictive_utility_mode="stl_robustness"`, `stl_active_clauses=("exp","cov")`. |
-| B4 | Full proposal | Reserved dispatcher, `predictive_utility_mode="stl_robustness"`, `stl_active_clauses=("exp","cov","hab")`. |
+| B1 | Legacy greedy fixed-cue baseline | `dispatch_policy="unc"`, legacy predictive utility, `predictive_fixed_deterring_mode=<fixed cue>`. |
+| B2 | Prior SESTPP deltaJ fixed-cue value | Reserved dispatcher, `predictive_utility_mode="deltaJ"`, fixed cue. |
+| B3 | STL without habituation clause, fixed cue | Reserved dispatcher, `predictive_utility_mode="stl_robustness"`, `stl_active_clauses=("exp","cov")`, fixed cue. |
+| B4 | Full proposal, multi-cue | Reserved dispatcher, `predictive_utility_mode="stl_robustness"`, `stl_active_clauses=("exp","cov","hab")`, cue variants enabled. |
 
 Each system should be run under both controls:
 
@@ -48,32 +48,33 @@ $env:PYTHONPATH=(Resolve-Path .).Path; C:\Users\gabri\AppData\Local\Programs\Pyt
 $env:PYTHONPATH=(Resolve-Path .\habituation_stl).Path; C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe habituation_stl\tests\test_spec_value.py
 ```
 
-B0-B4 900-second ladder:
+B0-B4 900-second revised ladder:
 
 ```powershell
-C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_b0_b4_900s_10seed_v5 --duration-s 900 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --max-workers 2
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_b0_b4_900s_10seed --duration-s 900 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --systems B0_reactive B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue --max-workers 2
 ```
 
-B1/B3/B4 1800-second confirmatory run:
+B1/B2/B3/B4 1800-second revised confirmatory run:
 
 ```powershell
-C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5 --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 120 --ny 96 --nrobots 6 --systems B1_unc_legacy B3_res_stl_nohab B4_res_stl_full --max-workers 2
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue --max-workers 4
 ```
 
 Summarize a run directory:
 
 ```powershell
-C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --outdir results\testbench\habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed
 ```
 
 ## Current Evidence
 
-The strongest current result is documented in `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`.
+The revised-ladder confirmatory result is documented in `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`.
 
-Under habituating truth:
+Under habituating truth in the 10-seed revised confirmatory batch:
 
-- B4 vs B1 exposure delta: `-2298.52`, 95% CI `[-4184.21, -412.82]`, 8/10 seeds improved.
-- B4 vs B3 exposure delta: `-3288.10`, 95% CI `[-4112.47, -2463.73]`, 10/10 seeds improved.
+- B4 vs B1 exposure delta: `-3696.74`, 95% CI `[-5226.86, -2166.61]`, 9/10 seeds improved.
+- B4 vs B3 exposure delta: `-4277.35`, 95% CI `[-5791.31, -2763.40]`, 10/10 seeds improved.
+- B3 vs B2 exposure delta: `-689.90`, 95% CI `[-1537.63, +157.84]`, 7/10 seeds improved.
 
 Under non-habituating truth:
 
@@ -81,9 +82,10 @@ Under non-habituating truth:
 
 Mechanism under habituating truth:
 
-- B4 increases `eta_at_apply` relative to B3.
-- B4 increases cue variety relative to B3.
-- B4 increases truth suppression rate relative to B3.
+- B4 increases `eta_at_apply` relative to B3 by `+0.1559`.
+- B4 increases cue variety relative to B3 by `+0.3634`.
+- B4 increases truth suppression rate relative to B3 by `+0.0867`.
+- B4 increases truth suppression effect sum relative to B3 by `+1901.7389`.
 
 ## Thesis-Ready Acceptance State
 
@@ -93,6 +95,7 @@ Accepted for thesis writing:
 - ground-truth habituation is live and tested
 - B3/B4 control semantics are correct
 - confirmatory production result supports the central simulation claim
+- H3 is directionally supported but remains the weakest claim because its confidence interval crosses zero
 - reproducible commands and output locations are documented
 
 Remaining before final thesis submission:

@@ -46,6 +46,11 @@ METRIC_FIELDS = [
     "predictive_generated_total",
     "predictive_admitted_total",
     "predictive_completion_ratio",
+    "zone_repartition_total",
+    "health_retirement_total",
+    "health_return_total",
+    "active_robot_count",
+    "retired_robot_count",
     "truth_candidate_events",
     "truth_accepted_events",
     "truth_suppressed_events",
@@ -75,7 +80,7 @@ def _common_params(args: argparse.Namespace) -> dict[str, Any]:
         "T_end": float(args.duration_s),
         "dt": 1.0,
         "fps": 1,
-        "task_replan_period_s": 45.0,
+        "task_replan_period_s": float(args.task_replan_period_s),
         "arrival_radius_m": 3.0,
         "hold_time_s": 20.0,
         "mu_true": float(args.mu_true),
@@ -96,6 +101,12 @@ def _common_params(args: argparse.Namespace) -> dict[str, Any]:
         "telemetry_clear_on_start": False,
         "telemetry_prompt_save": False,
         "warmup_s": float(args.warmup_s),
+        "stl_E_star": float(args.stl_e_star),
+        "stl_T_cov_s": float(args.stl_t_cov_s),
+        "stl_W_s": float(args.stl_w_s),
+        "stl_eta_min": float(args.stl_eta_min),
+        "stl_horizon_s": float(args.stl_horizon_s),
+        "stl_theta": float(args.stl_theta),
     }
 
 
@@ -119,9 +130,14 @@ def _reserved_dispatch_params(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _fixed_cue_params(args: argparse.Namespace) -> dict[str, Any]:
+    return {"predictive_fixed_deterring_mode": str(args.fixed_cue_mode)}
+
+
 def _system_params(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     reserved = _reserved_dispatch_params(args)
     proposed = _proposed_generation_params()
+    fixed_cue = _fixed_cue_params(args)
     return {
         "B0_reactive": {
             "simulation_mode": "reactive",
@@ -132,37 +148,41 @@ def _system_params(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
             "dispatch_policy": "react",
             "predictive_utility_mode": "legacy",
         },
-        "B1_unc_legacy": {
+        "B1_greedy_fixedcue": {
             **proposed,
+            **fixed_cue,
             "dispatch_policy": "unc",
             "predictive_utility_mode": "legacy",
         },
-        "B2_res_deltaJ": {
+        "B2_res_deltaJ_fixedcue": {
             **proposed,
             **reserved,
+            **fixed_cue,
             "predictive_utility_mode": "deltaJ",
         },
-        "B3_res_stl_nohab": {
+        "B3_res_stl_nohab_fixedcue": {
             **proposed,
             **reserved,
+            **fixed_cue,
             "predictive_utility_mode": "stl_robustness",
             "stl_active_clauses": ("exp", "cov"),
         },
-        "B4_res_stl_full": {
+        "B4_res_stl_full_multicue": {
             **proposed,
             **reserved,
+            "predictive_fixed_deterring_mode": None,
             "predictive_utility_mode": "stl_robustness",
             "stl_active_clauses": ("exp", "cov", "hab"),
         },
     }
 
 
-def _habituation_params(enabled: bool) -> dict[str, Any]:
+def _habituation_params(enabled: bool, args: argparse.Namespace) -> dict[str, Any]:
     if enabled:
         return {
             "habituation_condition": "hab_on",
             "enable_habituation": True,
-            "habituation_kappa": 0.35,
+            "habituation_kappa": float(args.habituation_kappa),
         }
     return {
         "habituation_condition": "hab_off",
@@ -250,10 +270,16 @@ def _advantage_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     }
     out = []
     comparisons = [
-        ("H1_B4_vs_B1", "B4_res_stl_full", "B1_unc_legacy", "value_weighted_exposure", "lower"),
-        ("H2_B4_vs_B3", "B4_res_stl_full", "B3_res_stl_nohab", "value_weighted_exposure", "lower"),
-        ("H3_B3_vs_B2", "B3_res_stl_nohab", "B2_res_deltaJ", "value_weighted_exposure", "lower"),
-        ("robustness_B4_vs_B3", "B4_res_stl_full", "B3_res_stl_nohab", "stl_robustness_global_mean", "higher"),
+        ("H1_B4_vs_B1", "B4_res_stl_full_multicue", "B1_greedy_fixedcue", "value_weighted_exposure", "lower"),
+        ("H2_B4_vs_B3", "B4_res_stl_full_multicue", "B3_res_stl_nohab_fixedcue", "value_weighted_exposure", "lower"),
+        ("H3_B3_vs_B2", "B3_res_stl_nohab_fixedcue", "B2_res_deltaJ_fixedcue", "value_weighted_exposure", "lower"),
+        (
+            "robustness_B4_vs_B3",
+            "B4_res_stl_full_multicue",
+            "B3_res_stl_nohab_fixedcue",
+            "stl_robustness_global_mean",
+            "higher",
+        ),
     ]
     for hab in ("hab_on", "hab_off"):
         seeds = sorted({int(row["seed"]) for row in rows if row["habituation_condition"] == hab})
@@ -341,17 +367,271 @@ def _habituation_delta_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 }
             )
     return out
+
+
+def _first_baseline(rows: list[dict[str, Any]], candidates: list[str]) -> str | None:
+    """Return the first candidate baseline name present in the run rows."""
+    present = {str(row.get("baseline")) for row in rows}
+    for candidate in candidates:
+        if candidate in present:
+            return candidate
+    return None
+
+
+def _paired_deltas(
+    rows: list[dict[str, Any]],
+    system: str,
+    reference: str,
+    habituation_condition: str,
+    metric: str,
+) -> list[float]:
+    """Compute paired `system - reference` metric deltas over matching seeds."""
+    by_key = {
+        (str(row["baseline"]), str(row["habituation_condition"]), int(row["seed"])): row
+        for row in rows
+    }
+    seeds = sorted(
+        {
+            int(row["seed"])
+            for row in rows
+            if str(row.get("habituation_condition")) == str(habituation_condition)
+        }
+    )
+    deltas: list[float] = []
+    for seed in seeds:
+        srow = by_key.get((system, habituation_condition, seed))
+        rrow = by_key.get((reference, habituation_condition, seed))
+        if srow is None or rrow is None:
+            continue
+        sval = _safe_float(srow.get(metric))
+        rval = _safe_float(rrow.get(metric))
+        if math.isfinite(sval) and math.isfinite(rval):
+            deltas.append(sval - rval)
+    return deltas
+
+
+def _ci95(values: list[float]) -> tuple[float, float]:
+    """Return a normal-approximation 95% confidence interval for paired deltas."""
+    if not values:
+        return float("nan"), float("nan")
+    mean = float(stats.mean(values))
+    if len(values) <= 1:
+        return mean, mean
+    half_width = 1.96 * float(stats.stdev(values)) / math.sqrt(len(values))
+    return mean - half_width, mean + half_width
+
+
+def _fmt(value: Any, digits: int = 3) -> str:
+    """Format finite floats while keeping missing values explicit in Markdown."""
+    fval = _safe_float(value)
+    if not math.isfinite(fval):
+        return "n/a"
+    return f"{fval:.{digits}f}"
+
+
+def _comparison_row(
+    rows: list[dict[str, Any]],
+    label: str,
+    system: str | None,
+    reference: str | None,
+    habituation_condition: str,
+    metric: str,
+    lower_is_better: bool,
+) -> str | None:
+    """Build one Markdown table row for a paired metric comparison."""
+    if system is None or reference is None:
+        return None
+    deltas = _paired_deltas(rows, system, reference, habituation_condition, metric)
+    if not deltas:
+        return None
+    mean_delta = float(stats.mean(deltas))
+    ci_lo, ci_hi = _ci95(deltas)
+    if lower_is_better:
+        improved = sum(1 for delta in deltas if delta < 0.0)
+    else:
+        improved = sum(1 for delta in deltas if delta > 0.0)
+    return (
+        f"| {label} | {habituation_condition} | {_fmt(mean_delta)} | "
+        f"[{_fmt(ci_lo)}, {_fmt(ci_hi)}] | {improved}/{len(deltas)} |"
+    )
+
+
+def _metric_delta_row(
+    rows: list[dict[str, Any]],
+    label: str,
+    system: str | None,
+    reference: str | None,
+    metric: str,
+) -> str | None:
+    """Build one mechanism-metric row for B4 minus B3 under habituating truth."""
+    if system is None or reference is None:
+        return None
+    deltas = _paired_deltas(rows, system, reference, "hab_on", metric)
+    if not deltas:
+        return None
+    mean_delta = float(stats.mean(deltas))
+    ci_lo, ci_hi = _ci95(deltas)
+    return f"| {label} | {_fmt(mean_delta, 4)} | [{_fmt(ci_lo, 4)}, {_fmt(ci_hi, 4)}] |"
+
+
+def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
+    """Write a thesis-facing Markdown recap next to the ladder CSV outputs."""
+    if not rows:
+        return
+
+    manifest_path = outdir / "ladder_manifest.json"
+    manifest: dict[str, Any] = {}
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            manifest = {}
+    args = manifest.get("args", {}) if isinstance(manifest.get("args", {}), dict) else {}
+
+    b1 = _first_baseline(rows, ["B1_greedy_fixedcue", "B1_unc_legacy"])
+    b2 = _first_baseline(rows, ["B2_res_deltaJ_fixedcue", "B2_res_deltaJ"])
+    b3 = _first_baseline(rows, ["B3_res_stl_nohab_fixedcue", "B3_res_stl_nohab"])
+    b4 = _first_baseline(rows, ["B4_res_stl_full_multicue", "B4_res_stl_full"])
+
+    paired_counts = [
+        len(_paired_deltas(rows, b4, ref, "hab_on", "value_weighted_exposure"))
+        for ref in (b1, b3)
+        if b4 is not None and ref is not None
+    ]
+    max_paired = max(paired_counts) if paired_counts else 0
+    status = "confirmatory" if max_paired >= 10 else "preliminary"
+
+    systems = ", ".join(sorted({str(row["baseline"]) for row in rows}))
+    seed_values = sorted({int(row["seed"]) for row in rows})
+    seed_span = f"{seed_values[0]} through {seed_values[-1]}" if seed_values else "n/a"
+
+    lines = [
+        "# Habituation STL Ladder Results",
+        "",
+        f"Source run: `{outdir.as_posix()}`.",
+        "",
+        "## Run Configuration",
+        "",
+        f"- Status: `{status}`",
+        f"- Duration: `{_fmt(args.get('duration_s'))}` seconds",
+        f"- Seeds: `{seed_span}`",
+        f"- Systems: `{systems}`",
+        f"- Jobs completed: `{len(rows)}` raw rows",
+        f"- Grid/fleet: `nx={args.get('nx', 'n/a')}`, `ny={args.get('ny', 'n/a')}`, `nrobots={args.get('nrobots', 'n/a')}`",
+        f"- Truth rate: `mu_true={args.get('mu_true', 'n/a')}`",
+        f"- Habituation kappa: `habituation_kappa={args.get('habituation_kappa', 'n/a')}`",
+        "",
+        "## Primary Paired Exposure Results",
+        "",
+        "| Comparison | Truth control | Mean delta Jexp | 95% CI | Seeds improved |",
+        "|---|---|---:|---:|---:|",
+    ]
+
+    comparison_rows = [
+        _comparison_row(
+            rows,
+            "B4 - B1",
+            b4,
+            b1,
+            "hab_on",
+            "value_weighted_exposure",
+            lower_is_better=True,
+        ),
+        _comparison_row(
+            rows,
+            "B4 - B3",
+            b4,
+            b3,
+            "hab_on",
+            "value_weighted_exposure",
+            lower_is_better=True,
+        ),
+        _comparison_row(
+            rows,
+            "B4 - B3",
+            b4,
+            b3,
+            "hab_off",
+            "value_weighted_exposure",
+            lower_is_better=True,
+        ),
+        _comparison_row(
+            rows,
+            "B3 - B2",
+            b3,
+            b2,
+            "hab_on",
+            "value_weighted_exposure",
+            lower_is_better=True,
+        ),
+    ]
+    lines.extend(row for row in comparison_rows if row is not None)
+    lines.extend(
+        [
+            "",
+            "Negative exposure deltas are better because lower value-weighted exposure is the desired outcome.",
+            "",
+            "## Mechanism Evidence: B4 - B3 Under Habituation On",
+            "",
+            "| Metric | Mean delta | 95% CI |",
+            "|---|---:|---:|",
+        ]
+    )
+    metric_rows = [
+        _metric_delta_row(rows, "Truth suppression rate", b4, b3, "truth_suppression_rate"),
+        _metric_delta_row(rows, "Truth suppression effect sum", b4, b3, "truth_suppression_effect_sum"),
+        _metric_delta_row(rows, "Eta at apply", b4, b3, "habituation_eta_at_apply_mean"),
+        _metric_delta_row(rows, "Variety index", b4, b3, "habituation_variety_index"),
+    ]
+    lines.extend(row for row in metric_rows if row is not None)
+    lines.extend(
+        [
+            "",
+            "## Interpretation",
+            "",
+            "B4 is the proposal system when it uses the full exposure, coverage, and habituation STL clauses with multi-cue action variants. B3 removes the habituation clause and uses the fixed-cue control, so B4 - B3 isolates the cue-variety mechanism. The non-habituating B4/B3 control should be near zero when the only difference between the systems is the inactive habituation clause.",
+        ]
+    )
+    if status == "preliminary":
+        lines.extend(
+            [
+                "",
+                "This run is preliminary because it has fewer than 10 paired seeds. Use it for debugging and calibration, not as the final thesis claim.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Source Tables",
+            "",
+            "- `per_run_metrics.csv`",
+            "- `summary_by_system.csv`",
+            "- `advantage_vs_reference.csv`",
+            "- `habituation_on_vs_off.csv`",
+        ]
+    )
+
+    (outdir / "THESIS_RESULTS_SUMMARY.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 def _build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
     common = _common_params(args)
     systems = _system_params(args)
-    wanted = set(args.systems or systems.keys())
+    aliases = {
+        "B1_unc_legacy": "B1_greedy_fixedcue",
+        "B2_res_deltaJ": "B2_res_deltaJ_fixedcue",
+        "B3_res_stl_nohab": "B3_res_stl_nohab_fixedcue",
+        "B4_res_stl_full": "B4_res_stl_full_multicue",
+    }
+    wanted = {
+        aliases.get(str(name), str(name))
+        for name in (args.systems or systems.keys())
+    }
     jobs = []
     for seed in range(int(args.seed_start), int(args.seed_start) + int(args.num_runs)):
         for baseline, sys_params in systems.items():
             if baseline not in wanted:
                 continue
             for hab_enabled in (True, False):
-                hab_params = _habituation_params(hab_enabled)
+                hab_params = _habituation_params(hab_enabled, args)
                 params = dict(common)
                 params.update(sys_params)
                 params.update(hab_params)
@@ -428,6 +708,7 @@ def run(args: argparse.Namespace) -> list[dict[str, Any]]:
         ),
         encoding="utf-8",
     )
+    _write_markdown_summary(rows, outdir)
     print(f"[ladder] wrote {outdir}", flush=True)
     return rows
 
@@ -443,6 +724,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ny", type=int, default=96)
     parser.add_argument("--nrobots", type=int, default=6)
     parser.add_argument("--warmup-s", type=float, default=300.0)
+    parser.add_argument("--task-replan-period-s", type=float, default=45.0)
     parser.add_argument("--reservation-fraction", type=float, default=0.25)
     parser.add_argument("--mu-true", type=float, default=1.0e-6)
     parser.add_argument("--alpha-true", type=float, default=0.3)
@@ -452,11 +734,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deterrence-beta-scale", type=float, default=1.0)
     parser.add_argument("--deterrence-sigma-scale", type=float, default=1.0)
     parser.add_argument("--deterrence-omega-scale", type=float, default=1.0)
+    parser.add_argument("--fixed-cue-mode", default="laser")
+    parser.add_argument("--habituation-kappa", type=float, default=0.5)
+    parser.add_argument("--stl-e-star", type=float, default=5.0)
+    parser.add_argument("--stl-t-cov-s", type=float, default=1200.0)
+    parser.add_argument("--stl-w-s", type=float, default=600.0)
+    parser.add_argument("--stl-eta-min", type=float, default=0.4)
+    parser.add_argument("--stl-horizon-s", type=float, default=300.0)
+    parser.add_argument("--stl-theta", type=float, default=12.0)
     parser.add_argument(
         "--systems",
         nargs="*",
         default=None,
-        help="Optional subset: B0_reactive B1_unc_legacy B2_res_deltaJ B3_res_stl_nohab B4_res_stl_full",
+        help=(
+            "Optional subset: B0_reactive B1_greedy_fixedcue "
+            "B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue "
+            "B4_res_stl_full_multicue. Legacy names are accepted as aliases."
+        ),
     )
     return parser.parse_args()
 

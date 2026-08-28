@@ -243,6 +243,7 @@ def run_truth_generation_stage(
     pending_event_onsets: MutableSequence[dict],
     mon: Any,
     record_truth_window_event_fn: Callable[[float, bool], None] | None = None,
+    robot_active_fn: Callable[[str], bool] | None = None,
 ) -> TruthGenerationCounters:
     """Advance the ground-truth event process, apply suppression, and ingest detections."""
     if use_ground_truth:
@@ -306,6 +307,8 @@ def run_truth_generation_stage(
     else:
         for robot in robots_def:
             robot_id = robot["id"]
+            if robot_active_fn is not None and not bool(robot_active_fn(str(robot_id))):
+                continue
             if now_t >= bird_present_until[robot_id]:
                 if rng.random() < (1.0 - np.exp(-detect_rate_per_robot * dt)):
                     bird_present_until[robot_id] = now_t + rng.exponential(bird_stay_mean_s)
@@ -479,6 +482,7 @@ def apply_external_motion_feedback(
     active_tasks: Sequence[Mapping[str, Any]],
     W: float,
     H: float,
+    robot_active_fn: Callable[[str], bool] | None = None,
 ) -> MotionFeedbackStep:
     """Apply externally reported robot pose/state updates back into simulator state."""
     if not callable(motion_state_callback):
@@ -489,10 +493,15 @@ def apply_external_motion_feedback(
             "t": float(now_t),
             "dt": float(dt),
             "mode": str(motion_orchestration_mode),
-            "poses": {str(rid): (float(x), float(y)) for rid, (x, y) in pose.items()},
+            "poses": {
+                str(rid): (float(x), float(y))
+                for rid, (x, y) in pose.items()
+                if robot_active_fn is None or bool(robot_active_fn(str(rid)))
+            },
             "goals": {
                 str(rid): (None if goal.get(rid) is None else (float(goal[rid][0]), float(goal[rid][1])))
                 for rid in goal
+                if robot_active_fn is None or bool(robot_active_fn(str(rid)))
             },
             "active_tasks": [
                 {
@@ -518,6 +527,8 @@ def apply_external_motion_feedback(
     updated_robot_count = 0
     for robot_id, xy in pose_updates.items():
         if robot_id not in pose:
+            continue
+        if robot_active_fn is not None and not bool(robot_active_fn(str(robot_id))):
             continue
         if not isinstance(xy, Sequence) or len(xy) != 2:
             continue

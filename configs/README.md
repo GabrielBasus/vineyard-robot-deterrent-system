@@ -52,6 +52,8 @@ Runbook:
 
 The STL proposal experiments are run through `experiments/run_habituation_stl_production_ladder.py` rather than the visual demo JSON overlays. This is intentional: the ladder needs paired habituation-on/off controls and baseline-specific STL clause settings.
 
+The revised ladder uses fixed-cue controls for B1/B2/B3 and enables multi-cue variants only for `B4_res_stl_full_multicue`, which isolates the habituation-aware cue-variety mechanism.
+
 Relevant simulator kwargs include:
 
 - `predictive_utility_mode="stl_robustness"`

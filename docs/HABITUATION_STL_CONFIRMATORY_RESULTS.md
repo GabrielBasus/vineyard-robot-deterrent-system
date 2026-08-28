@@ -1,115 +1,123 @@
-# Habituation-Aware STL Confirmatory Results
+# Habituation-Aware STL Results
 
-This document summarizes the current thesis-facing production evidence for the habituation-aware STL integration.
+This document records the current thesis-facing status of the habituation-aware STL production ladder.
 
-Primary run:
+## Current Source of Truth
 
-```text
-results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5
-```
-
-The batch compares three production systems with identical paired seeds and both habituating and non-habituating truth controls:
+The current ladder definition is the revised fixed-cue versus multi-cue design in `experiments/run_habituation_stl_production_ladder.py`.
 
 | System | Meaning |
 | --- | --- |
-| `B1_unc_legacy` | Legacy unconstrained predictive dispatcher using the legacy value path. |
-| `B3_res_stl_nohab` | Reserved-capacity STL robustness value using exposure and coverage clauses only. |
-| `B4_res_stl_full` | Reserved-capacity STL robustness value using exposure, coverage, and habituation clauses. |
+| `B0_reactive` | Reactive-only reference. |
+| `B1_greedy_fixedcue` | Legacy predictive value with unconstrained/greedy dispatch and one fixed cue mode. |
+| `B2_res_deltaJ_fixedcue` | Reserved-capacity dispatch with prior `deltaJ` value and one fixed cue mode. |
+| `B3_res_stl_nohab_fixedcue` | Reserved-capacity STL value with exposure and coverage clauses only, one fixed cue mode. |
+| `B4_res_stl_full_multicue` | Full proposal: reserved-capacity STL value with exposure, coverage, and habituation clauses plus multi-cue action variants. |
+
+This revision matches the STL package demo mechanism: the no-habituation baselines repeatedly use a fixed cue, while the full method can spend STL utility on cue variety.
+
+## Revised-Ladder Confirmatory Run
+
+Primary summarized run:
+
+```text
+results/testbench/habituation_stl_revised_confirm_with_b2_1800s_10seed
+```
 
 Run shape:
 
 - duration: 1800 seconds
 - seeds: 125-134
-- habituation controls: on and off
-- completed jobs: 60
-- production simulator: `DeterrentSystem.py`
-- runner: `experiments/run_habituation_stl_production_ladder.py`
+- systems: `B1_greedy_fixedcue`, `B2_res_deltaJ_fixedcue`, `B3_res_stl_nohab_fixedcue`, `B4_res_stl_full_multicue`
+- controls: habituation on and habituation off
+- truth rate: `mu_true=2e-05`
+- status: confirmatory
 
-## Primary Exposure Result
+Primary paired exposure results:
 
-Under habituating ground truth, B4 reduced value-weighted exposure relative to both references.
-
-| Comparison | Mean paired delta in Jexp | 95% CI | Seeds improved |
-| --- | ---: | ---: | ---: |
-| B4 - B1 | -2298.52 | [-4184.21, -412.82] | 8/10 |
-| B4 - B3 | -3288.10 | [-4112.47, -2463.73] | 10/10 |
+| Comparison | Truth control | Mean delta in Jexp | 95% CI | Seeds improved |
+| --- | --- | ---: | ---: | ---: |
+| B4 - B1 | habituation on | -3696.74 | [-5226.86, -2166.61] | 9/10 |
+| B4 - B3 | habituation on | -4277.35 | [-5791.31, -2763.40] | 10/10 |
+| B3 - B2 | habituation on | -689.90 | [-1537.63, +157.84] | 7/10 |
+| B4 - B3 | habituation off | 0.00 | [0.00, 0.00] | 0/10 |
 
 Negative deltas are better because lower value-weighted exposure is the desired outcome.
 
-Interpretation: the full habituation-aware STL value function improved the primary mission metric in the calibrated habituating condition.
+Mechanism evidence for B4 - B3 under habituating truth:
 
-## Falsifiable Control
-
-With habituation disabled, B4 and B3 are exactly matched on exposure and task metrics.
-
-| Comparison | Mean paired delta in Jexp | 95% CI |
+| Metric | Mean delta | 95% CI |
 | --- | ---: | ---: |
-| B4 - B3, habituation off | 0.00 | [0.00, 0.00] |
+| Truth suppression rate | +0.0867 | [+0.0596, +0.1139] |
+| Truth suppression effect sum | +1901.7389 | [+1346.1216, +2457.3562] |
+| Eta at apply | +0.1559 | [+0.1012, +0.2106] |
+| Variety index | +0.3634 | [+0.2498, +0.4770] |
 
-This is the expected control result. It shows that B4's advantage is not caused by an unrelated dispatch-path difference. The difference appears when the ground truth includes habituation and disappears when habituation is disabled.
+Interpretation: the revised ladder supports the central thesis claim. B4 chooses fresher cues, applies deterrence at higher effectiveness, increases realized suppression, and reduces value-weighted exposure relative to both the greedy fixed-cue baseline and the STL-without-habituation fixed-cue baseline. The exact B4/B3 no-habituation control isolates the result to the habituation-aware cue-variety mechanism. H3 is directionally consistent with the claim that smooth STL robustness improves over hand-tuned `deltaJ`, but its 95% CI crosses zero, so it should be framed as directional rather than fully confirmed.
 
-## Mechanism Evidence
+Note on STL robustness: B4 uses a stricter formula than B3 because it includes the additional habituation clause. Do not use global robustness alone as the primary B4/B3 comparison; use exposure and the mechanism metrics above.
 
-Against B3 under habituating truth, B4 improved the metrics that the habituation clause is designed to influence.
+## Calibration Pilot
 
-| Metric | Mean paired delta B4 - B3 | 95% CI |
-| --- | ---: | ---: |
-| Truth suppression rate | +0.0630 | [+0.0467, +0.0793] |
-| Eta at apply | +0.1454 | [+0.0843, +0.2064] |
-| Variety index | +0.3072 | [+0.2390, +0.3755] |
+The preceding revised-ladder calibration run remains useful for debugging:
 
-Mechanism interpretation:
+```text
+results/testbench/habituation_stl_revised_calibration_1800s_3seed
+```
 
-1. B4 penalizes repeatedly used cues through the STL `hab` clause.
-2. Candidate selection shifts toward fresher modes.
-3. Action-time effectiveness is higher.
-4. Higher effectiveness increases truth suppression.
-5. Increased suppression lowers value-weighted exposure.
+That pilot was mechanism-positive but underpowered. It should not be cited as the final result now that the 10-seed revised confirmatory batch is available.
 
-## Thesis Claims
+## Historical Calibration Result
 
-Supported by the current production results:
+The earlier 10-seed run remains useful as a historical stress-case calibration:
 
-- The production system has live ground-truth habituation: repeated cue use lowers `eta_at_apply`, and truth suppression is scaled by that value.
-- STL robustness can be used as a drop-in predictive task value while keeping dispatch policies unchanged.
-- The habituation clause adds value under habituating truth: B4 beats B3 with a paired CI below zero.
-- The effect is habituation-specific: B4 collapses to B3 when habituation is disabled.
-- B4 beats the legacy practical baseline B1 in the current 1800-second confirmatory batch.
+```text
+results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5
+```
 
-Not fully established by this batch alone:
+That run showed a strong B4 exposure win, but it used the earlier baseline labels and pre-revision ladder framing. Do not cite it as the final revised-ladder result without explaining that it predates the fixed-cue versus multi-cue cleanup.
 
-- biological realism of the habituation law
-- 24-hour production-scale stability
-- broad sensitivity across all load, robot-count, and reservation-fraction settings
+## Reproduction Command
 
-## Generated Artifacts
+Run the revised confirmatory batch:
 
-Primary summary files:
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue --max-workers 4
+```
 
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/THESIS_RESULTS_SUMMARY.md`
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/ladder_manifest.json`
+Then summarize:
 
-Advisor figures:
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed
+```
 
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/exposure_mean_ci_by_system.png`
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/hab_on_exposure_per_seed.png`
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/hab_on_b4_paired_exposure_deltas.png`
-- `results/testbench/habituation_stl_confirm_b1_b3_b4_1800s_10seed_v5/advisor_figures/hab_on_b4_b3_mechanism_deltas.png`
+Final thesis acceptance criteria:
 
-Related pilot and diagnostic outputs:
+- B4 beats B3 under habituating truth on paired value-weighted exposure: satisfied, 10/10 seeds.
+- B3 beats B2 under habituating truth on paired value-weighted exposure: directionally satisfied, 7/10 seeds, but not significant at 95% confidence.
+- B4/B3 is near-zero under non-habituating truth: satisfied, exactly zero.
+- B4 increases `habituation_variety_index` and `habituation_eta_at_apply_mean`: satisfied.
+- B4 increases realized truth suppression or suppression-effect sum: satisfied.
 
-- `results/testbench/habituation_stl_b0_b4_900s_10seed_v5`
-- `results/testbench/habituation_stl_b3_b4_900s_10seed_v5`
-- `results/diagnostics/`
+## Risks, Mitigations, and Threats to Validity
 
-## Recommended Thesis Framing
+Risk mitigations accounted for in the integration and experiment design:
 
-Use the result as simulation evidence for this claim:
+- Flat task values, the failure mode that motivated the STL revision, are mitigated by smooth STL robustness, AGM-style smooth aggregation, and per-clause normalization in the STL value path.
+- Habituation being too weak to affect the primary metric is mitigated by the concentrated high-value stress scenario, the `habituation_kappa` control, and the habituation-off paired control that bounds the effect size.
+- Decentralized monitoring gaps at zone boundaries are mitigated by the existing `EventBus` boundary-event sharing path and by evaluating each robot's STL monitor over its local cells and boundary-adjacent cells.
+- Horizon and monitor-period sensitivity are treated as secondary parameters. The headline experiments fix them at principled defaults rather than sweeping them.
 
-> In a production multi-robot vineyard simulator with habituating deterrence effectiveness, replacing legacy predictive deterrence value with a habituation-aware STL robustness improvement reduces value-weighted exposure and increases cue variety. The no-habituation control collapses the full STL system to the no-habituation STL baseline, isolating the effect of the habituation clause.
+Threats to validity:
 
-Avoid overstating:
+- The study is simulation-only and has no physical-robot validation.
+- The simulator has access to the ground-truth process used to generate events.
+- Detection noise is not the primary modeled uncertainty in the headline STL ladder.
+- The predictive workload generator is in-house.
+- The habituation model is a stylized abstraction and is not fitted to ecological field data.
 
-- Do not claim field validation.
-- Do not claim the habituation parameters are biologically fitted.
-- Do not treat global STL robustness as the sole result metric; B4 includes a stricter formula than B3, so exposure and mechanism metrics carry the primary comparison.
+These limitations should be stated in the thesis. They do not invalidate the central simulation claim tested here: holding the simulator, SESTPP model, dispatch logic, and workload setting fixed, replacing the predictive value function with habituation-aware STL robustness improves outcomes under habituating truth. Broader claims across alternative workload generators or ecological parameterizations should be treated as future validation unless additional sweeps are run.
+
+## Current Claim
+
+The production integration is complete, the revised ladder validates the mechanism, and the 10-seed B2-inclusive confirmatory batch supports the central simulation claim. H3 should be reported as a weaker directional result unless additional sensitivity runs make it statistically decisive.

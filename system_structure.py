@@ -9,7 +9,16 @@ from action_schema import task_action_kind, task_action_name, task_action_public
 PRODUCTION_CONFIG_SECTIONS: Dict[str, tuple[str, ...]] = {
     "field_timing": ("W", "H", "seed", "dt", "T_end", "fps"),
     "fleet": ("Nrobots", "uav_fraction"),
-    "zone_partitioning": ("mode", "scale", "gamma", "health_threshold", "debug_zone_areas"),
+    "zone_partitioning": (
+        "mode",
+        "scale",
+        "gamma",
+        "health_threshold",
+        "health_retire_threshold",
+        "health_recharge_time_s",
+        "health_recovered_value",
+        "debug_zone_areas",
+    ),
     "model": (
         "NX",
         "NY",
@@ -161,6 +170,7 @@ PRODUCTION_CONFIG_SECTIONS: Dict[str, tuple[str, ...]] = {
         "predictive_deadline_weight",
         "predictive_eta_penalty_weight",
         "predictive_utility_mode",
+        "predictive_fixed_deterring_mode",
         "predictive_confidence_source",
         "predictive_confidence_power",
         "predictive_time_score_deadline_scale_s",
@@ -386,6 +396,7 @@ class TaskGenerationStageResult:
                     "predictive_offset_cap_s": task.get("predictive_offset_cap_s"),
                     "predictive_mode_variant_count": task.get("predictive_mode_variant_count"),
                     "predictive_generation_best_mode": task.get("predictive_generation_best_mode"),
+                    "predictive_fixed_deterring_mode": task.get("predictive_fixed_deterring_mode"),
                     "predictive_dispatch_resolved_mode": task.get("predictive_dispatch_resolved_mode"),
                     "predictive_dispatch_eta_basis": task.get("predictive_dispatch_eta_basis"),
                 }
@@ -514,6 +525,7 @@ class DispatchStageResult:
                     "predictive_offset_cap_s": task.get("predictive_offset_cap_s"),
                     "predictive_mode_variant_count": task.get("predictive_mode_variant_count"),
                     "predictive_generation_best_mode": task.get("predictive_generation_best_mode"),
+                    "predictive_fixed_deterring_mode": task.get("predictive_fixed_deterring_mode"),
                     "predictive_dispatch_resolved_mode": task.get("predictive_dispatch_resolved_mode"),
                     "predictive_dispatch_eta_basis": task.get("predictive_dispatch_eta_basis"),
                     "predictive_confidence": task.get("predictive_confidence"),
@@ -741,6 +753,11 @@ class MetricsStageResult:
     predictive_timing_mode: str
     predictive_expiry_grace_s: float
     predictive_selection_policy: str
+    zone_repartition_total: int
+    health_retirement_total: int
+    health_return_total: int
+    active_robot_count: int
+    retired_robot_count: int
     habituation_eta_mean: float
     habituation_eta_min: float
     habituation_eta_at_apply_mean: float
@@ -835,6 +852,11 @@ class MetricsStageResult:
             "predictive_timing_mode": str(self.predictive_timing_mode),
             "predictive_expiry_grace_s": float(self.predictive_expiry_grace_s),
             "predictive_selection_policy": str(self.predictive_selection_policy),
+            "zone_repartition_total": int(self.zone_repartition_total),
+            "health_retirement_total": int(self.health_retirement_total),
+            "health_return_total": int(self.health_return_total),
+            "active_robot_count": int(self.active_robot_count),
+            "retired_robot_count": int(self.retired_robot_count),
             "habituation_eta_mean": float(self.habituation_eta_mean),
             "habituation_eta_min": float(self.habituation_eta_min),
             "habituation_eta_at_apply_mean": float(self.habituation_eta_at_apply_mean),

@@ -19,18 +19,53 @@
 - The nominal winner still worsens log loss, Brier score, or NLL once CI95 uncertainty is considered.
 
 ## Key Outputs
-- Per-run CSV: `sestpp_calibration_sweep_per_run.csv`
-- Summary CSV: `sestpp_calibration_sweep_summary.csv`
-- Ranking CSV: `sestpp_calibration_sweep_ranking.csv`
+- Prediction-only stage summary CSV: `sestpp_prediction_only_calibration_summary.csv`
+- Proposed stage summary CSV: `sestpp_proposed_calibration_summary.csv`
+- Joint pairing stage summary CSV: `sestpp_joint_calibration_summary.csv`
+- Canonical per-run CSV: `sestpp_calibration_sweep_per_run.csv`
+- Canonical summary CSV: `sestpp_calibration_sweep_summary.csv`
+- Canonical ranking CSV: `sestpp_calibration_sweep_ranking.csv`
 - Manifest: `sestpp_calibration_sweep_manifest.json`
 - Ranking plot: `sestpp_calibration_sweep_tradeoff.png`
+- Divergence-rerank summary CSV: `sestpp_divergence_rerank_summary.csv`
 
-## Current Best-Ranked Config
-- Config id: `C37`
-- Proposed field log loss mean +/- CI95: 19.8133 +/- 0.0240
-- Proposed field Brier mean +/- CI95: 0.9641 +/- 8.504e-04
-- Proposed NLL mean +/- CI95: 31210070.7749 +/- 545525.0556
-- NLL improvement mean: 9.1582%
+## Best Prediction-Only Config
+- Config id: `P01`
+- Prediction-only field log loss mean +/- CI95: 18.9911 +/- 0.0574
+- Prediction-only field Brier mean +/- CI95: 0.9716 +/- 3.238e-04
+- Prediction-only NLL mean +/- CI95: 15684559.4381 +/- 254998.9268
+
+## Best Proposed Config
+- Config id: `R27`
+- Proposed field log loss mean +/- CI95: 16.3764 +/- 0.1270
+- Proposed field Brier mean +/- CI95: 0.8611 +/- 0.0043
+- Proposed NLL mean +/- CI95: 12609086.5371 +/- 237415.6086
+
+## Best Joint Pair
+- Config id: `C001`
+- Prediction-only config id: `P01`
+- Proposed config id: `R27`
+- Guardrail satisfied: `True`
+- Proposed field log loss mean +/- CI95: 16.3764 +/- 0.1270
+- Proposed field Brier mean +/- CI95: 0.8611 +/- 0.0043
+- Proposed NLL mean +/- CI95: 12609086.5371 +/- 237415.6086
+- NLL improvement mean: 19.6152%
+
+### Saved Parameter Blocks
+- Prediction-only sigma/omega/alpha_in/mu_base: `10.0000` / `450.0000` / `0.1500` / `2.500e-05`
+- Proposed sigma/omega/alpha_in/alpha_inhib/mu_base: `10.0000` / `450.0000` / `0.1500` / `0.9000` / `2.500e-05`
+
+## Deployment Recommendation
+- Selection policy: `divergence_rerank`
+- Recommended config id: `C004`
+- Calibration rank: `2`
+- Divergence status: `PASS`
+- Suppressed-area mean +/- CI95: 0.9948 +/- 0.0013
+- Final exposure improve mean +/- CI95: 0.7172 +/- 2.4959
+- Final response improve mean +/- CI95: -22.9894 +/- 19.5826
+
+## Guardrail
+- Any full config satisfied paired non-worsening guardrails: `True`
 
 ## Experiment Execution Order
 

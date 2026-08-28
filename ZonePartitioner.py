@@ -200,7 +200,9 @@ class ZonePartitioner:
 
         # include only the requested types in the partition
         include = [r["id"] for r in robots_def if profiles[r["id"]].type in partition_types]
-        self.ids      = include
+        self.all_ids  = include[:]
+        self.excluded_ids = set()
+        self.ids      = include[:]
         self.anchors  = {rid: tuple(next(rd["anchor"] for rd in robots_def if rd["id"]==rid)) for rid in include}
         self.healths  = {rid: float(next(rd["health"] for rd in robots_def if rd["id"]==rid)) for rid in include}
         self.profiles = profiles  # for health reads if you want to sync
@@ -220,10 +222,17 @@ class ZonePartitioner:
         return True
 
     def update_anchor(self, rid, xy):
-        self.anchors[rid] = (float(xy[0]), float(xy[1]))
+        if rid in self.anchors:
+            self.anchors[rid] = (float(xy[0]), float(xy[1]))
 
     def set_health(self, rid, h):
-        self.healths[rid] = float(h)
+        if rid in self.healths:
+            self.healths[rid] = float(h)
+
+    def set_excluded_ids(self, excluded_ids):
+        """Exclude failed partitioned robots from subsequent power diagrams."""
+        self.excluded_ids = {str(rid) for rid in (excluded_ids or [])}
+        self.ids = [rid for rid in self.all_ids if rid not in self.excluded_ids]
 
     def maybe_trigger(self, health_threshold=0.25, drop_fraction=0.5, previous_healths=None) -> bool:
         """
@@ -254,3 +263,264 @@ class ZonePartitioner:
             return []
         i = self.ids.index(rid)
         return [self.ids[j] for j in self.nbrs.get(i, [])]
+
+
+# -------------------------------
+# Demo: zone partitioning theory
+# -------------------------------
+
+class _ZonePartitionTheoryDemoProfile:
+    def __init__(self, robot_type: str):
+        self.type = robot_type
+
+
+def _demo_profiles_for(robots_def):
+    return {
+        r["id"]: _ZonePartitionTheoryDemoProfile(r.get("type", "UGV"))
+        for r in robots_def
+    }
+
+
+def _demo_weights(partitioner: ZonePartitioner) -> List[float]:
+    return [
+        health_to_weight(
+            partitioner.healths[rid],
+            mode=partitioner.mode,
+            scale=partitioner.scale,
+            gamma=partitioner.gamma,
+        )
+        for rid in partitioner.ids
+    ]
+
+
+def _demo_rows(label: str, partitioner: ZonePartitioner) -> List[Dict[str, object]]:
+    weights = _demo_weights(partitioner)
+    rows = []
+    for i, rid in enumerate(partitioner.ids):
+        rows.append(
+            {
+                "scenario": label,
+                "robot": rid,
+                "health": round(float(partitioner.healths[rid]), 3),
+                "weight": round(float(weights[i]), 1),
+                "area": round(float(polygon_area(partitioner.cells[i])), 1),
+                "neighbors": ",".join(partitioner.neighbors_for_id(rid)),
+            }
+        )
+    return rows
+
+
+def _demo_plot_partition(ax, partitioner: ZonePartitioner, title: str, subtitle: str) -> None:
+    colors = plt.get_cmap("tab10")
+    weights = _demo_weights(partitioner)
+
+    for i, rid in enumerate(partitioner.ids):
+        poly = partitioner.cells[i]
+        if not poly:
+            continue
+
+        xs = [p[0] for p in poly] + [poly[0][0]]
+        ys = [p[1] for p in poly] + [poly[0][1]]
+        color = colors(i)
+        ax.fill(xs, ys, facecolor=color, edgecolor=color, linewidth=2.0, alpha=0.28)
+        ax.plot(xs, ys, color=color, linewidth=2.0)
+
+        cx, cy = polygon_centroid(poly)
+        ax.text(
+            cx,
+            cy,
+            f"{rid}\nA={polygon_area(poly):.0f}",
+            ha="center",
+            va="center",
+            fontsize=8,
+            color="black",
+            bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.75, "pad": 2.0},
+        )
+
+        x, y = partitioner.anchors[rid]
+        ax.scatter([x], [y], s=75, color=color, edgecolor="black", linewidth=0.8, zorder=5)
+        ax.text(
+            x + 1.6,
+            y + 1.6,
+            f"h={partitioner.healths[rid]:.2f}\nw={weights[i]:.0f}",
+            ha="left",
+            va="bottom",
+            fontsize=7,
+            bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.72, "pad": 1.5},
+        )
+
+    ax.set_title(f"{title}\n{subtitle}", fontsize=10)
+    ax.set_xlim(0.0, partitioner.W)
+    ax.set_ylim(0.0, partitioner.H)
+    ax.set_aspect("equal", "box")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(True, linestyle=":", alpha=0.35)
+
+
+def _demo_plot_area_summary(ax, summary_df: pd.DataFrame, robot_ids: List[str]) -> None:
+    scenarios = ["neutral", "weighted", "after_health_drop"]
+    labels = {
+        "neutral": "neutral",
+        "weighted": "health weighted",
+        "after_health_drop": "after health drop",
+    }
+    x = np.arange(len(robot_ids))
+    width = 0.25
+
+    for offset, scenario in zip([-width, 0.0, width], scenarios):
+        sub = summary_df[summary_df["scenario"] == scenario].set_index("robot")
+        areas = [float(sub.loc[rid, "area"]) for rid in robot_ids]
+        ax.bar(x + offset, areas, width=width, label=labels[scenario])
+
+    weighted = summary_df[summary_df["scenario"] == "weighted"].set_index("robot")
+    damaged = summary_df[summary_df["scenario"] == "after_health_drop"].set_index("robot")
+    ax2 = ax.twinx()
+    ax2.plot(
+        x,
+        [float(weighted.loc[rid, "health"]) for rid in robot_ids],
+        color="black",
+        marker="o",
+        linewidth=1.6,
+        label="initial health",
+    )
+    ax2.plot(
+        x,
+        [float(damaged.loc[rid, "health"]) for rid in robot_ids],
+        color="dimgray",
+        marker="x",
+        linewidth=1.6,
+        linestyle="--",
+        label="post-drop health",
+    )
+
+    ax.set_title("Cell area response\npower score = distance^2 - weight", fontsize=10)
+    ax.set_xticks(x)
+    ax.set_xticklabels(robot_ids, rotation=20)
+    ax.set_ylabel("zone area")
+    ax2.set_ylabel("health")
+    ax2.set_ylim(0.0, 1.05)
+    ax.grid(True, axis="y", linestyle=":", alpha=0.35)
+
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(handles1 + handles2, labels1 + labels2, loc="upper right", fontsize=7)
+
+
+def run_zone_partitioning_theory_demo(show: bool = True) -> str:
+    """
+    Demonstrate the health-weighted power diagram theory used by ZonePartitioner.
+
+    Running this module directly saves a multi-panel figure and, when the active
+    matplotlib backend supports it, opens the figure window.
+    """
+    import os
+
+    W, H = 100.0, 100.0
+    scale, gamma = 4000.0, 1.0
+    robots_def = [
+        {"id": "UGV-A", "anchor": (25.0, 25.0), "health": 1.00, "type": "UGV"},
+        {"id": "UGV-B", "anchor": (75.0, 25.0), "health": 0.80, "type": "UGV"},
+        {"id": "UGV-C", "anchor": (75.0, 75.0), "health": 0.60, "type": "UGV"},
+        {"id": "UGV-D", "anchor": (25.0, 75.0), "health": 0.40, "type": "UGV"},
+        {"id": "UAV-Scout", "anchor": (50.0, 50.0), "health": 1.00, "type": "UAV"},
+    ]
+    profiles = _demo_profiles_for(robots_def)
+
+    neutral = ZonePartitioner(
+        W,
+        H,
+        robots_def,
+        profiles,
+        mode="direct",
+        scale=0.0,
+        gamma=gamma,
+        partition_types=("UGV",),
+    )
+    weighted = ZonePartitioner(
+        W,
+        H,
+        robots_def,
+        profiles,
+        mode="direct",
+        scale=scale,
+        gamma=gamma,
+        partition_types=("UGV",),
+    )
+    after_drop = ZonePartitioner(
+        W,
+        H,
+        robots_def,
+        profiles,
+        mode="direct",
+        scale=scale,
+        gamma=gamma,
+        partition_types=("UGV",),
+    )
+
+    previous_healths = dict(after_drop.healths)
+    after_drop.set_health("UGV-A", 0.15)
+    triggered = after_drop.maybe_trigger(
+        health_threshold=0.25,
+        drop_fraction=0.5,
+        previous_healths=previous_healths,
+    )
+    if triggered:
+        after_drop.recompute(force=True)
+
+    rows = (
+        _demo_rows("neutral", neutral)
+        + _demo_rows("weighted", weighted)
+        + _demo_rows("after_health_drop", after_drop)
+    )
+    summary_df = pd.DataFrame(rows)
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    _demo_plot_partition(
+        axes[0, 0],
+        neutral,
+        "1. Neutral Voronoi partition",
+        "all weights are zero, so ownership is geometric",
+    )
+    _demo_plot_partition(
+        axes[0, 1],
+        weighted,
+        "2. Health-weighted power diagram",
+        "direct mode: higher health creates a larger weight",
+    )
+    _demo_plot_partition(
+        axes[1, 0],
+        after_drop,
+        "3. Triggered repartition after health loss",
+        f"UGV-A health drops below 0.25, trigger={triggered}",
+    )
+    _demo_plot_area_summary(axes[1, 1], summary_df, weighted.ids)
+
+    fig.suptitle(
+        "Zone partitioning theory demo: power cells allocate more area to healthier UGVs",
+        fontsize=13,
+    )
+    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.95])
+
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demos")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, "zone_partitioning_theory_demo.png")
+    fig.savefig(out_path, dpi=180)
+
+    print("\nZone partitioning theory demo")
+    print("Power score: distance_to_anchor^2 - health_weight")
+    print(f"Direct health weight: weight = {scale:.0f} * health^{gamma:.1f}")
+    print("Partitioned robot types: UGV. UAV-Scout is intentionally excluded.")
+    print(summary_df.to_string(index=False))
+    print(f"[demo] saved visualization to: {out_path}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return out_path
+
+
+if __name__ == "__main__":
+    run_zone_partitioning_theory_demo()

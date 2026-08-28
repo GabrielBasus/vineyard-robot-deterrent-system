@@ -247,7 +247,7 @@ The production system is evaluated against the same main baselines used througho
 1. `reactive`: direct-response deterring only,
 2. `prediction_only`: patrol forecasting without intervention feedback,
 3. `proposed`: intervention-aware forecasting and preventive deterring.
-4. `B3_res_stl_nohab` / `B4_res_stl_full`: STL predictive-value baselines for the habituation study.
+4. `B3_res_stl_nohab_fixedcue` / `B4_res_stl_full_multicue`: STL predictive-value baselines for the habituation study, isolating fixed-cue STL from the full habituation-aware multi-cue proposal.
 
 The current staged validation flow is:
 
