@@ -350,6 +350,45 @@ class TaskGeneratorCounterfactualScoringTests(unittest.TestCase):
         self.assertAlmostEqual(row["predicted_deltaJ"], row["predictive_stl_U"], places=10)
         self.assertGreater(row["deltaJ_per_cost"], 0.0)
 
+    def test_legacy_habituation_mode_chooses_fresh_cue_without_stl_value(self):
+        deterring_modes = {
+            "habituated_mode": {
+                "beta": 3.0,
+                "omega": 60.0,
+                "sigma": 2.0,
+                "w_eta": 1.0,
+                "fixed_cost": 0.0,
+            },
+            "fresh_mode": {
+                "beta": 3.0,
+                "omega": 60.0,
+                "sigma": 2.0,
+                "w_eta": 1.0,
+                "fixed_cost": 0.0,
+            },
+        }
+        hab = HabituationField(n_cells=1, n_modes=2, T_rec=1800.0, kappa=0.5)
+        for _ in range(4):
+            hab.apply(0, 0)
+
+        row = self._generate_deterring_task(
+            event_points=[(20.0, 20.0)] * 8,
+            deterring_modes=deterring_modes,
+            periodic_kwargs={
+                "predictive_utility_mode": "legacy_habituation",
+                "stl_hab": hab,
+                "stl_mode_to_id": {"habituated_mode": 0, "fresh_mode": 1},
+                "stl_cell_id_for_xy_fn": lambda _x, _y: 0,
+            },
+        )
+
+        variants = {variant["mode"]: variant for variant in row["predictive_action_variants"]}
+        self.assertEqual(row["mode"], "fresh_mode", msg=str(row["predictive_action_variants"]))
+        self.assertIsNone(row.get("predictive_stl_U"))
+        self.assertAlmostEqual(row["habituation_eta_at_plan"], 1.0)
+        self.assertLess(variants["habituated_mode"]["habituation_eta_at_plan"], 1.0)
+        self.assertGreater(variants["fresh_mode"]["utility"], variants["habituated_mode"]["utility"])
+
     def test_hotspot_origin_can_generate_without_recent_detection_support(self):
         model = self._build_model()
         self._stamp_events(model, [(20.0, 20.0)] * 6)

@@ -440,6 +440,12 @@ Run the revised confirmatory B1/B2/B3/B4 batch:
 C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue --max-workers 4
 ```
 
+Run the B5 supplemental baseline without rerunning B1-B4. B5 keeps B1's unconstrained exposure-greedy dispatch but chooses cue modes using current habituation effectiveness, with no STL robustness:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B5_greedy_habcue --merge-existing-raw --max-workers 4
+```
+
 Summarize ladder outputs:
 
 ```powershell
@@ -523,7 +529,7 @@ Run shape:
 
 - duration: 1800 seconds
 - seeds: 125-134
-- systems: `B1_greedy_fixedcue`, `B2_res_deltaJ_fixedcue`, `B3_res_stl_nohab_fixedcue`, `B4_res_stl_full_multicue`
+- systems: `B1_greedy_fixedcue`, `B2_res_deltaJ_fixedcue`, `B3_res_stl_nohab_fixedcue`, `B4_res_stl_full_multicue`, `B5_greedy_habcue`
 - controls: habituation on and habituation off
 - status: confirmatory
 
@@ -534,6 +540,8 @@ Primary paired exposure results:
 | B4 - B1 | habituation on | -3696.74 | [-5226.86, -2166.61] | 9/10 |
 | B4 - B3 | habituation on | -4277.35 | [-5791.31, -2763.40] | 10/10 |
 | B3 - B2 | habituation on | -689.90 | [-1537.63, +157.84] | 7/10 |
+| B5 - B1 | habituation on | -2220.87 | [-2977.34, -1464.40] | 10/10 |
+| B4 - B5 | habituation on | -1475.87 | [-3350.76, +399.01] | 7/10 |
 | B4 - B3 | habituation off | 0.00 | [0.00, 0.00] | 0/10 |
 
 Mechanism check under habituating truth:
@@ -545,7 +553,7 @@ Mechanism check under habituating truth:
 | Eta at apply | +0.1559 | [+0.1012, +0.2106] |
 | Variety index | +0.3634 | [+0.2498, +0.4770] |
 
-Interpretation: B4 reduced value-weighted exposure relative to both the greedy fixed-cue baseline and the STL-without-habituation fixed-cue baseline when truth habituated. When habituation was disabled, B4 collapsed exactly to B3, which isolates the advantage to the habituation-aware STL cue-variety clause. B3 also improved over B2 on mean exposure, but that comparison is directional because the confidence interval crosses zero.
+Interpretation: B4 reduced value-weighted exposure relative to both the greedy fixed-cue baseline and the STL-without-habituation fixed-cue baseline when truth habituated. B5 shows that simple habituation-aware cue rotation also improves over B1, so the strongest confirmed claim is cue-variety under habituation. B4 still beats B5 on mean exposure, but that comparison is directional because the confidence interval crosses zero.
 
 STL result artifacts:
 

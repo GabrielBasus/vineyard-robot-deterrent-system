@@ -7,6 +7,7 @@ import numpy as np
 
 PREDICTIVE_UTILITY_MODES = (
     "legacy",
+    "legacy_habituation",
     "deltaJ",
     "bernoulli_expected_deltaJ",
     "stl_robustness",
@@ -18,6 +19,16 @@ def canonical_predictive_utility_mode(mode: str | None) -> str:
     key = str(mode or "legacy").strip().lower().replace("-", "_")
     if key in {"", "legacy", "taskgenerator", "task_generator"}:
         return "legacy"
+    if key in {
+        "legacy_habituation",
+        "habituation_legacy",
+        "habituation_aware",
+        "habituation_aware_legacy",
+        "eta_scaled_legacy",
+        "eta_scaled_deltaj",
+        "eta_scaled_delta_j",
+    }:
+        return "legacy_habituation"
     if key in {"deltaj", "delta_j", "raw_deltaj", "raw_delta_j", "deterministic"}:
         return "deltaJ"
     if key in {
@@ -274,6 +285,7 @@ def annotate_predictive_utility_fields(
                         "predicted_deltaJ",
                         "deltaJ_per_cost",
                         "cost_eta",
+                        "habituation_eta_at_plan",
                         "p_event",
                         "risk_conf",
                         "selection_weight",

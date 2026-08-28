@@ -634,6 +634,15 @@ class TaskGenerator:
             "robustness",
             "counterfactual_robustness",
         }
+        use_habituation_aware_legacy_value = predictive_utility_mode_key in {
+            "legacy_habituation",
+            "habituation_legacy",
+            "habituation_aware",
+            "habituation_aware_legacy",
+            "eta_scaled_legacy",
+            "eta_scaled_deltaj",
+            "eta_scaled_delta_j",
+        }
 
         for rid, rob in robots.items():
             # ----------------------------------------------------------------
@@ -975,6 +984,27 @@ class TaskGenerator:
                 lam_patch = max(lam_patch, 0.0)
                 return float(1.0 - math.exp(-lam_patch))
 
+            def _habituation_eta_for_candidate(x, y, mode):
+                """Return current cue effectiveness for non-STL habituation-aware scoring."""
+                if stl_hab is None:
+                    return 1.0
+                target_cell_id = None
+                if callable(stl_cell_id_for_xy_fn):
+                    target_cell_id = stl_cell_id_for_xy_fn(float(x), float(y))
+                if target_cell_id is None:
+                    return 1.0
+                mode_id = None
+                if stl_mode_to_id is not None:
+                    mode_id = dict(stl_mode_to_id).get(str(mode))
+                    if mode_id is None:
+                        mode_id = dict(stl_mode_to_id).get(mode)
+                if mode_id is None:
+                    return 1.0
+                try:
+                    return float(stl_hab.effectiveness(int(target_cell_id), int(mode_id)))
+                except Exception:
+                    return 1.0
+
             def _deterrence_candidate_metrics(x, y, mode):
                 """Compute predictive deterrence value, cost, confidence, and STL fields."""
                 params = deterring_modes.get(mode, {})
@@ -1056,17 +1086,24 @@ class TaskGenerator:
                     available_integral_grid=available_excess_integral_grid,
                 )
                 predicted_reduction_raw = float(reduction_summary["predicted_reduction_raw"])
-                utility = predicted_reduction_raw - cost_eta
+                eta_at_plan = (
+                    _habituation_eta_for_candidate(x, y, mode)
+                    if use_habituation_aware_legacy_value
+                    else 1.0
+                )
+                predicted_delta_j = float(predicted_reduction_raw) * float(eta_at_plan)
+                utility = predicted_delta_j - cost_eta
                 return {
                     "predicted_reduction_raw": float(predicted_reduction_raw),
-                    "predicted_deltaJ": float(predicted_reduction_raw),
+                    "predicted_deltaJ": float(predicted_delta_j),
                     "cost_eta": float(cost_eta),
                     "utility": float(utility),
                     "score": float(utility),
-                    "deltaJ_per_cost": float(predicted_reduction_raw / max(cost_eta, 1e-6)),
+                    "deltaJ_per_cost": float(predicted_delta_j / max(cost_eta, 1e-6)),
                     "beta": float(beta),
                     "omega_u": float(omega_u),
                     "sigma_u": float(sigma_u),
+                    "habituation_eta_at_plan": float(eta_at_plan),
                     "reduction_summary": reduction_summary,
                 }
 
@@ -1312,6 +1349,7 @@ class TaskGenerator:
                     best_mode_deltaJ_per_cost = None
                     best_mode_predicted_deltaJ = None
                     best_mode_score = None
+                    best_mode_habituation_eta_at_plan = None
                     mode_variants: list[dict[str, Any]] = []
                     for mode in candidate_deterring_modes:
                         mode_metrics = _deterrence_candidate_metrics(dx, dy, mode)
@@ -1329,6 +1367,7 @@ class TaskGenerator:
                             "utility": float(mode_utility),
                             "predicted_deltaJ": float(mode_predicted_deltaJ),
                             "predictive_stl_U": mode_metrics.get("predictive_stl_U"),
+                            "habituation_eta_at_plan": mode_metrics.get("habituation_eta_at_plan"),
                             "stl_summary": mode_metrics.get("stl_summary"),
                             "deltaJ_per_cost": float(mode_deltaJ_per_cost),
                             "cost_eta": float(mode_cost),
@@ -1351,6 +1390,7 @@ class TaskGenerator:
                             best_mode_event_prob = mode_p_event
                             best_mode_deltaJ_per_cost = mode_deltaJ_per_cost
                             best_mode_predicted_deltaJ = mode_predicted_deltaJ
+                            best_mode_habituation_eta_at_plan = mode_metrics.get("habituation_eta_at_plan")
 
                     if _origin_is_detection_cluster(origin):
                         self._deterring_cluster_state[cluster_key] = {
@@ -1416,6 +1456,9 @@ class TaskGenerator:
                                 float(best_mode_utility or 0.0)
                                 if use_stl_robustness_value
                                 else None
+                            ),
+                            "habituation_eta_at_plan": (
+                                None if best_mode is None else best_mode_habituation_eta_at_plan
                             ),
                             "llr": float(llr),
                             "recent_detection_count": int(recent_detection_count),
@@ -1696,6 +1739,7 @@ class TaskGenerator:
                         'persistence': int(best.get("persistence", 0)),
                         'predicted_deltaJ': float(best.get("predicted_deltaJ", 0.0)),
                         'predictive_stl_U': best.get("predictive_stl_U"),
+                        'habituation_eta_at_plan': best.get("habituation_eta_at_plan"),
                         'stl_summary': best.get("stl_summary"),
                         'p_event': float(best.get("p_event", 0.0)),
                         'deltaJ_per_cost': float(best.get("deltaJ_per_cost", 0.0)),
@@ -1802,6 +1846,11 @@ class TaskGenerator:
                 None
                 if task.get('predictive_stl_U') is None
                 else float(task.get('predictive_stl_U', 0.0))
+            ),
+            'habituation_eta_at_plan': (
+                None
+                if task.get('habituation_eta_at_plan') is None
+                else float(task.get('habituation_eta_at_plan', 1.0))
             ),
             'stl_summary': task.get('stl_summary'),
             'p_event': float(task.get('p_event', 0.0)),

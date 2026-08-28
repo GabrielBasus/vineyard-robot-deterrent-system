@@ -31,6 +31,7 @@ Complete in the production path:
 | B2 | Prior SESTPP deltaJ fixed-cue value | Reserved dispatcher, `predictive_utility_mode="deltaJ"`, fixed cue. |
 | B3 | STL without habituation clause, fixed cue | Reserved dispatcher, `predictive_utility_mode="stl_robustness"`, `stl_active_clauses=("exp","cov")`, fixed cue. |
 | B4 | Full proposal, multi-cue | Reserved dispatcher, `predictive_utility_mode="stl_robustness"`, `stl_active_clauses=("exp","cov","hab")`, cue variants enabled. |
+| B5 | Greedy exposure value with habituation-aware cues | B1-style `dispatch_policy="unc"`, `predictive_utility_mode="legacy_habituation"`, cue variants enabled, no STL robustness. |
 
 Each system should be run under both controls:
 
@@ -60,6 +61,12 @@ B1/B2/B3/B4 1800-second revised confirmatory run:
 C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue --max-workers 4
 ```
 
+B5 supplemental 1800-second run, reusing the already completed B1-B4 raw rows:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B5_greedy_habcue --merge-existing-raw --max-workers 4
+```
+
 Summarize a run directory:
 
 ```powershell
@@ -75,6 +82,8 @@ Under habituating truth in the 10-seed revised confirmatory batch:
 - B4 vs B1 exposure delta: `-3696.74`, 95% CI `[-5226.86, -2166.61]`, 9/10 seeds improved.
 - B4 vs B3 exposure delta: `-4277.35`, 95% CI `[-5791.31, -2763.40]`, 10/10 seeds improved.
 - B3 vs B2 exposure delta: `-689.90`, 95% CI `[-1537.63, +157.84]`, 7/10 seeds improved.
+- B5 vs B1 exposure delta: `-2220.87`, 95% CI `[-2977.34, -1464.40]`, 10/10 seeds improved.
+- B4 vs B5 exposure delta: `-1475.87`, 95% CI `[-3350.76, +399.01]`, 7/10 seeds improved.
 
 Under non-habituating truth:
 
@@ -95,7 +104,7 @@ Accepted for thesis writing:
 - ground-truth habituation is live and tested
 - B3/B4 control semantics are correct
 - confirmatory production result supports the central simulation claim
-- H3 is directionally supported but remains the weakest claim because its confidence interval crosses zero
+- H3 and B4-vs-B5 are directionally supported but remain weaker claims because their confidence intervals cross zero
 - reproducible commands and output locations are documented
 
 Remaining before final thesis submission:

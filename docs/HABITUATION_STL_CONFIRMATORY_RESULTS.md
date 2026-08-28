@@ -13,8 +13,10 @@ The current ladder definition is the revised fixed-cue versus multi-cue design i
 | `B2_res_deltaJ_fixedcue` | Reserved-capacity dispatch with prior `deltaJ` value and one fixed cue mode. |
 | `B3_res_stl_nohab_fixedcue` | Reserved-capacity STL value with exposure and coverage clauses only, one fixed cue mode. |
 | `B4_res_stl_full_multicue` | Full proposal: reserved-capacity STL value with exposure, coverage, and habituation clauses plus multi-cue action variants. |
+| `B5_greedy_habcue` | B1-style unconstrained exposure-greedy dispatch, but with non-STL habituation-aware cue selection. |
 
 This revision matches the STL package demo mechanism: the no-habituation baselines repeatedly use a fixed cue, while the full method can spend STL utility on cue variety.
+B5 is the added reader-check baseline: it tests whether simple cue rotation gets most of the benefit without STL.
 
 ## Revised-Ladder Confirmatory Run
 
@@ -28,7 +30,7 @@ Run shape:
 
 - duration: 1800 seconds
 - seeds: 125-134
-- systems: `B1_greedy_fixedcue`, `B2_res_deltaJ_fixedcue`, `B3_res_stl_nohab_fixedcue`, `B4_res_stl_full_multicue`
+- systems: `B1_greedy_fixedcue`, `B2_res_deltaJ_fixedcue`, `B3_res_stl_nohab_fixedcue`, `B4_res_stl_full_multicue`, `B5_greedy_habcue`
 - controls: habituation on and habituation off
 - truth rate: `mu_true=2e-05`
 - status: confirmatory
@@ -40,6 +42,8 @@ Primary paired exposure results:
 | B4 - B1 | habituation on | -3696.74 | [-5226.86, -2166.61] | 9/10 |
 | B4 - B3 | habituation on | -4277.35 | [-5791.31, -2763.40] | 10/10 |
 | B3 - B2 | habituation on | -689.90 | [-1537.63, +157.84] | 7/10 |
+| B5 - B1 | habituation on | -2220.87 | [-2977.34, -1464.40] | 10/10 |
+| B4 - B5 | habituation on | -1475.87 | [-3350.76, +399.01] | 7/10 |
 | B4 - B3 | habituation off | 0.00 | [0.00, 0.00] | 0/10 |
 
 Negative deltas are better because lower value-weighted exposure is the desired outcome.
@@ -53,7 +57,7 @@ Mechanism evidence for B4 - B3 under habituating truth:
 | Eta at apply | +0.1559 | [+0.1012, +0.2106] |
 | Variety index | +0.3634 | [+0.2498, +0.4770] |
 
-Interpretation: the revised ladder supports the central thesis claim. B4 chooses fresher cues, applies deterrence at higher effectiveness, increases realized suppression, and reduces value-weighted exposure relative to both the greedy fixed-cue baseline and the STL-without-habituation fixed-cue baseline. The exact B4/B3 no-habituation control isolates the result to the habituation-aware cue-variety mechanism. H3 is directionally consistent with the claim that smooth STL robustness improves over hand-tuned `deltaJ`, but its 95% CI crosses zero, so it should be framed as directional rather than fully confirmed.
+Interpretation: the revised ladder supports the central habituation mechanism, but the B5 ablation narrows the STL claim. A simple non-STL cue-rotation heuristic already recovers a substantial share of the gain over B1. B4 still has lower mean exposure than B5, but the B4-B5 confidence interval crosses zero in this 10-seed run, so the extra STL layer should be framed as directionally beneficial rather than conclusively better than cue rotation alone. The strongest confirmed result is that habituation-aware cue variety matters; the incremental value of STL beyond cue rotation needs either a larger run or a more targeted condition.
 
 Note on STL robustness: B4 uses a stricter formula than B3 because it includes the additional habituation clause. Do not use global robustness alone as the primary B4/B3 comparison; use exposure and the mechanism metrics above.
 
@@ -91,9 +95,19 @@ Then summarize:
 C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\summarize_habituation_stl_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed
 ```
 
+Run the B5 supplemental 10-seed batch without rerunning B1-B4:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B5_greedy_habcue --merge-existing-raw --max-workers 4
+```
+
+After B5 completes, the same output directory will contain raw rows for B1-B5 and regenerated combined CSV/Markdown summaries.
+
 Final thesis acceptance criteria:
 
 - B4 beats B3 under habituating truth on paired value-weighted exposure: satisfied, 10/10 seeds.
+- B4 beats B5 under habituating truth on paired value-weighted exposure: directionally satisfied, 7/10 seeds, but not significant at 95% confidence.
+- B5 beats B1 under habituating truth on paired value-weighted exposure: satisfied, 10/10 seeds.
 - B3 beats B2 under habituating truth on paired value-weighted exposure: directionally satisfied, 7/10 seeds, but not significant at 95% confidence.
 - B4/B3 is near-zero under non-habituating truth: satisfied, exactly zero.
 - B4 increases `habituation_variety_index` and `habituation_eta_at_apply_mean`: satisfied.
@@ -116,8 +130,8 @@ Threats to validity:
 - The predictive workload generator is in-house.
 - The habituation model is a stylized abstraction and is not fitted to ecological field data.
 
-These limitations should be stated in the thesis. They do not invalidate the central simulation claim tested here: holding the simulator, SESTPP model, dispatch logic, and workload setting fixed, replacing the predictive value function with habituation-aware STL robustness improves outcomes under habituating truth. Broader claims across alternative workload generators or ecological parameterizations should be treated as future validation unless additional sweeps are run.
+These limitations should be stated in the thesis. They do not invalidate the central simulation claim tested here: holding the simulator, SESTPP model, dispatch logic, and workload setting fixed, adding habituation-aware cue selection improves outcomes under habituating truth. The stronger claim that STL robustness adds decisive benefit beyond a non-STL cue-rotation heuristic should be treated as directional unless additional sweeps make B4 vs B5 statistically decisive.
 
 ## Current Claim
 
-The production integration is complete, the revised ladder validates the mechanism, and the 10-seed B2-inclusive confirmatory batch supports the central simulation claim. H3 should be reported as a weaker directional result unless additional sensitivity runs make it statistically decisive.
+The production integration is complete and the revised ladder validates the habituation-aware cue-variety mechanism. The 10-seed B2/B5-inclusive confirmatory batch supports B4 over B1 and B3, and supports B5 over B1. B4 over B5 and B3 over B2 should be reported as weaker directional results unless additional sensitivity runs make them statistically decisive.

@@ -174,6 +174,12 @@ def _system_params(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
             "predictive_utility_mode": "stl_robustness",
             "stl_active_clauses": ("exp", "cov", "hab"),
         },
+        "B5_greedy_habcue": {
+            **proposed,
+            "dispatch_policy": "unc",
+            "predictive_fixed_deterring_mode": None,
+            "predictive_utility_mode": "legacy_habituation",
+        },
     }
 
 
@@ -273,6 +279,8 @@ def _advantage_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ("H1_B4_vs_B1", "B4_res_stl_full_multicue", "B1_greedy_fixedcue", "value_weighted_exposure", "lower"),
         ("H2_B4_vs_B3", "B4_res_stl_full_multicue", "B3_res_stl_nohab_fixedcue", "value_weighted_exposure", "lower"),
         ("H3_B3_vs_B2", "B3_res_stl_nohab_fixedcue", "B2_res_deltaJ_fixedcue", "value_weighted_exposure", "lower"),
+        ("H4_B5_vs_B1", "B5_greedy_habcue", "B1_greedy_fixedcue", "value_weighted_exposure", "lower"),
+        ("H5_B4_vs_B5", "B4_res_stl_full_multicue", "B5_greedy_habcue", "value_weighted_exposure", "lower"),
         (
             "robustness_B4_vs_B3",
             "B4_res_stl_full_multicue",
@@ -492,6 +500,7 @@ def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
     b2 = _first_baseline(rows, ["B2_res_deltaJ_fixedcue", "B2_res_deltaJ"])
     b3 = _first_baseline(rows, ["B3_res_stl_nohab_fixedcue", "B3_res_stl_nohab"])
     b4 = _first_baseline(rows, ["B4_res_stl_full_multicue", "B4_res_stl_full"])
+    b5 = _first_baseline(rows, ["B5_greedy_habcue"])
 
     paired_counts = [
         len(_paired_deltas(rows, b4, ref, "hab_on", "value_weighted_exposure"))
@@ -564,6 +573,24 @@ def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
             "value_weighted_exposure",
             lower_is_better=True,
         ),
+        _comparison_row(
+            rows,
+            "B5 - B1",
+            b5,
+            b1,
+            "hab_on",
+            "value_weighted_exposure",
+            lower_is_better=True,
+        ),
+        _comparison_row(
+            rows,
+            "B4 - B5",
+            b4,
+            b5,
+            "hab_on",
+            "value_weighted_exposure",
+            lower_is_better=True,
+        ),
     ]
     lines.extend(row for row in comparison_rows if row is not None)
     lines.extend(
@@ -589,7 +616,7 @@ def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
             "",
             "## Interpretation",
             "",
-            "B4 is the proposal system when it uses the full exposure, coverage, and habituation STL clauses with multi-cue action variants. B3 removes the habituation clause and uses the fixed-cue control, so B4 - B3 isolates the cue-variety mechanism. The non-habituating B4/B3 control should be near zero when the only difference between the systems is the inactive habituation clause.",
+            "B4 is the proposal system when it uses the full exposure, coverage, and habituation STL clauses with multi-cue action variants. B3 removes the habituation clause and uses the fixed-cue control, so B4 - B3 isolates the cue-variety mechanism. B5 keeps B1's unconstrained exposure-greedy dispatch but lets the legacy exposure value choose cues using current habituation effectiveness, so B4 - B5 tests whether STL adds value beyond a simple cue-rotation heuristic. The non-habituating B4/B3 control should be near zero when the only difference between the systems is the inactive habituation clause.",
         ]
     )
     if status == "preliminary":
@@ -620,6 +647,7 @@ def _build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
         "B2_res_deltaJ": "B2_res_deltaJ_fixedcue",
         "B3_res_stl_nohab": "B3_res_stl_nohab_fixedcue",
         "B4_res_stl_full": "B4_res_stl_full_multicue",
+        "B5_greedy_habcue": "B5_greedy_habcue",
     }
     wanted = {
         aliases.get(str(name), str(name))
@@ -646,6 +674,19 @@ def _build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
                     }
                 )
     return jobs
+
+
+def _load_raw_rows(raw_dir: Path) -> list[dict[str, Any]]:
+    """Load previously completed raw JSON rows from a ladder output directory."""
+    rows = []
+    for path in sorted(raw_dir.glob("*.json")):
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(row, dict) and {"baseline", "habituation_condition", "seed"} <= set(row):
+            rows.append(row)
+    return rows
 
 
 def run(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -690,6 +731,15 @@ def run(args: argparse.Namespace) -> list[dict[str, Any]]:
                     flush=True,
                 )
 
+    if bool(getattr(args, "merge_existing_raw", False)):
+        merged_by_key = {
+            (str(row["baseline"]), str(row["habituation_condition"]), int(row["seed"])): row
+            for row in _load_raw_rows(raw_dir)
+        }
+        for row in rows:
+            merged_by_key[(str(row["baseline"]), str(row["habituation_condition"]), int(row["seed"]))] = row
+        rows = list(merged_by_key.values())
+
     rows = sorted(rows, key=lambda r: (str(r["baseline"]), str(r["habituation_condition"]), int(r["seed"])))
     _write_csv(rows, outdir / "per_run_metrics.csv")
     _write_csv(_summarize(rows), outdir / "summary_by_system.csv")
@@ -714,7 +764,7 @@ def run(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run clean B0-B4 habituation/STL production ladder.")
+    parser = argparse.ArgumentParser(description="Run clean B0-B5 habituation/STL production ladder.")
     parser.add_argument("--outdir", default="results/testbench/habituation_stl_production_ladder_short")
     parser.add_argument("--duration-s", type=float, default=900.0)
     parser.add_argument("--num-runs", type=int, default=3)
@@ -743,13 +793,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stl-horizon-s", type=float, default=300.0)
     parser.add_argument("--stl-theta", type=float, default=12.0)
     parser.add_argument(
+        "--merge-existing-raw",
+        action="store_true",
+        help=(
+            "After running the requested systems, rebuild summary CSV/Markdown from all raw JSON "
+            "files already present in --outdir. Use this for B5-only supplemental runs."
+        ),
+    )
+    parser.add_argument(
         "--systems",
         nargs="*",
         default=None,
         help=(
             "Optional subset: B0_reactive B1_greedy_fixedcue "
             "B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue "
-            "B4_res_stl_full_multicue. Legacy names are accepted as aliases."
+            "B4_res_stl_full_multicue B5_greedy_habcue. Legacy names are accepted as aliases."
         ),
     )
     return parser.parse_args()

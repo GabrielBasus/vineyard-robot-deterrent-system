@@ -80,6 +80,31 @@ class PredictiveUtilityPropagationTests(unittest.TestCase):
         self.assertAlmostEqual(annotated["predicted_deltaJ"], 2.5)
         self.assertAlmostEqual(annotated["utility"], 2.5)
         self.assertAlmostEqual(annotated["score"], 2.5)
+
+    def test_legacy_habituation_mode_preserves_task_generator_fields(self):
+        task = {
+            "type": "deterring",
+            "origin": "model_hotspot",
+            "mode": "laser",
+            "predicted_deltaJ": 7.5,
+            "utility": 3.5,
+            "score": 3.5,
+            "habituation_eta_at_plan": 0.5,
+            "p_event": 0.5,
+            "selection_weight": 0.5,
+        }
+
+        annotated = annotate_predictive_utility_fields(
+            task,
+            predictive_utility_mode="legacy_habituation",
+        )
+
+        self.assertEqual(annotated["predictive_utility_mode"], "legacy_habituation")
+        self.assertAlmostEqual(annotated["predicted_deltaJ"], 7.5)
+        self.assertAlmostEqual(annotated["utility"], 3.5)
+        self.assertAlmostEqual(annotated["score"], 3.5)
+        self.assertAlmostEqual(annotated["habituation_eta_at_plan"], 0.5)
+
     def test_confidence_survives_extraction_and_selection(self):
         predictive_row = {
             "robot_id": "r1",

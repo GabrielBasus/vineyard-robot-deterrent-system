@@ -5,7 +5,7 @@ This repo includes these maintained experiment runners:
 - `experiments/run_24h_experiment.py` (sequential, baseline/stable)
 - `experiments/run_24h_experiment_parallel.py` (multiprocessing, faster)
 - `demos/demo_live_day_vineyard.py` (single-file, audience-friendly visual demo)
-- `experiments/run_habituation_stl_production_ladder.py` (production B0-B4 habituation/STL ladder)
+- `experiments/run_habituation_stl_production_ladder.py` (production B0-B5 habituation/STL ladder)
 - `experiments/diagnose_habituation_stl_production.py` (short-run STL/habituation diagnostic)
 - `experiments/summarize_habituation_stl_ladder.py` (paired CSV summaries and `THESIS_RESULTS_SUMMARY.md`)
 
@@ -22,7 +22,7 @@ For the April thesis dispatch reframe, use `docs/THESIS_DISPATCH_RUNBOOK.md` for
 - [ ] Stage 4, planner / assignment tuning: `python -m experiments.run_assignment_tuning_sweep_lab --config configs/run_assignment_tuning_sweep_lab.yaml`
 - [ ] Stage 5, assignment-method comparison if still needed: `python -m experiments.run_assignment_method_comparison_lab --with-smoke-check` then `python -m plots.plot_assignment_method_comparison_lab`
 - [ ] Stage 6, robot scaling / long-horizon confirmation: `python -m experiments.run_robot_scaling_experiment --profile fast`
-- [ ] STL addendum, habituation-aware value: run the B0-B4 ladder and B1/B2/B3/B4 confirmatory batch documented below.
+- [ ] STL addendum, habituation-aware value: run the B0-B4 ladder, B1/B2/B3/B4 confirmatory batch, and B5 supplemental cue-rotation baseline documented below.
 - Use the README written into each stage output directory to decide whether the next stage is justified.
 - The concise thesis-methods version of this order is in `docs/EXPERIMENT_EXECUTION_ORDER.md`.
 
@@ -41,6 +41,14 @@ C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\ru
 
 ```powershell
 C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue --max-workers 4
+```
+
+### Supplemental B5 cue-rotation baseline
+
+Run only B5 and merge it with the existing B1-B4 raw rows:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B5_greedy_habcue --merge-existing-raw --max-workers 4
 ```
 
 ### Summarize a ladder run
