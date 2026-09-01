@@ -51,6 +51,14 @@ Run only B5 and merge it with the existing B1-B4 raw rows:
 C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_revised_confirm_with_b2_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --systems B5_greedy_habcue --merge-existing-raw --max-workers 4
 ```
 
+### Model-mismatch robustness check
+
+This run keeps the planner's assumed habituation model at the proposal default while making truth recover faster, generalize habituation across cues, and use an additive drop after each cue instead of the proposal multiplicative update:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_model_mismatch_b1_b5_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --truth-habituation-t-rec-s 900 --truth-habituation-gamma 0.35 --truth-habituation-update-model additive_drop --planner-habituation-t-rec-s 1800 --planner-habituation-gamma 0.0 --planner-habituation-update-model multiplicative --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue B5_greedy_habcue --max-workers 4
+```
+
 ### Summarize a ladder run
 
 ```powershell
@@ -66,6 +74,12 @@ Primary outputs:
 Primary metrics:
 
 - `value_weighted_exposure`
+- `mean_response_time_s`
+- `predictive_completion_ratio`
+- `predictive_expired_fraction`
+- `predictive_deadline_feasible_fraction`
+- `travel_distance_total`
+- `tasks_per_unit_distance`
 - `truth_suppression_rate`
 - `truth_suppression_effect_sum`
 - `habituation_eta_at_apply_mean`

@@ -41,11 +41,24 @@ def _scaled_deterring_modes(args: argparse.Namespace) -> dict[str, dict[str, flo
 METRIC_FIELDS = [
     "value_weighted_exposure",
     "mean_response_time_s",
+    "reactive_mean_response_time_s",
+    "response_samples",
+    "completed_tasks_total",
     "reactive_completed_total",
     "predictive_completed_total",
     "predictive_generated_total",
     "predictive_admitted_total",
+    "reactive_completed_fraction",
+    "predictive_completed_fraction",
     "predictive_completion_ratio",
+    "predictive_expired_total",
+    "predictive_expired_fraction",
+    "predictive_deadline_feasible_total",
+    "predictive_deadline_checked_total",
+    "predictive_deadline_feasible_fraction",
+    "travel_distance_total",
+    "tasks_per_unit_distance",
+    "exposure_per_completed_task",
     "zone_repartition_total",
     "health_retirement_total",
     "health_return_total",
@@ -60,6 +73,8 @@ METRIC_FIELDS = [
     "birds_deterred_pct",
     "habituation_eta_mean",
     "habituation_eta_min",
+    "planner_habituation_eta_mean",
+    "planner_habituation_eta_min",
     "habituation_eta_at_apply_mean",
     "habituation_variety_index",
     "stl_robustness_global_mean",
@@ -71,7 +86,7 @@ METRIC_FIELDS = [
 
 
 def _common_params(args: argparse.Namespace) -> dict[str, Any]:
-    return {
+    params = {
         "W": 500.0,
         "H": 500.0,
         "NX": int(args.nx),
@@ -108,6 +123,20 @@ def _common_params(args: argparse.Namespace) -> dict[str, Any]:
         "stl_horizon_s": float(args.stl_horizon_s),
         "stl_theta": float(args.stl_theta),
     }
+    optional_mismatch_args = {
+        "truth_habituation_T_rec_s": args.truth_habituation_t_rec_s,
+        "truth_habituation_kappa": args.truth_habituation_kappa,
+        "truth_habituation_gamma": args.truth_habituation_gamma,
+        "truth_habituation_update_model": args.truth_habituation_update_model,
+        "planner_habituation_T_rec_s": args.planner_habituation_t_rec_s,
+        "planner_habituation_kappa": args.planner_habituation_kappa,
+        "planner_habituation_gamma": args.planner_habituation_gamma,
+        "planner_habituation_update_model": args.planner_habituation_update_model,
+    }
+    for key, value in optional_mismatch_args.items():
+        if value is not None:
+            params[key] = value
+    return params
 
 
 def _proposed_generation_params() -> dict[str, Any]:
@@ -419,13 +448,47 @@ def _paired_deltas(
 
 
 def _ci95(values: list[float]) -> tuple[float, float]:
-    """Return a normal-approximation 95% confidence interval for paired deltas."""
+    """Return a two-sided 95% Student-t confidence interval for paired deltas."""
     if not values:
         return float("nan"), float("nan")
     mean = float(stats.mean(values))
     if len(values) <= 1:
         return mean, mean
-    half_width = 1.96 * float(stats.stdev(values)) / math.sqrt(len(values))
+    t_critical_95 = {
+        1: 12.706,
+        2: 4.303,
+        3: 3.182,
+        4: 2.776,
+        5: 2.571,
+        6: 2.447,
+        7: 2.365,
+        8: 2.306,
+        9: 2.262,
+        10: 2.228,
+        11: 2.201,
+        12: 2.179,
+        13: 2.160,
+        14: 2.145,
+        15: 2.131,
+        16: 2.120,
+        17: 2.110,
+        18: 2.101,
+        19: 2.093,
+        20: 2.086,
+        21: 2.080,
+        22: 2.074,
+        23: 2.069,
+        24: 2.064,
+        25: 2.060,
+        26: 2.056,
+        27: 2.052,
+        28: 2.048,
+        29: 2.045,
+        30: 2.042,
+    }
+    df = len(values) - 1
+    critical = t_critical_95.get(df, 1.96)
+    half_width = critical * float(stats.stdev(values)) / math.sqrt(len(values))
     return mean - half_width, mean + half_width
 
 
@@ -597,6 +660,7 @@ def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
         [
             "",
             "Negative exposure deltas are better because lower value-weighted exposure is the desired outcome.",
+            "Confidence intervals are paired two-sided 95% Student-t intervals over matched seeds.",
             "",
             "## Mechanism Evidence: B4 - B3 Under Habituation On",
             "",
@@ -786,6 +850,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deterrence-omega-scale", type=float, default=1.0)
     parser.add_argument("--fixed-cue-mode", default="laser")
     parser.add_argument("--habituation-kappa", type=float, default=0.5)
+    parser.add_argument("--truth-habituation-t-rec-s", type=float, default=None)
+    parser.add_argument("--truth-habituation-kappa", type=float, default=None)
+    parser.add_argument("--truth-habituation-gamma", type=float, default=None)
+    parser.add_argument("--truth-habituation-update-model", default=None)
+    parser.add_argument("--planner-habituation-t-rec-s", type=float, default=None)
+    parser.add_argument("--planner-habituation-kappa", type=float, default=None)
+    parser.add_argument("--planner-habituation-gamma", type=float, default=None)
+    parser.add_argument("--planner-habituation-update-model", default=None)
     parser.add_argument("--stl-e-star", type=float, default=5.0)
     parser.add_argument("--stl-t-cov-s", type=float, default=1200.0)
     parser.add_argument("--stl-w-s", type=float, default=600.0)

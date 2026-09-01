@@ -3,6 +3,7 @@ import unittest
 
 import DeterrentSystem as ds
 from action_schema import make_detection_action, make_deterring_mode_action
+from habituation_stl.habituation import HabituationField
 
 
 class GroundTruthHabituationWiringTests(unittest.TestCase):
@@ -41,6 +42,14 @@ class GroundTruthHabituationWiringTests(unittest.TestCase):
         self.assertEqual(beta, 0.25)
         self.assertEqual(sigma, 12.0)
         self.assertEqual(omega, 600.0)
+
+    def test_additive_habituation_update_supports_truth_model_mismatch(self):
+        hab = HabituationField(n_cells=1, n_modes=2, T_rec=1800.0, kappa=0.2, gamma=0.5)
+
+        ds._apply_habituation_update(hab, cell_id=0, mode_idx=0, update_model="additive_drop")
+
+        self.assertTrue(math.isclose(float(hab.eta[0, 0]), 0.8))
+        self.assertTrue(math.isclose(float(hab.eta[0, 1]), 0.9))
 
     def _run_probe(self, *, enable_habituation):
         last = None

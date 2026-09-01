@@ -39,27 +39,94 @@ Primary paired exposure results:
 
 | Comparison | Truth control | Mean delta in Jexp | 95% CI | Seeds improved |
 | --- | --- | ---: | ---: | ---: |
-| B4 - B1 | habituation on | -3696.74 | [-5226.86, -2166.61] | 9/10 |
-| B4 - B3 | habituation on | -4277.35 | [-5791.31, -2763.40] | 10/10 |
-| B3 - B2 | habituation on | -689.90 | [-1537.63, +157.84] | 7/10 |
-| B5 - B1 | habituation on | -2220.87 | [-2977.34, -1464.40] | 10/10 |
-| B4 - B5 | habituation on | -1475.87 | [-3350.76, +399.01] | 7/10 |
+| B4 - B1 | habituation on | -3696.74 | [-5462.62, -1930.85] | 9/10 |
+| B4 - B3 | habituation on | -4277.35 | [-6024.58, -2530.12] | 10/10 |
+| B3 - B2 | habituation on | -689.90 | [-1668.25, +288.46] | 7/10 |
+| B5 - B1 | habituation on | -2220.87 | [-3093.89, -1347.84] | 10/10 |
+| B4 - B5 | habituation on | -1475.87 | [-3639.64, +687.90] | 7/10 |
 | B4 - B3 | habituation off | 0.00 | [0.00, 0.00] | 0/10 |
 
-Negative deltas are better because lower value-weighted exposure is the desired outcome.
+Negative deltas are better because lower value-weighted exposure is the desired outcome. Confidence intervals are paired two-sided 95% Student-t intervals over matched seeds.
 
 Mechanism evidence for B4 - B3 under habituating truth:
 
 | Metric | Mean delta | 95% CI |
 | --- | ---: | ---: |
-| Truth suppression rate | +0.0867 | [+0.0596, +0.1139] |
-| Truth suppression effect sum | +1901.7389 | [+1346.1216, +2457.3562] |
-| Eta at apply | +0.1559 | [+0.1012, +0.2106] |
-| Variety index | +0.3634 | [+0.2498, +0.4770] |
+| Truth suppression rate | +0.0867 | [+0.0554, +0.1181] |
+| Truth suppression effect sum | +1901.7389 | [+1260.5112, +2542.9666] |
+| Eta at apply | +0.1559 | [+0.0927, +0.2190] |
+| Variety index | +0.3634 | [+0.2323, +0.4946] |
 
 Interpretation: the revised ladder supports the central habituation mechanism, but the B5 ablation narrows the STL claim. A simple non-STL cue-rotation heuristic already recovers a substantial share of the gain over B1. B4 still has lower mean exposure than B5, but the B4-B5 confidence interval crosses zero in this 10-seed run, so the extra STL layer should be framed as directionally beneficial rather than conclusively better than cue rotation alone. The strongest confirmed result is that habituation-aware cue variety matters; the incremental value of STL beyond cue rotation needs either a larger run or a more targeted condition.
 
 Note on STL robustness: B4 uses a stricter formula than B3 because it includes the additional habituation clause. Do not use global robustness alone as the primary B4/B3 comparison; use exposure and the mechanism metrics above.
+
+Guardrail and mechanism metrics under matched-model habituating truth:
+
+| System | Response s | Predictive completion ratio | Coverage robustness | Eta-bar at apply | Variety index | Suppression effect sum | Habituation-attributable exposure |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| B1 | 95.41 | 0.256 | 0.1555 | 0.3615 | 0.0000 | 3281.97 | +4723.11 |
+| B3 | 149.26 | 0.265 | -0.0266 | 0.3548 | 0.0000 | 3006.04 | +3881.80 |
+| B4 | 176.43 | 0.273 | 0.0838 | 0.5107 | 0.3634 | 4907.78 | -395.56 |
+| B5 | 102.62 | 0.245 | 0.0727 | 0.4485 | 0.1403 | 4294.19 | +2554.33 |
+
+Matched-model guardrail interpretation: B4 does not buy exposure improvement by degrading the available completion or coverage guardrails. It has the highest predictive completion ratio in this table and coverage robustness is positive. However, B4 does increase mean response time relative to B1 and B5, so response latency must be reported as a tradeoff. The strongest mechanism evidence is that B4 raises eta-bar at apply, increases variety, raises realized suppression effect, and nearly eliminates the habituation-attributable exposure penalty observed in B1, B3, and B5.
+
+## Model-Mismatch Robustness Run
+
+Robustness summarized run:
+
+```text
+results/testbench/habituation_stl_model_mismatch_b1_b5_1800s_10seed
+```
+
+This run deliberately breaks the self-fulfilling matched-model assumption. The realized truth process uses faster habituation recovery, cross-mode generalization, and an additive post-cue drop, while the planner still assumes the proposal multiplicative update with no cross-mode generalization.
+
+Run shape:
+
+- duration: 1800 seconds
+- seeds: 125-134
+- systems: `B1_greedy_fixedcue`, `B2_res_deltaJ_fixedcue`, `B3_res_stl_nohab_fixedcue`, `B4_res_stl_full_multicue`, `B5_greedy_habcue`
+- controls: habituation on and habituation off
+- truth mismatch: `truth_habituation_T_rec_s=900`, `truth_habituation_gamma=0.35`, `truth_habituation_update_model=additive_drop`
+- planner assumption: `planner_habituation_T_rec_s=1800`, `planner_habituation_gamma=0.0`, `planner_habituation_update_model=multiplicative`
+- status: robustness check
+
+Primary paired exposure results under habituating truth:
+
+| Comparison | Mean delta in Jexp | 95% CI | Seeds improved |
+| --- | ---: | ---: | ---: |
+| B4 - B1 | -2461.34 | [-3467.22, -1455.46] | 10/10 |
+| B4 - B3 | -2846.91 | [-3920.37, -1773.45] | 10/10 |
+| B3 - B2 | -111.31 | [-1090.87, +868.26] | 6/10 |
+| B5 - B1 | -1024.21 | [-1824.23, -224.20] | 8/10 |
+| B4 - B5 | -1437.13 | [-2669.03, -205.23] | 8/10 |
+
+Confidence intervals are paired two-sided 95% Student-t intervals over matched seeds.
+
+Mismatch diagnostics under habituating truth:
+
+| System | Truth eta mean | Planner eta mean | Eta at apply | Variety index |
+| --- | ---: | ---: | ---: | ---: |
+| B1 | 0.4748 | 0.8368 | 0.3163 | 0.0000 |
+| B3 | 0.5042 | 0.8383 | 0.3159 | 0.0000 |
+| B4 | 0.5085 | 0.7671 | 0.4035 | 0.3295 |
+| B5 | 0.4900 | 0.8092 | 0.3568 | 0.1145 |
+
+Interpretation: the mismatch result is stronger than the matched-model B5 ablation. B4 still beats B1 and B3 in every seed, and now also beats the non-STL B5 cue-rotation baseline with a negative 95% confidence interval. This supports the claim that the STL layer is not merely exploiting perfect knowledge of the ground-truth habituation model. The weaker result remains B3 versus B2, where STL without the habituation clause is approximately neutral.
+
+Guardrail and mechanism metrics under mismatched habituating truth:
+
+| System | Response s | Predictive completion ratio | Coverage robustness | Eta-bar at apply | Variety index | Suppression effect sum | Habituation-attributable exposure |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| B1 | 82.55 | 0.228 | -0.0269 | 0.3163 | 0.0000 | 3040.12 | +5317.43 |
+| B3 | 160.27 | 0.301 | 0.0651 | 0.3159 | 0.0000 | 2902.66 | +4281.07 |
+| B4 | 142.05 | 0.276 | 0.1766 | 0.4035 | 0.3295 | 4051.32 | +1434.16 |
+| B5 | 91.62 | 0.226 | 0.0834 | 0.3568 | 0.1145 | 3469.10 | +4345.31 |
+
+Mismatch guardrail interpretation: B4's exposure gain is not accompanied by a coverage robustness collapse; it has the best mean coverage robustness in the table. It also improves predictive completion ratio over B1 and B5, though B3 has the highest completion ratio. Response time is again slower than the unconstrained greedy systems, but faster than B3. Mechanistically, B4 has higher eta-bar at apply, much higher cue variety, higher suppression effect, and a much smaller habituation-attributable exposure penalty than B1, B3, or B5.
+
+Travel and explicit deadline-miss caveat: the completed B1-B5 ladder rows did not export `travel_distance_total`, `predictive_expired_fraction`, or `predictive_deadline_feasible_fraction`, so those guardrails cannot be reconstructed from the existing raw JSON. The ladder exporter now includes those fields for future reruns. Until that rerun is available, do not claim that B4 has no travel or deadline-miss cost; claim only what the current rows directly support.
 
 ## Calibration Pilot
 
@@ -103,10 +170,19 @@ C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\ru
 
 After B5 completes, the same output directory will contain raw rows for B1-B5 and regenerated combined CSV/Markdown summaries.
 
+Run the model-mismatch robustness check:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_production_ladder.py --outdir results\testbench\habituation_stl_model_mismatch_b1_b5_1800s_10seed --duration-s 1800 --num-runs 10 --seed-start 125 --warmup-s 0 --nx 60 --ny 48 --nrobots 4 --reservation-fraction 0.25 --mu-true 2e-05 --deterrence-beta-scale 4.0 --deterrence-sigma-scale 4.0 --deterrence-omega-scale 3.0 --habituation-kappa 0.5 --truth-habituation-t-rec-s 900 --truth-habituation-gamma 0.35 --truth-habituation-update-model additive_drop --planner-habituation-t-rec-s 1800 --planner-habituation-gamma 0.0 --planner-habituation-update-model multiplicative --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue B5_greedy_habcue --max-workers 4
+```
+
+This isolates model misspecification: the realized truth field recovers with `T_rec=900`, applies cross-mode generalization with `gamma=0.35`, and uses an additive post-cue drop. The planner still assumes `T_rec=1800`, no cross-mode generalization, and the proposal multiplicative update.
+
 Final thesis acceptance criteria:
 
 - B4 beats B3 under habituating truth on paired value-weighted exposure: satisfied, 10/10 seeds.
-- B4 beats B5 under habituating truth on paired value-weighted exposure: directionally satisfied, 7/10 seeds, but not significant at 95% confidence.
+- B4 beats B5 under matched-model habituating truth: directionally satisfied, 7/10 seeds, but not significant at 95% confidence.
+- B4 beats B5 under mismatched habituating truth: satisfied, 8/10 seeds, 95% confidence interval below zero.
 - B5 beats B1 under habituating truth on paired value-weighted exposure: satisfied, 10/10 seeds.
 - B3 beats B2 under habituating truth on paired value-weighted exposure: directionally satisfied, 7/10 seeds, but not significant at 95% confidence.
 - B4/B3 is near-zero under non-habituating truth: satisfied, exactly zero.
@@ -130,8 +206,8 @@ Threats to validity:
 - The predictive workload generator is in-house.
 - The habituation model is a stylized abstraction and is not fitted to ecological field data.
 
-These limitations should be stated in the thesis. They do not invalidate the central simulation claim tested here: holding the simulator, SESTPP model, dispatch logic, and workload setting fixed, adding habituation-aware cue selection improves outcomes under habituating truth. The stronger claim that STL robustness adds decisive benefit beyond a non-STL cue-rotation heuristic should be treated as directional unless additional sweeps make B4 vs B5 statistically decisive.
+These limitations should be stated in the thesis. They do not invalidate the central simulation claim tested here: holding the simulator, SESTPP model, dispatch logic, and workload setting fixed, adding habituation-aware cue selection improves outcomes under habituating truth. The stronger claim that STL robustness adds benefit beyond a non-STL cue-rotation heuristic is directional in the matched-model batch and statistically supported in the model-mismatch robustness batch.
 
 ## Current Claim
 
-The production integration is complete and the revised ladder validates the habituation-aware cue-variety mechanism. The 10-seed B2/B5-inclusive confirmatory batch supports B4 over B1 and B3, and supports B5 over B1. B4 over B5 and B3 over B2 should be reported as weaker directional results unless additional sensitivity runs make them statistically decisive.
+The production integration is complete and the revised ladder validates the habituation-aware cue-variety mechanism. The 10-seed B2/B5-inclusive confirmatory batch supports B4 over B1 and B3, and supports B5 over B1. B4 over B5 is directional under the matched-model run but becomes statistically supported in the deliberate model-mismatch robustness check. B3 over B2 remains a weaker directional result, so the thesis should emphasize the habituation-aware STL mechanism rather than claiming that exposure/coverage STL alone is sufficient.

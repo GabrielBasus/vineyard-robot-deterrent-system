@@ -98,6 +98,41 @@ from action_schema import (
 from tracking_export import export_named_tracking_state
 
 
+def _canonical_habituation_update_model(model_name: str | None) -> str:
+    """Normalize the habituation update model used after a deterrence action."""
+    key = str(model_name or "multiplicative").strip().lower().replace("-", "_")
+    if key in {"", "multiplicative", "provided", "proposal", "proposal_multiplicative"}:
+        return "multiplicative"
+    if key in {"additive", "additive_drop", "linear", "linear_drop"}:
+        return "additive_drop"
+    raise ValueError(
+        "habituation update model must be one of: multiplicative, additive_drop; "
+        f"got {model_name!r}"
+    )
+
+
+def _apply_habituation_update(hab, cell_id, mode_idx, update_model: str | None) -> None:
+    """Apply one deterrence cue update using the selected habituation state model."""
+    if hab is None:
+        return
+    c = int(cell_id)
+    m = int(mode_idx)
+    model = _canonical_habituation_update_model(update_model)
+    if model == "multiplicative":
+        hab.apply(c, m)
+        return
+
+    kappa_m = float(hab.kappa[m])
+    hab.eta[c, m] = max(0.0, float(hab.eta[c, m]) - kappa_m)
+    gamma = float(getattr(hab, "gamma", 0.0))
+    if gamma <= 0.0:
+        return
+    for other_mode in range(int(hab.n_modes)):
+        if other_mode == m:
+            continue
+        hab.eta[c, other_mode] = max(0.0, float(hab.eta[c, other_mode]) - gamma * kappa_m)
+
+
 # ============================================================================
 # Communication and shared dispatch utilities
 # ============================================================================
@@ -2032,6 +2067,14 @@ def run_simulation_frames_persistent(
     habituation_T_rec_s = 1800.0,
     habituation_kappa=0.35,
     habituation_gamma=0.0,
+    truth_habituation_T_rec_s=None,
+    truth_habituation_kappa=None,
+    truth_habituation_gamma=None,
+    truth_habituation_update_model=None,
+    planner_habituation_T_rec_s=None,
+    planner_habituation_kappa=None,
+    planner_habituation_gamma=None,
+    planner_habituation_update_model=None,
     direct_detection_habituation_mode="laser",
     enable_habituation=True,
     stl_E_star=5.0,
@@ -2549,6 +2592,28 @@ def run_simulation_frames_persistent(
     stl_monitor_dt_s = max(float(stl_monitor_dt_s), 1.0e-9)
     stl_theta = max(float(stl_theta), 1.0e-9)
     stl_smooth = bool(stl_smooth)
+    truth_habituation_T_rec_s = float(
+        habituation_T_rec_s if truth_habituation_T_rec_s in (None, "") else truth_habituation_T_rec_s
+    )
+    truth_habituation_kappa = float(
+        habituation_kappa if truth_habituation_kappa in (None, "") else truth_habituation_kappa
+    )
+    truth_habituation_gamma = float(
+        habituation_gamma if truth_habituation_gamma in (None, "") else truth_habituation_gamma
+    )
+    planner_habituation_T_rec_s = float(
+        habituation_T_rec_s if planner_habituation_T_rec_s in (None, "") else planner_habituation_T_rec_s
+    )
+    planner_habituation_kappa = float(
+        habituation_kappa if planner_habituation_kappa in (None, "") else planner_habituation_kappa
+    )
+    planner_habituation_gamma = float(
+        habituation_gamma if planner_habituation_gamma in (None, "") else planner_habituation_gamma
+    )
+    if truth_habituation_T_rec_s <= 0.0 or planner_habituation_T_rec_s <= 0.0:
+        raise ValueError("truth/planner habituation recovery times must be positive")
+    truth_habituation_update_model = _canonical_habituation_update_model(truth_habituation_update_model)
+    planner_habituation_update_model = _canonical_habituation_update_model(planner_habituation_update_model)
     if isinstance(stl_active_clauses, str):
         stl_active_clauses = tuple(
             clause.strip()
@@ -3264,14 +3329,29 @@ def run_simulation_frames_persistent(
             return float(np.mean(values)) if values else float("nan")
 
         eta_arr = np.asarray(hab.eta, dtype=float)
+        planner_eta_arr = np.asarray(planner_hab.eta, dtype=float)
         return {
             "habituation_enabled": int(bool(enable_habituation)),
             "habituation_T_rec_s": float(habituation_T_rec_s),
             "habituation_kappa": float(habituation_kappa),
             "habituation_gamma": float(habituation_gamma),
+            "truth_habituation_T_rec_s": float(truth_habituation_T_rec_s),
+            "truth_habituation_kappa": float(truth_habituation_kappa),
+            "truth_habituation_gamma": float(truth_habituation_gamma),
+            "truth_habituation_update_model": str(truth_habituation_update_model),
+            "planner_habituation_T_rec_s": float(planner_habituation_T_rec_s),
+            "planner_habituation_kappa": float(planner_habituation_kappa),
+            "planner_habituation_gamma": float(planner_habituation_gamma),
+            "planner_habituation_update_model": str(planner_habituation_update_model),
             "direct_detection_habituation_mode": str(direct_detection_habituation_mode),
             "habituation_eta_mean": float(np.mean(eta_arr)) if eta_arr.size else float("nan"),
             "habituation_eta_min": float(np.min(eta_arr)) if eta_arr.size else float("nan"),
+            "planner_habituation_eta_mean": (
+                float(np.mean(planner_eta_arr)) if planner_eta_arr.size else float("nan")
+            ),
+            "planner_habituation_eta_min": (
+                float(np.min(planner_eta_arr)) if planner_eta_arr.size else float("nan")
+            ),
             "habituation_eta_at_apply_mean": (
                 float(np.mean(eta_at_apply_samples)) if eta_at_apply_samples else float("nan")
             ),
@@ -3927,13 +4007,21 @@ def run_simulation_frames_persistent(
             mapped = str(direct_detection_habituation_mode or "direct_detection")
             return mapped if mapped else "direct_detection"
         return label
-    hab = HabituationField(
+    truth_hab = HabituationField(
         n_cells=len(cells),
         n_modes=len(mode_labels),
-        T_rec=float(habituation_T_rec_s),
-        kappa=float(habituation_kappa),
-        gamma=float(habituation_gamma),
+        T_rec=float(truth_habituation_T_rec_s),
+        kappa=float(truth_habituation_kappa),
+        gamma=float(truth_habituation_gamma),
     )
+    planner_hab = HabituationField(
+        n_cells=len(cells),
+        n_modes=len(mode_labels),
+        T_rec=float(planner_habituation_T_rec_s),
+        kappa=float(planner_habituation_kappa),
+        gamma=float(planner_habituation_gamma),
+    )
+    hab = truth_hab
     stl_spec_params = SpecParams(
         E_star=float(stl_E_star),
         T_cov=float(stl_T_cov_s),
@@ -4403,7 +4491,8 @@ def run_simulation_frames_persistent(
         nonlocal suppression_effect_sum
 
         if bool(enable_habituation):
-            hab.recover(dt)
+            truth_hab.recover(dt)
+            planner_hab.recover(dt)
 
         truth_step = run_truth_generation_stage(
             use_ground_truth=use_ground_truth,
@@ -4626,7 +4715,7 @@ def run_simulation_frames_persistent(
             travel_time_fn=(_graph_eta_seconds if graph_motion_graph is not None else None),
             predictive_utility_mode=str(predictive_utility_mode),
             predictive_fixed_deterring_mode=predictive_fixed_deterring_mode,
-            stl_hab=hab,
+            stl_hab=planner_hab,
             stl_spec_params=stl_spec_params,
             stl_dynamics=stl_dynamics,
             stl_cell_polys=cells,
@@ -4758,7 +4847,7 @@ def run_simulation_frames_persistent(
                 "travel_time_fn": (_graph_eta_seconds if graph_motion_graph is not None else None),
                 "predictive_utility_mode": str(predictive_utility_mode),
                 "predictive_fixed_deterring_mode": predictive_fixed_deterring_mode,
-                "stl_hab": hab,
+                "stl_hab": planner_hab,
                 "stl_spec_params": stl_spec_params,
                 "stl_dynamics": stl_dynamics,
                 "stl_cell_polys": cells,
@@ -6166,8 +6255,9 @@ def run_simulation_frames_persistent(
         mode_idx = _mode_id_for_label(habituation_mode_label)
 
         if bool(enable_habituation) and cell_id is not None and mode_idx is not None:
-            eta_at_apply = hab.effectiveness(cell_id, mode_idx)
-            hab.apply(cell_id, mode_idx)
+            eta_at_apply = truth_hab.effectiveness(cell_id, mode_idx)
+            _apply_habituation_update(truth_hab, cell_id, mode_idx, truth_habituation_update_model)
+            _apply_habituation_update(planner_hab, cell_id, mode_idx, planner_habituation_update_model)
         if cell_id is not None:
             last_service_t_by_cell[int(cell_id)] = float(now_t)
             if mode_idx is not None:
