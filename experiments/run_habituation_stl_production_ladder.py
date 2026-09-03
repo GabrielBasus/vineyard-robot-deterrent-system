@@ -4,9 +4,11 @@ import argparse
 import csv
 import json
 import math
+import random as _random
 import statistics as stats
 import sys
 import time
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -492,6 +494,101 @@ def _ci95(values: list[float]) -> tuple[float, float]:
     return mean - half_width, mean + half_width
 
 
+def _bootstrap_ci95(
+    values: list[float], n_boot: int = 9999, rng_seed: int = 0
+) -> tuple[float, float]:
+    """Percentile bootstrap 95% CI for the mean of *values*."""
+    if not values:
+        return float("nan"), float("nan")
+    if len(values) == 1:
+        v = float(values[0])
+        return v, v
+    rng = _random.Random(rng_seed)
+    n = len(values)
+    boot_means: list[float] = sorted(
+        sum(values[rng.randrange(n)] for _ in range(n)) / n
+        for _ in range(n_boot)
+    )
+    lo = boot_means[int(0.025 * n_boot)]
+    hi = boot_means[min(int(0.975 * n_boot), n_boot - 1)]
+    return lo, hi
+
+
+def _wilcoxon_signed_rank(
+    deltas: list[float],
+) -> tuple[float, float, int]:
+    """Two-sided Wilcoxon signed-rank test against H0: median(delta)=0.
+
+    Returns (W, p_value, n_nonzero).  Uses normal approximation with
+    continuity correction and tie-corrected variance.  Valid for n >= 4;
+    returns p=1.0 for degenerate inputs.
+    """
+    nonzero = [d for d in deltas if d != 0.0]
+    n = len(nonzero)
+    if n < 4:
+        return 0.0, 1.0, n
+    # Sort by |d|, record sign
+    pairs = sorted(((abs(d), 1 if d > 0 else -1) for d in nonzero), key=lambda x: x[0])
+    # Assign average ranks (tie groups get the same average rank)
+    ranked: list[tuple[int, float]] = []
+    i = 0
+    while i < n:
+        j = i
+        while j < n and pairs[j][0] == pairs[i][0]:
+            j += 1
+        avg = (i + 1 + j) / 2.0  # 1-indexed midpoint
+        for k in range(i, j):
+            ranked.append((pairs[k][1], avg))
+        i = j
+    w_plus = sum(r for s, r in ranked if s > 0)
+    w_minus = sum(r for s, r in ranked if s < 0)
+    w_stat = min(w_plus, w_minus)
+    # Tie-corrected variance
+    tie_sizes = Counter(p[0] for p in pairs).values()
+    tie_corr = sum(t * (t - 1) * (t + 1) for t in tie_sizes) / 48.0
+    var_w = n * (n + 1) * (2 * n + 1) / 24.0 - tie_corr
+    if var_w <= 0:
+        return w_stat, 1.0, n
+    mu_w = n * (n + 1) / 4.0
+    z = (w_stat - mu_w + 0.5) / math.sqrt(var_w)  # continuity-corrected
+    # Two-tailed p via erfc (no extra import needed; math.erfc is stdlib)
+    p_one = 0.5 * math.erfc(-z / math.sqrt(2.0))
+    p_val = min(1.0, 2.0 * min(p_one, 1.0 - p_one))
+    return w_stat, p_val, n
+
+
+def _paired_deltas_pct(
+    rows: list[dict[str, Any]],
+    system: str,
+    reference: str,
+    habituation_condition: str,
+    metric: str,
+) -> list[float]:
+    """Like _paired_deltas but returns 100*(system - ref)/ref for each seed."""
+    by_key = {
+        (str(row["baseline"]), str(row["habituation_condition"]), int(row["seed"])): row
+        for row in rows
+    }
+    seeds = sorted(
+        {
+            int(row["seed"])
+            for row in rows
+            if str(row.get("habituation_condition")) == str(habituation_condition)
+        }
+    )
+    pcts: list[float] = []
+    for seed in seeds:
+        srow = by_key.get((system, habituation_condition, seed))
+        rrow = by_key.get((reference, habituation_condition, seed))
+        if srow is None or rrow is None:
+            continue
+        sval = _safe_float(srow.get(metric))
+        rval = _safe_float(rrow.get(metric))
+        if math.isfinite(sval) and math.isfinite(rval) and rval != 0.0:
+            pcts.append(100.0 * (sval - rval) / rval)
+    return pcts
+
+
 def _fmt(value: Any, digits: int = 3) -> str:
     """Format finite floats while keeping missing values explicit in Markdown."""
     fval = _safe_float(value)
@@ -516,14 +613,25 @@ def _comparison_row(
     if not deltas:
         return None
     mean_delta = float(stats.mean(deltas))
-    ci_lo, ci_hi = _ci95(deltas)
+    pct_deltas = _paired_deltas_pct(rows, system, reference, habituation_condition, metric)
+    mean_pct = float(stats.mean(pct_deltas)) if pct_deltas else float("nan")
+    boot_lo, boot_hi = _bootstrap_ci95(pct_deltas) if pct_deltas else (float("nan"), float("nan"))
+    w_stat, p_val, _n_nz = _wilcoxon_signed_rank(deltas)
     if lower_is_better:
         improved = sum(1 for delta in deltas if delta < 0.0)
     else:
         improved = sum(1 for delta in deltas if delta > 0.0)
+    pct_str = f"{mean_pct:+.1f}%" if math.isfinite(mean_pct) else "n/a"
+    ci_str = (
+        f"[{boot_lo:+.1f}%, {boot_hi:+.1f}%]"
+        if math.isfinite(boot_lo) and math.isfinite(boot_hi)
+        else "n/a"
+    )
+    p_str = f"{p_val:.3f}" if math.isfinite(p_val) else "n/a"
+    w_str = f"{w_stat:.0f}" if math.isfinite(w_stat) else "n/a"
     return (
         f"| {label} | {habituation_condition} | {_fmt(mean_delta)} | "
-        f"[{_fmt(ci_lo)}, {_fmt(ci_hi)}] | {improved}/{len(deltas)} |"
+        f"{pct_str} | {ci_str} | {w_str} | {p_str} | {improved}/{len(deltas)} |"
     )
 
 
@@ -595,8 +703,8 @@ def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
         "",
         "## Primary Paired Exposure Results",
         "",
-        "| Comparison | Truth control | Mean delta Jexp | 95% CI | Seeds improved |",
-        "|---|---|---:|---:|---:|",
+        "| Comparison | Truth control | Mean ΔJexp | Δ̄% | 95% Boot CI% | W | p | Seeds ↓ |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
 
     comparison_rows = [
@@ -660,7 +768,9 @@ def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
         [
             "",
             "Negative exposure deltas are better because lower value-weighted exposure is the desired outcome.",
-            "Confidence intervals are paired two-sided 95% Student-t intervals over matched seeds.",
+            "Δ̄% = mean per-seed percentage improvement over reference. 95% Boot CI%: percentile bootstrap "
+            "(9999 resamples) of the mean percentage. W: Wilcoxon signed-rank statistic (two-sided, normal "
+            "approximation with tie correction and continuity correction). p: two-tailed p-value.",
             "",
             "## Mechanism Evidence: B4 - B3 Under Habituation On",
             "",

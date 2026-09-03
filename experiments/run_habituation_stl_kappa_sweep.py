@@ -134,6 +134,11 @@ def _build_cross_kappa_summary(
                 d_lo, d_hi = ladder._ci95(deltas)
                 seeds_below = sum(1 for d in deltas if d < 0)
 
+                pct_deltas = ladder._paired_deltas_pct(rows, system, reference, hab_cond, _SUMMARY_METRIC)
+                pct_mean = float(stats.mean(pct_deltas)) if pct_deltas else float("nan")
+                boot_lo, boot_hi = ladder._bootstrap_ci95(pct_deltas) if pct_deltas else (float("nan"), float("nan"))
+                w_stat, p_val, _n_nz = ladder._wilcoxon_signed_rank(deltas)
+
                 summary_row: dict[str, Any] = {
                     "kappa": kappa,
                     "system": system,
@@ -145,6 +150,11 @@ def _build_cross_kappa_summary(
                     "delta_vs_reference_mean": delta_mean,
                     "delta_ci_lo": d_lo,
                     "delta_ci_hi": d_hi,
+                    "pct_delta_mean": pct_mean,
+                    "pct_boot_ci_lo": boot_lo,
+                    "pct_boot_ci_hi": boot_hi,
+                    "wilcoxon_W": w_stat,
+                    "wilcoxon_p": p_val,
                     "seeds_below_reference": seeds_below,
                     "n_paired_seeds": len(deltas),
                 }
