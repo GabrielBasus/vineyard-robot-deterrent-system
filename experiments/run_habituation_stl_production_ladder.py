@@ -262,10 +262,20 @@ def _run_one(job: dict[str, Any]) -> dict[str, Any]:
 def _write_csv(rows: list[dict[str, Any]], path: Path) -> None:
     if not rows:
         return
-    fields = list(rows[0].keys())
+    # Union of all keys in insertion order so that rows with different
+    # schema versions (e.g. old 10-seed rows merged with newer 20-seed rows)
+    # all write cleanly.  Old rows missing a new field get an empty string
+    # via restval; new rows with extra fields are included rather than raising.
+    seen: set[str] = set()
+    fields: list[str] = []
+    for row in rows:
+        for k in row:
+            if k not in seen:
+                fields.append(k)
+                seen.add(k)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
+        writer = csv.DictWriter(f, fieldnames=fields, restval="")
         writer.writeheader()
         writer.writerows(rows)
 
