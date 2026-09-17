@@ -18,13 +18,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import experiments.run_habituation_stl_production_ladder as ladder
+from experiments.habituation_stl_selected_configs import SYSTEM_ALIASES
 from planner_profiles import get_planner_profile_values
 
 
 DEFAULT_SYSTEMS = [
     "B1_greedy_fixedcue",
     "B2_res_deltaJ_fixedcue",
-    "B3_res_stl_nohab_fixedcue",
+    "B3_res_stl_nohab_multicue",
     "B4_res_stl_full_multicue",
     "B5_greedy_habcue",
     "B5_res_habcue_multicue",
@@ -33,7 +34,7 @@ DEFAULT_SYSTEMS = [
 # Systems that use reserved-dispatch (share reservation_fraction, horizon, budget, etc.)
 RESERVED_SYSTEMS = {
     "B2_res_deltaJ_fixedcue",
-    "B3_res_stl_nohab_fixedcue",
+    "B3_res_stl_nohab_multicue",
     "B4_res_stl_full_multicue",
     "B5_res_habcue_multicue",
 }
@@ -42,7 +43,6 @@ RESERVED_SYSTEMS = {
 FIXED_CUE_SYSTEMS = {
     "B1_greedy_fixedcue",
     "B2_res_deltaJ_fixedcue",
-    "B3_res_stl_nohab_fixedcue",
 }
 
 LOWER_IS_BETTER = {
@@ -61,6 +61,17 @@ CONFIRM_RUNTIME_ARG_KEYS = {
     "confirm_num_runs",
     "confirm_seed_start",
     "max_workers",
+    # mismatch args: always take the CLI value, not the frozen tuning-protocol value
+    "truth_habituation_t_rec_s",
+    "truth_habituation_kappa",
+    "truth_habituation_gamma",
+    "truth_habituation_update_model",
+    "planner_habituation_t_rec_s",
+    "planner_habituation_kappa",
+    "planner_habituation_gamma",
+    "planner_habituation_update_model",
+    # systems filter: let the caller narrow the system set at confirm time
+    "systems",
 }
 
 
@@ -260,18 +271,19 @@ def build_structural_trial_plan(
 
     trials: list[dict[str, Any]] = []
     for baseline in args.systems:
-        reserved = baseline in RESERVED_SYSTEMS
+        canonical = SYSTEM_ALIASES.get(baseline, baseline)
+        reserved = canonical in RESERVED_SYSTEMS
         for struct_idx, struct_combo in enumerate(struct_samples, start=1):
-            trial_id = f"{baseline}_struct_{struct_idx:03d}"
+            trial_id = f"{canonical}_struct_{struct_idx:03d}"
             overrides = _trial_overrides(struct_combo, reserved=reserved)
-            if baseline in FIXED_CUE_SYSTEMS:
+            if canonical in FIXED_CUE_SYSTEMS:
                 overrides["predictive_fixed_deterring_mode"] = str(args.fixed_cue_mode)
             trials.append(
                 {
                     "trial_id": trial_id,
                     "trial_index": struct_idx,
                     "struct_index": struct_idx,
-                    "baseline": baseline,
+                    "baseline": canonical,
                     "reserved_dispatch": bool(reserved),
                     "overrides": overrides,
                 }
@@ -292,11 +304,12 @@ def build_cue_mode_trial_plan(
     """
     trials: list[dict[str, Any]] = []
     for baseline in args.systems:
-        if baseline not in FIXED_CUE_SYSTEMS:
+        canonical = SYSTEM_ALIASES.get(baseline, baseline)
+        if canonical not in FIXED_CUE_SYSTEMS:
             continue
-        reserved = baseline in RESERVED_SYSTEMS
+        reserved = canonical in RESERVED_SYSTEMS
         for cue_idx, cue in enumerate(args.fixed_cue_values, start=1):
-            trial_id = f"{baseline}_cue_{cue}"
+            trial_id = f"{canonical}_cue_{cue}"
             overrides = _trial_overrides(struct_combo, reserved=reserved)
             overrides["predictive_fixed_deterring_mode"] = str(cue)
             trials.append(
@@ -304,7 +317,7 @@ def build_cue_mode_trial_plan(
                     "trial_id": trial_id,
                     "trial_index": cue_idx,
                     "struct_index": 0,
-                    "baseline": baseline,
+                    "baseline": canonical,
                     "reserved_dispatch": bool(reserved),
                     "overrides": overrides,
                 }
@@ -327,7 +340,7 @@ def _build_jobs_for_trial(
 ) -> list[dict[str, Any]]:
     common = _materialized_common_params(base_args)
     systems = _system_params(base_args)
-    baseline = str(trial["baseline"])
+    baseline = SYSTEM_ALIASES.get(str(trial["baseline"]), str(trial["baseline"]))
     if baseline not in systems:
         raise ValueError(f"Unknown baseline {baseline!r}. Expected one of: {sorted(systems)}")
 
@@ -519,13 +532,13 @@ def select_best_structural_combo(
     and the winning struct_index (1-based).
     """
     sel_hab = str(args.selection_habituation_condition)
-    reserved_systems = {s for s in args.systems if s in RESERVED_SYSTEMS}
+    reserved_systems = {SYSTEM_ALIASES.get(s, s) for s in args.systems if SYSTEM_ALIASES.get(s, s) in RESERVED_SYSTEMS}
 
     joint: dict[int, list[float]] = {}
     for row in summaries:
         if str(row.get("habituation_condition")) != sel_hab:
             continue
-        baseline = str(row["baseline"])
+        baseline = SYSTEM_ALIASES.get(str(row["baseline"]), str(row["baseline"]))
         if baseline not in reserved_systems:
             continue
         struct_idx = int(row.get("struct_index", 0))
@@ -588,14 +601,14 @@ def select_best_trials(
     reservation_fraction with the reserved group.
     """
     sel_hab = str(args.selection_habituation_condition)
-    reserved_systems = {s for s in args.systems if s in RESERVED_SYSTEMS}
+    reserved_systems = {SYSTEM_ALIASES.get(s, s) for s in args.systems if SYSTEM_ALIASES.get(s, s) in RESERVED_SYSTEMS}
 
     # Collect per-(baseline, struct_index) scores for the reserved group
     joint: dict[int, list[float]] = {}
     for row in trial_summaries:
         if str(row.get("habituation_condition")) != sel_hab:
             continue
-        baseline = str(row["baseline"])
+        baseline = SYSTEM_ALIASES.get(str(row["baseline"]), str(row["baseline"]))
         if baseline not in reserved_systems:
             continue
         struct_idx = int(row.get("struct_index", row.get("trial_index", 0)))
@@ -614,16 +627,17 @@ def select_best_trials(
 
     result: list[dict[str, Any]] = []
     for baseline in args.systems:
+        canonical_baseline = SYSTEM_ALIASES.get(baseline, baseline)
         matching = [
             row
             for row in trial_summaries
-            if str(row["baseline"]) == baseline
+            if SYSTEM_ALIASES.get(str(row["baseline"]), str(row["baseline"])) == canonical_baseline
             and str(row.get("habituation_condition")) == sel_hab
         ]
         if not matching:
             continue
 
-        if baseline in reserved_systems and best_joint_idx is not None:
+        if canonical_baseline in reserved_systems and best_joint_idx is not None:
             at_joint = [
                 row
                 for row in matching
@@ -675,7 +689,7 @@ def _selection_to_trial(selection: dict[str, Any]) -> dict[str, Any]:
         "trial_id": f"{selection['baseline']}_selected",
         "trial_index": int(selection.get("trial_index", 0)),
         "baseline": str(selection["baseline"]),
-        "reserved_dispatch": str(selection["baseline"]) in RESERVED_SYSTEMS,
+        "reserved_dispatch": SYSTEM_ALIASES.get(str(selection["baseline"]), str(selection["baseline"])) in RESERVED_SYSTEMS,
         "overrides": overrides,
         "selected_from_trial_id": str(selection["trial_id"]),
         "tuning_selection_score": _safe_float(selection.get("selection_score")),
@@ -686,10 +700,10 @@ def _comparison_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     comparisons = [
         ("B4_vs_B1", "B4_res_stl_full_multicue", "B1_greedy_fixedcue"),
         ("B4_vs_B2", "B4_res_stl_full_multicue", "B2_res_deltaJ_fixedcue"),
-        ("B4_vs_B3", "B4_res_stl_full_multicue", "B3_res_stl_nohab_fixedcue"),
+        ("B4_vs_B3", "B4_res_stl_full_multicue", "B3_res_stl_nohab_multicue"),
         ("B4_vs_B5_greedy", "B4_res_stl_full_multicue", "B5_greedy_habcue"),
         ("B4_vs_B5_res", "B4_res_stl_full_multicue", "B5_res_habcue_multicue"),
-        ("B3_vs_B2", "B3_res_stl_nohab_fixedcue", "B2_res_deltaJ_fixedcue"),
+        ("B3_vs_B2", "B3_res_stl_nohab_multicue", "B2_res_deltaJ_fixedcue"),
     ]
     out = []
     for hab in ("hab_on", "hab_off"):
@@ -756,9 +770,9 @@ def _write_report(
         "parameters for all reserved-system comparisons.",
         "",
         "### Cue-mode phase",
-        "Fixed-cue systems (B1, B2, B3) independently evaluate all cue modes at the "
+        "Fixed-cue systems (B1, B2) independently evaluate all cue modes at the "
         "selected structural config. Selection is per-system (cue mode is the only "
-        "system-specific tunable).",
+        "system-specific tunable). B3 is multicue and excluded from this phase.",
         "",
         "### Validity invariant",
         "B4 − B3 under hab_off must be near zero. If it is not, the configs are not "
@@ -990,6 +1004,15 @@ def run_confirm(
         num_runs=int(args.confirm_num_runs),
         seed_start=int(args.confirm_seed_start),
     )
+    systems_filter = set(getattr(confirm_source_args, "systems", None) or [])
+    if systems_filter:
+        # Resolve aliases in both directions: the filter may use canonical names while
+        # selected_configs.json may store legacy names (e.g. B3_res_stl_nohab_fixedcue).
+        canonical_filter = {SYSTEM_ALIASES.get(s, s) for s in systems_filter}
+        selected_trials = [
+            t for t in selected_trials
+            if SYSTEM_ALIASES.get(str(t["baseline"]), str(t["baseline"])) in canonical_filter
+        ]
     jobs: list[dict[str, Any]] = []
     for trial in selected_trials:
         jobs.extend(

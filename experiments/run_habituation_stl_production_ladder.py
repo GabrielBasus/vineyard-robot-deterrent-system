@@ -191,10 +191,10 @@ def _system_params(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
             **fixed_cue,
             "predictive_utility_mode": "deltaJ",
         },
-        "B3_res_stl_nohab_fixedcue": {
+        "B3_res_stl_nohab_multicue": {
             **proposed,
             **reserved,
-            **fixed_cue,
+            "predictive_fixed_deterring_mode": None,
             "predictive_utility_mode": "stl_robustness",
             "stl_active_clauses": ("exp", "cov"),
         },
@@ -208,6 +208,12 @@ def _system_params(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
         "B5_greedy_habcue": {
             **proposed,
             "dispatch_policy": "unc",
+            "predictive_fixed_deterring_mode": None,
+            "predictive_utility_mode": "legacy_habituation",
+        },
+        "B5_res_habcue_multicue": {
+            **proposed,
+            **reserved,
             "predictive_fixed_deterring_mode": None,
             "predictive_utility_mode": "legacy_habituation",
         },
@@ -318,14 +324,14 @@ def _advantage_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     comparisons = [
         ("H1_B4_vs_B1", "B4_res_stl_full_multicue", "B1_greedy_fixedcue", "value_weighted_exposure", "lower"),
-        ("H2_B4_vs_B3", "B4_res_stl_full_multicue", "B3_res_stl_nohab_fixedcue", "value_weighted_exposure", "lower"),
-        ("H3_B3_vs_B2", "B3_res_stl_nohab_fixedcue", "B2_res_deltaJ_fixedcue", "value_weighted_exposure", "lower"),
+        ("H2_B4_vs_B3", "B4_res_stl_full_multicue", "B3_res_stl_nohab_multicue", "value_weighted_exposure", "lower"),
+        ("H3_B3_vs_B2", "B3_res_stl_nohab_multicue", "B2_res_deltaJ_fixedcue", "value_weighted_exposure", "lower"),
         ("H4_B5_vs_B1", "B5_greedy_habcue", "B1_greedy_fixedcue", "value_weighted_exposure", "lower"),
         ("H5_B4_vs_B5", "B4_res_stl_full_multicue", "B5_greedy_habcue", "value_weighted_exposure", "lower"),
         (
             "robustness_B4_vs_B3",
             "B4_res_stl_full_multicue",
-            "B3_res_stl_nohab_fixedcue",
+            "B3_res_stl_nohab_multicue",
             "stl_robustness_global_mean",
             "higher",
         ),
@@ -679,7 +685,7 @@ def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
 
     b1 = _first_baseline(rows, ["B1_greedy_fixedcue", "B1_unc_legacy"])
     b2 = _first_baseline(rows, ["B2_res_deltaJ_fixedcue", "B2_res_deltaJ"])
-    b3 = _first_baseline(rows, ["B3_res_stl_nohab_fixedcue", "B3_res_stl_nohab"])
+    b3 = _first_baseline(rows, ["B3_res_stl_nohab_multicue", "B3_res_stl_nohab_fixedcue", "B3_res_stl_nohab"])
     b4 = _first_baseline(rows, ["B4_res_stl_full_multicue", "B4_res_stl_full"])
     b5 = _first_baseline(rows, ["B5_greedy_habcue"])
 
@@ -800,7 +806,7 @@ def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
             "",
             "## Interpretation",
             "",
-            "B4 is the proposal system when it uses the full exposure, coverage, and habituation STL clauses with multi-cue action variants. B3 removes the habituation clause and uses the fixed-cue control, so B4 - B3 isolates the cue-variety mechanism. B5 keeps B1's unconstrained exposure-greedy dispatch but lets the legacy exposure value choose cues using current habituation effectiveness, so B4 - B5 tests whether STL adds value beyond a simple cue-rotation heuristic. The non-habituating B4/B3 control should be near zero when the only difference between the systems is the inactive habituation clause.",
+            "B4 is the proposal system with the full exposure, coverage, and habituation STL clauses and multi-cue action variants. B3 uses the same multi-cue dispatch and reserved structure but removes the habituation STL clause, so B4 - B3 isolates the effect of habituation-aware STL planning while controlling for cue mode. B5 keeps B1's unconstrained exposure-greedy dispatch but lets the legacy exposure value choose cues using current habituation effectiveness, so B4 - B5 tests whether STL constraint enforcement adds value beyond a simple cue-rotation heuristic. The B4/B3 hab_off control must be near zero because the only difference between them under no habituation is the inactive habituation clause.",
         ]
     )
     if status == "preliminary":
@@ -826,12 +832,15 @@ def _write_markdown_summary(rows: list[dict[str, Any]], outdir: Path) -> None:
 def _build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
     common = _common_params(args)
     systems = _system_params(args)
+    selected_config_overrides = getattr(args, "selected_config_overrides", None) or {}
     aliases = {
         "B1_unc_legacy": "B1_greedy_fixedcue",
         "B2_res_deltaJ": "B2_res_deltaJ_fixedcue",
-        "B3_res_stl_nohab": "B3_res_stl_nohab_fixedcue",
+        "B3_res_stl_nohab": "B3_res_stl_nohab_multicue",
+        "B3_res_stl_nohab_fixedcue": "B3_res_stl_nohab_multicue",
         "B4_res_stl_full": "B4_res_stl_full_multicue",
         "B5_greedy_habcue": "B5_greedy_habcue",
+        "B5_res_habcue_multicue": "B5_res_habcue_multicue",
     }
     wanted = {
         aliases.get(str(name), str(name))
@@ -846,6 +855,7 @@ def _build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
                 hab_params = _habituation_params(hab_enabled, args)
                 params = dict(common)
                 params.update(sys_params)
+                params.update(dict(selected_config_overrides.get(baseline, {})))
                 params.update(hab_params)
                 system = f"{baseline}_{hab_params['habituation_condition']}"
                 jobs.append(
@@ -998,8 +1008,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Optional subset: B0_reactive B1_greedy_fixedcue "
-            "B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue "
-            "B4_res_stl_full_multicue B5_greedy_habcue. Legacy names are accepted as aliases."
+            "B2_res_deltaJ_fixedcue B3_res_stl_nohab_multicue "
+            "B4_res_stl_full_multicue B5_greedy_habcue "
+            "B5_res_habcue_multicue. Legacy names are accepted as aliases."
         ),
     )
     return parser.parse_args()

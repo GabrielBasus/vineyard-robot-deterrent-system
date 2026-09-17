@@ -17,11 +17,17 @@ import experiments.run_habituation_stl_production_ladder as ladder
 from experiments.habituation_stl_selected_configs import load_selected_config_overrides
 
 
-DEFAULT_KAPPA_VALUES = [0.0, 0.10, 0.25, 0.40, 0.50, 0.65, 0.80]
+# Truth kappa values swept while planner kappa stays fixed at 0.5 (nominal confirmatory value).
+# truth_kappa < planner_kappa: truth is more forgiving than the planner assumes.
+# truth_kappa = planner_kappa: matched (replication check).
+# truth_kappa > planner_kappa: truth is more severe than the planner assumes.
+DEFAULT_TRUTH_KAPPA_VALUES = [0.10, 0.25, 0.50, 0.75, 0.90]
+DEFAULT_PLANNER_KAPPA = 0.5
 
 DEFAULT_SYSTEMS = [
     "B1_greedy_fixedcue",
     "B2_res_deltaJ_fixedcue",
+    "B3_res_stl_nohab_multicue",
     "B4_res_stl_full_multicue",
     "B5_greedy_habcue",
 ]
@@ -34,46 +40,34 @@ _AUX_METRICS = [
     "mean_response_time_s",
     "predictive_completion_ratio",
     "predictive_expired_fraction",
-    "predictive_deadline_feasible_fraction",
     "travel_distance_total",
-    "stl_robustness_cov",
     "stl_robustness_global_mean",
 ]
 
 
-def _kappa_token(kappa: float) -> str:
-    """Convert kappa float to a filesystem-safe directory token, e.g. 0.50 -> kappa_0p50."""
-    return f"kappa_{kappa:.2f}".replace(".", "p")
+def _truth_kappa_token(tk: float) -> str:
+    """e.g. 0.25 -> truth_kappa_0p25"""
+    return f"truth_kappa_{tk:.2f}".replace(".", "p")
 
 
 def _base_ladder_args(sweep_args: argparse.Namespace) -> argparse.Namespace:
-    """Build the argparse.Namespace that the ladder's run() and helpers expect."""
     return argparse.Namespace(
-        # kappa swept per iteration — placeholder, overridden in the loop
-        habituation_kappa=float(sweep_args.kappa_placeholder),
+        habituation_kappa=float(sweep_args.planner_kappa),
         outdir="",
         merge_existing_raw=False,
-        # mu_true fixed for this sweep
         mu_true=float(sweep_args.mu_true),
-        # fixed grid / fleet
         nx=int(sweep_args.nx),
         ny=int(sweep_args.ny),
         nrobots=int(sweep_args.nrobots),
-        # timing
         duration_s=float(sweep_args.duration_s),
         warmup_s=0.0,
         task_replan_period_s=45.0,
-        # seeds
         num_runs=int(sweep_args.num_runs),
         seed_start=int(sweep_args.seed_start),
-        # concurrency
         max_workers=int(sweep_args.max_workers),
-        # systems
         systems=list(sweep_args.systems),
         selected_config_overrides=dict(getattr(sweep_args, "selected_config_overrides", {}) or {}),
-        # dispatch
         reservation_fraction=float(sweep_args.reservation_fraction),
-        # ground-truth process shape parameters at proposal defaults
         alpha_true=0.3,
         beta_true=0.25,
         sigma_true=12.0,
@@ -82,16 +76,15 @@ def _base_ladder_args(sweep_args: argparse.Namespace) -> argparse.Namespace:
         deterrence_sigma_scale=float(sweep_args.deterrence_sigma_scale),
         deterrence_omega_scale=float(sweep_args.deterrence_omega_scale),
         fixed_cue_mode="laser",
-        # mismatch fields: not used in a plain kappa sweep
+        # mismatch: planner kappa fixed at nominal, truth kappa swept (overridden per iteration)
+        truth_habituation_kappa=float(sweep_args.truth_kappa_placeholder),  # placeholder, overridden
         truth_habituation_t_rec_s=None,
-        truth_habituation_kappa=None,
         truth_habituation_gamma=None,
         truth_habituation_update_model=None,
+        planner_habituation_kappa=float(sweep_args.planner_kappa),  # fixed at nominal
         planner_habituation_t_rec_s=None,
-        planner_habituation_kappa=None,
         planner_habituation_gamma=None,
         planner_habituation_update_model=None,
-        # STL parameters at confirmatory-run defaults
         stl_e_star=5.0,
         stl_t_cov_s=1200.0,
         stl_w_s=600.0,
@@ -116,14 +109,15 @@ def _safe_float(value: Any) -> float:
         return float("nan")
 
 
-def _build_cross_kappa_summary(
-    kappa_results: list[tuple[float, list[dict[str, Any]]]],
+def _build_cross_mismatch_summary(
+    sweep_results: list[tuple[float, list[dict[str, Any]]]],
     systems: list[str],
+    planner_kappa: float,
 ) -> list[dict[str, Any]]:
     _B1 = "B1_greedy_fixedcue"
     reference = _B1 if _B1 in systems else (systems[0] if systems else _B1)
     out = []
-    for kappa, rows in kappa_results:
+    for truth_kappa, rows in sweep_results:
         for hab_cond in ("hab_on", "hab_off"):
             for system in systems:
                 sub = [
@@ -146,11 +140,15 @@ def _build_cross_kappa_summary(
 
                 pct_deltas = ladder._paired_deltas_pct(rows, system, reference, hab_cond, _SUMMARY_METRIC)
                 pct_mean = float(stats.mean(pct_deltas)) if pct_deltas else float("nan")
-                boot_lo, boot_hi = ladder._bootstrap_ci95(pct_deltas) if pct_deltas else (float("nan"), float("nan"))
+                boot_lo, boot_hi = (
+                    ladder._bootstrap_ci95(pct_deltas) if pct_deltas else (float("nan"), float("nan"))
+                )
                 w_stat, p_val, _n_nz = ladder._wilcoxon_signed_rank(deltas)
 
                 summary_row: dict[str, Any] = {
-                    "kappa": kappa,
+                    "truth_kappa": truth_kappa,
+                    "planner_kappa": planner_kappa,
+                    "kappa_mismatch": truth_kappa - planner_kappa,
                     "system": system,
                     "habituation_condition": hab_cond,
                     "n_seeds": len(vals),
@@ -192,68 +190,75 @@ def run(args: argparse.Namespace) -> None:
     outdir = Path(args.outdir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
-    kappa_values: list[float] = sorted(args.kappa_values)
+    truth_kappa_values: list[float] = sorted(args.truth_kappa_values)
+    planner_kappa = float(args.planner_kappa)
     systems: list[str] = list(args.systems)
     selected_overrides = load_selected_config_overrides(args.selection_path, systems=systems)
     args.selected_config_overrides = selected_overrides
 
     print(
-        f"[kappa_sweep] kappa_values={kappa_values}  mu_true={args.mu_true:.2e}  "
-        f"systems={systems}  num_runs={args.num_runs}  outdir={outdir}",
+        f"[mismatch_sweep] planner_kappa={planner_kappa} (fixed)  truth_kappa_values={truth_kappa_values}"
+        f"  mu_true={args.mu_true:.2e}  systems={systems}  num_runs={args.num_runs}"
+        f"  outdir={outdir}",
         flush=True,
     )
     if selected_overrides:
         print(
-            f"[kappa_sweep] frozen selected configs applied for {sorted(selected_overrides)}",
+            f"[mismatch_sweep] frozen selected configs applied for {sorted(selected_overrides)}",
             flush=True,
         )
 
-    args.kappa_placeholder = kappa_values[0]
+    args.truth_kappa_placeholder = truth_kappa_values[0]  # placeholder; overridden per iteration
     base = _base_ladder_args(args)
 
-    kappa_results: list[tuple[float, list[dict[str, Any]]]] = []
+    sweep_results: list[tuple[float, list[dict[str, Any]]]] = []
 
-    for kappa in kappa_values:
-        token = _kappa_token(kappa)
-        kappa_outdir = outdir / token
-        existing_csv = kappa_outdir / "per_run_metrics.csv"
+    for tk in truth_kappa_values:
+        token = _truth_kappa_token(tk)
+        sub_outdir = outdir / token
+        mismatch_str = f"{tk - planner_kappa:+.2f}"
+        existing_csv = sub_outdir / "per_run_metrics.csv"
 
         if existing_csv.exists():
-            per_run_rows = _load_per_run_csv(kappa_outdir)
-            kappa_results.append((kappa, per_run_rows))
+            per_run_rows = _load_per_run_csv(sub_outdir)
+            sweep_results.append((tk, per_run_rows))
             print(
-                f"\n[kappa_sweep] --- kappa={kappa:.2f}  SKIPPING"
-                f" (per_run_metrics.csv exists, {len(per_run_rows)} rows) ---",
+                f"\n[mismatch_sweep] --- truth_kappa={tk:.2f} (mismatch={mismatch_str})"
+                f"  SKIPPING (per_run_metrics.csv exists, {len(per_run_rows)} rows) ---",
                 flush=True,
             )
             continue
 
-        print(f"\n[kappa_sweep] --- kappa={kappa:.2f}  subdir={token} ---", flush=True)
-
-        kappa_args = copy.copy(base)
-        kappa_args.habituation_kappa = kappa
-        kappa_args.outdir = str(kappa_outdir)
-
-        ladder.run(kappa_args)
-
-        per_run_rows = _load_per_run_csv(kappa_outdir)
-        kappa_results.append((kappa, per_run_rows))
         print(
-            f"[kappa_sweep] kappa={kappa:.2f} done  "
+            f"\n[mismatch_sweep] --- truth_kappa={tk:.2f} (mismatch={mismatch_str})"
+            f"  subdir={token} ---",
+            flush=True,
+        )
+
+        tk_args = copy.copy(base)
+        tk_args.truth_habituation_kappa = tk
+        tk_args.outdir = str(sub_outdir)
+
+        ladder.run(tk_args)
+
+        per_run_rows = _load_per_run_csv(sub_outdir)
+        sweep_results.append((tk, per_run_rows))
+        print(
+            f"[mismatch_sweep] truth_kappa={tk:.2f} done  "
             f"({len(per_run_rows)} per-run rows loaded)",
             flush=True,
         )
 
-    print("\n[kappa_sweep] Writing cross-kappa summary...", flush=True)
-    summary_rows = _build_cross_kappa_summary(kappa_results, systems)
-    summary_path = outdir / "kappa_sweep_summary.csv"
+    print("\n[mismatch_sweep] Writing cross-mismatch summary...", flush=True)
+    summary_rows = _build_cross_mismatch_summary(sweep_results, systems, planner_kappa)
+    summary_path = outdir / "mismatch_sweep_summary.csv"
     _write_csv(summary_rows, summary_path)
     print(
-        f"[kappa_sweep] kappa_sweep_summary.csv: {len(summary_rows)} rows -> {summary_path}",
+        f"[mismatch_sweep] mismatch_sweep_summary.csv: {len(summary_rows)} rows -> {summary_path}",
         flush=True,
     )
     print(
-        f"[kappa_sweep] Complete: {len(kappa_values)} kappa points × "
+        f"[mismatch_sweep] Complete: {len(truth_kappa_values)} truth-kappa points × "
         f"{len(systems)} systems × 2 hab conditions.",
         flush=True,
     )
@@ -262,41 +267,49 @@ def run(args: argparse.Namespace) -> None:
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Sweep habituation_kappa across dose levels and run the B1/B4/B5 ladder "
-            "at each point (mu_true fixed at confirmatory value). Traces the dose-response "
-            "curve from kappa=0 (no habituation, B4 gap should be ~0) to kappa=0.80 "
-            "(strong habituation). Results go to per-kappa subdirectories under --outdir "
-            "plus a combined kappa_sweep_summary.csv at the root."
+            "Sweep truth kappa (ground-truth habituation severity) while keeping planner kappa "
+            "fixed at the confirmatory value (0.5). Tests robustness of B4's STL habituation "
+            "clause when the real world is more or less severe than the planner's model assumes. "
+            "truth_kappa < planner_kappa: truth more forgiving (planner overestimates severity); "
+            "truth_kappa > planner_kappa: truth more severe (planner underestimates severity). "
+            "Results go to per-kappa subdirectories under --outdir plus a combined "
+            "mismatch_sweep_summary.csv at the root."
         )
     )
     parser.add_argument(
-        "--kappa-values",
+        "--truth-kappa-values",
         nargs="+",
         type=float,
-        default=DEFAULT_KAPPA_VALUES,
+        default=DEFAULT_TRUTH_KAPPA_VALUES,
         metavar="FLOAT",
-        help="kappa values to sweep. Default: 0.0 0.1 0.25 0.4 0.5 0.65 0.8",
+        help="Truth kappa values to sweep. Default: 0.1 0.25 0.5 0.75 0.9",
+    )
+    parser.add_argument(
+        "--planner-kappa",
+        type=float,
+        default=DEFAULT_PLANNER_KAPPA,
+        help="Fixed planner habituation kappa (default: 0.5, the confirmatory value).",
     )
     parser.add_argument(
         "--mu-true",
         type=float,
         default=2e-05,
-        help="Fixed mu_true for all kappa points (default: 2e-05, the confirmatory value).",
+        help="Fixed mu_true for all points (default: 2e-05).",
     )
     parser.add_argument(
         "--outdir",
-        default="results/testbench/habituation_stl_kappa_sweep",
+        default="results/testbench/habituation_stl_mismatch_sweep",
     )
     parser.add_argument(
         "--systems",
         nargs="*",
         default=DEFAULT_SYSTEMS,
-        help="Systems to run at each kappa point. Default: B1 B4 B5.",
+        help="Systems to run. Default: B1 B3 B4 B5_greedy.",
     )
     parser.add_argument(
         "--selection-path",
         default=None,
-        help="Optional fair-tuning selected_configs.json. Matching baselines receive frozen tuned overrides.",
+        help="Optional fair-tuning selected_configs.json for frozen structural overrides.",
     )
     parser.add_argument("--duration-s", type=float, default=1800.0)
     parser.add_argument("--num-runs", type=int, default=10)

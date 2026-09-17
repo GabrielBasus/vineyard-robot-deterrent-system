@@ -179,7 +179,7 @@ class SelectBestTrialsTests(unittest.TestCase):
         args = _args(
             systems=[
                 "B2_res_deltaJ_fixedcue",
-                "B3_res_stl_nohab_fixedcue",
+                "B3_res_stl_nohab_multicue",
                 "B4_res_stl_full_multicue",
                 "B5_res_habcue_multicue",
             ]
@@ -190,8 +190,8 @@ class SelectBestTrialsTests(unittest.TestCase):
             {
                 ("B2_res_deltaJ_fixedcue", 1): 100.0,
                 ("B2_res_deltaJ_fixedcue", 2): 90.0,   # B2 best at 2
-                ("B3_res_stl_nohab_fixedcue", 1): 80.0,  # B3 individually best at 1
-                ("B3_res_stl_nohab_fixedcue", 2): 95.0,
+                ("B3_res_stl_nohab_multicue", 1): 80.0,  # B3 individually best at 1
+                ("B3_res_stl_nohab_multicue", 2): 95.0,
                 ("B4_res_stl_full_multicue", 1): 110.0,
                 ("B4_res_stl_full_multicue", 2): 85.0,  # B4 best at 2
                 ("B5_res_habcue_multicue", 1): 120.0,
@@ -205,7 +205,7 @@ class SelectBestTrialsTests(unittest.TestCase):
             str(row["baseline"]): int(row["struct_index"]) for row in selected
         }
         self.assertEqual(struct_indices["B2_res_deltaJ_fixedcue"], 2)
-        self.assertEqual(struct_indices["B3_res_stl_nohab_fixedcue"], 2)
+        self.assertEqual(struct_indices["B3_res_stl_nohab_multicue"], 2)
         self.assertEqual(struct_indices["B4_res_stl_full_multicue"], 2)
         self.assertEqual(struct_indices["B5_res_habcue_multicue"], 2)
 
@@ -213,20 +213,20 @@ class SelectBestTrialsTests(unittest.TestCase):
         """B3 would individually pick idx=1 (score=80), but the joint winner is idx=2."""
         args = _args(
             systems=[
-                "B3_res_stl_nohab_fixedcue",
+                "B3_res_stl_nohab_multicue",
                 "B4_res_stl_full_multicue",
             ]
         )
         summaries = self._make_summaries(
             {
-                ("B3_res_stl_nohab_fixedcue", 1): 80.0,
-                ("B3_res_stl_nohab_fixedcue", 2): 95.0,
+                ("B3_res_stl_nohab_multicue", 1): 80.0,
+                ("B3_res_stl_nohab_multicue", 2): 95.0,
                 ("B4_res_stl_full_multicue", 1): 110.0,
                 ("B4_res_stl_full_multicue", 2): 85.0,
             }
         )
         selected = select_best_trials(summaries, args)
-        b3 = next(r for r in selected if r["baseline"] == "B3_res_stl_nohab_fixedcue")
+        b3 = next(r for r in selected if r["baseline"] == "B3_res_stl_nohab_multicue")
         b4 = next(r for r in selected if r["baseline"] == "B4_res_stl_full_multicue")
         # joint mean at 1: (80+110)/2=95, at 2: (95+85)/2=90 → joint best=2
         self.assertEqual(b3["struct_index"], 2)
@@ -289,22 +289,22 @@ class SelectBestCueModesTests(unittest.TestCase):
         args = _args()
         summaries = [
             {
-                "baseline": "B3_res_stl_nohab_fixedcue",
-                "trial_id": "B3_res_stl_nohab_fixedcue_cue_formation",
+                "baseline": "B2_res_deltaJ_fixedcue",
+                "trial_id": "B2_res_deltaJ_fixedcue_cue_formation",
                 "habituation_condition": "hab_on",
                 "selection_score": 200.0,
                 "config_predictive_fixed_deterring_mode": "formation",
             },
             {
-                "baseline": "B3_res_stl_nohab_fixedcue",
-                "trial_id": "B3_res_stl_nohab_fixedcue_cue_laser",
+                "baseline": "B2_res_deltaJ_fixedcue",
+                "trial_id": "B2_res_deltaJ_fixedcue_cue_laser",
                 "habituation_condition": "hab_on",
                 "selection_score": 150.0,
                 "config_predictive_fixed_deterring_mode": "laser",
             },
             {
-                "baseline": "B3_res_stl_nohab_fixedcue",
-                "trial_id": "B3_res_stl_nohab_fixedcue_cue_biosonic",
+                "baseline": "B2_res_deltaJ_fixedcue",
+                "trial_id": "B2_res_deltaJ_fixedcue_cue_biosonic",
                 "habituation_condition": "hab_on",
                 "selection_score": 180.0,
                 "config_predictive_fixed_deterring_mode": "biosonic",
@@ -325,7 +325,7 @@ class SelectBestCueModesTests(unittest.TestCase):
             },
         ]
         best = select_best_cue_modes(summaries, args)
-        self.assertEqual(best["B3_res_stl_nohab_fixedcue"], "laser")
+        self.assertEqual(best["B2_res_deltaJ_fixedcue"], "laser")
         self.assertEqual(best["B1_greedy_fixedcue"], "biosonic")
 
     def test_ignores_non_selection_habituation_condition(self):

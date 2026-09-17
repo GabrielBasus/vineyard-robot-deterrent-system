@@ -6,6 +6,7 @@ This repo includes these maintained experiment runners:
 - `experiments/run_24h_experiment_parallel.py` (multiprocessing, faster)
 - `demos/demo_live_day_vineyard.py` (single-file, audience-friendly visual demo)
 - `experiments/run_habituation_stl_production_ladder.py` (production B0-B5 habituation/STL ladder)
+- `experiments/run_habituation_stl_fair_tuning.py` (equal-budget tuning plus held-out confirmation for B1-B5 and dispatcher-matched B5)
 - `experiments/diagnose_habituation_stl_production.py` (short-run STL/habituation diagnostic)
 - `experiments/summarize_habituation_stl_ladder.py` (paired CSV summaries and `THESIS_RESULTS_SUMMARY.md`)
 
@@ -88,6 +89,78 @@ Primary metrics:
 - `stl_robustness_exp`, `stl_robustness_cov`, `stl_robustness_hab`
 
 Current result summary: `docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md`.
+
+### Fair equal-budget tuning and held-out confirmation
+
+Use this when the thesis question is whether B4 still wins after each baseline receives comparable tuning effort. The runner tunes each requested system on one seed set, freezes the best setting per system, then confirms those frozen winners on held-out seeds. It also adds `B5_res_habcue_multicue`, a reserved-dispatch non-STL cue-rotation baseline, so B4 can be compared against cue rotation under the same dispatcher class.
+
+Dry-run the protocol first:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_fair_tuning.py --dry-run --phase tune --outdir results\testbench\habituation_stl_fair_tuning_dryrun --trial-budget 36
+```
+
+Run tuning only:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_fair_tuning.py --phase tune --outdir results\testbench\habituation_stl_fair_tuning --trial-budget 36 --tune-duration-s 900 --tune-num-runs 3 --tune-seed-start 100 --max-workers 4
+```
+
+Run held-out confirmation after tuning:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_fair_tuning.py --phase confirm --outdir results\testbench\habituation_stl_fair_tuning --confirm-duration-s 1800 --confirm-num-runs 10 --confirm-seed-start 125 --max-workers 4
+```
+
+Confirm-only mode reads `selected_configs.json` and reuses the saved scenario arguments from `tuning_protocol.json`. The command above only changes confirmation run controls such as duration, seed range, output path, and worker count.
+
+Or run the full tune-and-confirm protocol in one command:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_fair_tuning.py --phase tune_confirm --outdir results\testbench\habituation_stl_fair_tuning --trial-budget 36 --tune-duration-s 900 --tune-num-runs 3 --tune-seed-start 100 --confirm-duration-s 1800 --confirm-num-runs 10 --confirm-seed-start 125 --max-workers 4
+```
+
+Use `--trial-budget 12` only as a screening run. The thesis-facing fair run should use `--trial-budget 36`, which exhausts the common grid of budget, score margin, max ETA, and horizon settings. Reserved baselines then receive a balanced reservation-fraction schedule across that full common grid.
+
+Primary fair-tuning outputs:
+
+- `tuning_protocol.json`
+- `tuning_trials.csv`
+- `tuning_summary_by_trial.csv`
+- `selected_configs.json`
+- `confirm_per_run_metrics.csv`
+- `confirm_summary_by_system.csv`
+- `confirm_comparisons.csv`
+- `FAIR_TUNING_PROTOCOL.md`
+
+Fairness controls:
+
+- Every baseline receives the same common grid over predictive budget, score margin, max ETA, and horizon.
+- Fixed-cue baselines B1/B2/B3 tune the fixed cue over `formation`, `laser`, and `biosonic`; the selected cue is frozen into confirmation.
+- Reserved baselines B2/B3/B4/B5-res tune `rho` over `0.10`, `0.25`, and `0.40` with a balanced schedule across the common grid.
+- Multi-cue baselines B4/B5 keep automatic cue selection, as required by their mechanism definition.
+- Final thesis claims must use held-out confirmation seeds, not tuning seeds.
+
+Interpretation rule: cite this as the fair comparison because every tuned baseline receives the same trial budget and final claims use held-out seeds only. Keep the STL mission thresholds fixed unless the thesis explicitly reframes them as tunable design variables.
+
+### Fair-tuned sensitivity sweeps
+
+After fair tuning has produced `selected_configs.json`, use the frozen winners for sensitivity checks. These sweeps vary only the named stress variable while keeping each baseline's tuned settings fixed.
+
+Kappa response curve:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_kappa_sweep.py --outdir results\testbench\habituation_stl_kappa_sweep_fair_tuned --selection-path results\testbench\habituation_stl_fair_tuning\selected_configs.json --kappa-values 0 0.10 0.25 0.40 0.50 0.65 0.80 --mu-true 2e-05 --duration-s 1800 --num-runs 10 --seed-start 125 --nx 60 --ny 48 --nrobots 4 --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue B5_greedy_habcue B5_res_habcue_multicue --max-workers 4
+```
+
+Load-regime sweep:
+
+```powershell
+C:\Users\gabri\AppData\Local\Programs\Python\Python310\python.exe experiments\run_habituation_stl_load_sweep.py --outdir results\testbench\habituation_stl_load_sweep_fair_tuned --selection-path results\testbench\habituation_stl_fair_tuning\selected_configs.json --mu-values 1e-05 1.5e-05 2e-05 2.5e-05 3e-05 --duration-s 1800 --num-runs 10 --seed-start 125 --nx 60 --ny 48 --nrobots 4 --habituation-kappa 0.5 --systems B1_greedy_fixedcue B2_res_deltaJ_fixedcue B3_res_stl_nohab_fixedcue B4_res_stl_full_multicue B5_greedy_habcue B5_res_habcue_multicue --max-workers 4
+```
+
+Both summary CSVs include exposure, response time, predictive completion/expiration, deadline feasibility, travel distance, STL robustness, eta-bar at apply, variety index, and realized suppression effect.
+
 ## Requirements
 
 - Python 3.10+

@@ -18,6 +18,28 @@ The current ladder definition is the revised fixed-cue versus multi-cue design i
 This revision matches the STL package demo mechanism: the no-habituation baselines repeatedly use a fixed cue, while the full method can spend STL utility on cue variety.
 B5 is the added reader-check baseline: it tests whether simple cue rotation gets most of the benefit without STL.
 
+## Baseline Provenance and Tuning Fairness
+
+B2 is the real prior production predictive-value path from the immediate pre-STL code, not a new STL-shaped reimplementation. In the ladder, `B2_res_deltaJ_fixedcue` sets `predictive_utility_mode="deltaJ"`. That mode calls `TaskGenerator._deterrence_candidate_metrics(...)`, which in turn calls `planner_task_estimation.estimate_counterfactual_reduction(...)` and writes the result into the existing `predicted_deltaJ`, `utility`, and `score` fields. The same `estimate_counterfactual_reduction(...)` function existed before the STL integration in commit `635bab7` (`Update snapshot workspace`).
+
+Important provenance caveat: this means B2 represents the immediate pre-STL production counterfactual-value method. It is not the earliest `main`-branch task generator, because `main` predates the later predictive counterfactual module entirely.
+
+The dispatcher settings are controlled as follows:
+
+| System | Dispatcher | Reservation fraction rho | Predictive value |
+| --- | --- | ---: | --- |
+| B1 | `unc` | none | legacy greedy fixed cue |
+| B2 | `res` | 0.25 in the reported runs | prior `estimate_counterfactual_reduction` deltaJ, fixed cue |
+| B3 | `res` | 0.25 in the reported runs | STL exposure+coverage, fixed cue |
+| B4 | `res` | 0.25 in the reported runs | STL exposure+coverage+habituation, multi-cue |
+| B5 | `unc` | none | legacy greedy with non-STL habituation-aware cue choice |
+
+B2, B3, and B4 therefore share the same reserved-capacity dispatcher class and the same `rho` in the reported B1-B5 ladders. B1 and B5 intentionally use the unconstrained greedy dispatcher, so there is no reservation fraction to tune for those baselines.
+
+The current experiments should be described as fixed-settings ablations, not as a fully tuned best-response comparison across every policy. The STL/habituation settings and stress scenario were iterated during this revision, while B2 did not receive an independent sweep over `rho`, horizon, budget, and admission thresholds. This does not invalidate B4-vs-B1, B4-vs-B3, B4-vs-B5, or the mismatch robustness checks, but it does limit H3. The correct H3 wording is: under the shared reserved-capacity settings used here, STL exposure+coverage without the habituation clause is approximately neutral relative to the prior deltaJ method. Do not claim that a globally optimized STL-nohab policy beats a globally optimized legacy deltaJ policy.
+
+The fair-comparison protocol is now implemented in `experiments/run_habituation_stl_fair_tuning.py`. Once that runner has completed, prefer its held-out confirmation tables for any thesis claim about tuned B4 versus tuned baselines.
+
 ## Revised-Ladder Confirmatory Run
 
 Primary summarized run:
@@ -128,6 +150,37 @@ Mismatch guardrail interpretation: B4's exposure gain is not accompanied by a co
 
 Travel and explicit deadline-miss caveat: the completed B1-B5 ladder rows did not export `travel_distance_total`, `predictive_expired_fraction`, or `predictive_deadline_feasible_fraction`, so those guardrails cannot be reconstructed from the existing raw JSON. The ladder exporter now includes those fields for future reruns. Until that rerun is available, do not claim that B4 has no travel or deadline-miss cost; claim only what the current rows directly support.
 
+## Fair Equal-Budget Tuning Status
+
+The fair tuning run in:
+
+```text
+results/testbench/habituation_stl_fair_tuning
+```
+
+completed the tuning phase only. It produced 648 per-run rows, matching six systems, 36 trials per system, three tuning seeds, and habituation-on selection. The audit found:
+
+- every system received 36 trials;
+- every trial has exactly three tuning seeds;
+- the shared tuning grid is identical across systems;
+- `rho` is tuned only for reserved-dispatch systems and is balanced at 12 trials each for `0.10`, `0.25`, and `0.40`;
+- fixed cue is tuned only for B1/B2/B3 and is balanced at 12 trials each for `formation`, `laser`, and `biosonic`;
+- the selected configs are the actual best rows under tuning-set `value_weighted_exposure`;
+- primary exposure and guardrail/mechanism metrics are finite in all 648 tuning rows.
+
+Selected tuning scores under habituating truth:
+
+| Rank | Baseline | Selected trial | Tuning exposure |
+| ---: | --- | --- | ---: |
+| 1 | B1_greedy_fixedcue | B1_greedy_fixedcue_trial_027 | 19625.047 |
+| 2 | B5_greedy_habcue | B5_greedy_habcue_trial_025 | 19776.460 |
+| 3 | B4_res_stl_full_multicue | B4_res_stl_full_multicue_trial_003 | 19965.626 |
+| 4 | B3_res_stl_nohab_fixedcue | B3_res_stl_nohab_fixedcue_trial_013 | 20028.964 |
+| 5 | B2_res_deltaJ_fixedcue | B2_res_deltaJ_fixedcue_trial_010 | 20643.600 |
+| 6 | B5_res_habcue_multicue | B5_res_habcue_multicue_trial_014 | 20749.965 |
+
+Interpretation: the fair tuning protocol appears structurally unbiased, but the tuning-set result does not show B4 dominating all baselines. B1 and B5-greedy tune to lower exposure on the three tuning seeds. The held-out confirmation phase is therefore required before any final thesis claim about fair best-response performance. Because this tuning run used no explicit guardrail constraints during selection, the thesis can call it an exposure-primary fair tuning protocol; claims about deadline, coverage, or travel tradeoffs must come from the held-out confirmation metrics.
+
 ## Calibration Pilot
 
 The preceding revised-ladder calibration run remains useful for debugging:
@@ -210,4 +263,4 @@ These limitations should be stated in the thesis. They do not invalidate the cen
 
 ## Current Claim
 
-The production integration is complete and the revised ladder validates the habituation-aware cue-variety mechanism. The 10-seed B2/B5-inclusive confirmatory batch supports B4 over B1 and B3, and supports B5 over B1. B4 over B5 is directional under the matched-model run but becomes statistically supported in the deliberate model-mismatch robustness check. B3 over B2 remains a weaker directional result, so the thesis should emphasize the habituation-aware STL mechanism rather than claiming that exposure/coverage STL alone is sufficient.
+The production integration is complete, and the fixed-setting revised ladder validates the habituation-aware cue-variety mechanism. The newer fair equal-budget tuning run is the stricter thesis protocol, but only its tuning phase has completed. Under fair tuning seeds, B4 is competitive but not the best exposure policy; B1 and B5-greedy are lower on the tuning set. Do not present the fair-tuned thesis result as complete until the held-out confirmation phase is run and the guardrail/mechanism metrics are summarized.

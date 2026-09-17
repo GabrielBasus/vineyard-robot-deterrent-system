@@ -14,13 +14,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import experiments.run_habituation_stl_production_ladder as ladder
+from experiments.habituation_stl_selected_configs import load_selected_config_overrides
 
 
 DEFAULT_MU_VALUES = [1.0e-5, 1.5e-5, 2.0e-5, 2.5e-5, 3.0e-5]
 
 DEFAULT_SYSTEMS = [
     "B1_greedy_fixedcue",
-    "B3_res_stl_nohab_fixedcue",
+    "B2_res_deltaJ_fixedcue",
+    "B3_res_stl_nohab_multicue",
     "B4_res_stl_full_multicue",
     "B5_greedy_habcue",
 ]
@@ -31,6 +33,12 @@ _AUX_METRICS = [
     "habituation_variety_index",
     "truth_suppression_effect_sum",
     "mean_response_time_s",
+    "predictive_completion_ratio",
+    "predictive_expired_fraction",
+    "predictive_deadline_feasible_fraction",
+    "travel_distance_total",
+    "stl_robustness_cov",
+    "stl_robustness_global_mean",
 ]
 
 
@@ -64,6 +72,7 @@ def _base_ladder_args(sweep_args: argparse.Namespace) -> argparse.Namespace:
         max_workers=int(sweep_args.max_workers),
         # systems
         systems=list(sweep_args.systems),
+        selected_config_overrides=dict(getattr(sweep_args, "selected_config_overrides", {}) or {}),
         # dispatch
         reservation_fraction=float(sweep_args.reservation_fraction),
         # ground-truth process (non-mu params at proposal defaults)
@@ -115,7 +124,8 @@ def _build_cross_mu_summary(
     mu_results: list[tuple[float, list[dict[str, Any]]]],
     systems: list[str],
 ) -> list[dict[str, Any]]:
-    reference = systems[0] if systems else "B1_greedy_fixedcue"
+    _B1 = "B1_greedy_fixedcue"
+    reference = _B1 if _B1 in systems else (systems[0] if systems else _B1)
     out = []
     for mu_true, rows in mu_results:
         for hab_cond in ("hab_on", "hab_off"):
@@ -138,6 +148,13 @@ def _build_cross_mu_summary(
                 d_lo, d_hi = ladder._ci95(deltas)
                 seeds_below = sum(1 for d in deltas if d < 0)
 
+                pct_deltas = ladder._paired_deltas_pct(rows, system, reference, hab_cond, _SUMMARY_METRIC)
+                pct_mean = float(stats.mean(pct_deltas)) if pct_deltas else float("nan")
+                boot_lo, boot_hi = (
+                    ladder._bootstrap_ci95(pct_deltas) if pct_deltas else (float("nan"), float("nan"))
+                )
+                w_stat, p_val, _n_nz = ladder._wilcoxon_signed_rank(deltas)
+
                 summary_row: dict[str, Any] = {
                     "mu_true": mu_true,
                     "system": system,
@@ -149,6 +166,11 @@ def _build_cross_mu_summary(
                     "delta_vs_reference_mean": delta_mean,
                     "delta_ci_lo": d_lo,
                     "delta_ci_hi": d_hi,
+                    "pct_delta_mean": pct_mean,
+                    "pct_boot_ci_lo": boot_lo,
+                    "pct_boot_ci_hi": boot_hi,
+                    "wilcoxon_W": w_stat,
+                    "wilcoxon_p": p_val,
                     "seeds_below_reference": seeds_below,
                     "n_paired_seeds": len(deltas),
                 }
@@ -178,12 +200,19 @@ def run(args: argparse.Namespace) -> None:
 
     mu_values: list[float] = sorted(args.mu_values)
     systems: list[str] = list(args.systems)
+    selected_overrides = load_selected_config_overrides(args.selection_path, systems=systems)
+    args.selected_config_overrides = selected_overrides
 
     print(
         f"[load_sweep] mu_values={[f'{m:.2e}' for m in mu_values]}  "
         f"systems={systems}  num_runs={args.num_runs}  outdir={outdir}",
         flush=True,
     )
+    if selected_overrides:
+        print(
+            f"[load_sweep] frozen selected configs applied for {sorted(selected_overrides)}",
+            flush=True,
+        )
 
     args.mu_true_placeholder = mu_values[0]
     base = _base_ladder_args(args)
@@ -193,6 +222,18 @@ def run(args: argparse.Namespace) -> None:
     for mu_true in mu_values:
         token = _mu_token(mu_true)
         mu_outdir = outdir / token
+        existing_csv = mu_outdir / "per_run_metrics.csv"
+
+        if existing_csv.exists():
+            per_run_rows = _load_per_run_csv(mu_outdir)
+            mu_results.append((mu_true, per_run_rows))
+            print(
+                f"\n[load_sweep] --- mu_true={mu_true:.2e}  SKIPPING"
+                f" (per_run_metrics.csv exists, {len(per_run_rows)} rows) ---",
+                flush=True,
+            )
+            continue
+
         print(f"\n[load_sweep] --- mu_true={mu_true:.2e}  subdir={token} ---", flush=True)
 
         mu_args = copy.copy(base)
@@ -250,6 +291,11 @@ def parse_args(argv=None) -> argparse.Namespace:
         nargs="*",
         default=DEFAULT_SYSTEMS,
         help="Systems to run at each mu_true point. Default: B1 B3 B4 B5.",
+    )
+    parser.add_argument(
+        "--selection-path",
+        default=None,
+        help="Optional fair-tuning selected_configs.json. Matching baselines receive frozen tuned overrides.",
     )
     parser.add_argument("--duration-s", type=float, default=1800.0)
     parser.add_argument("--num-runs", type=int, default=10)
