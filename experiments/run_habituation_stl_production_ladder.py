@@ -269,6 +269,21 @@ def _system_params(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
             "predictive_utility_mode": "stl_robustness",
             "stl_active_clauses": ("exp", "cov", "hab"),
         },
+        # B4_res_queue: ρ_res scales linearly to zero as the pending reactive
+        # queue reaches fleet size — eliminates predictive reservation exactly
+        # when demand saturates the fleet, recovering B1 throughput at overload
+        # while preserving the hab-on advantage at spare/heavy-spare capacity.
+        "B4_res_queue_multicue": {
+            **proposed,
+            "dispatch_policy": "res-queue",
+            "reservation_fraction": float(args.reservation_fraction),
+            "reservation_window_s": 600.0,
+            "reactive_override_slack_s": 90.0,
+            "predictive_selection_policy": "utility",
+            "predictive_fixed_deterring_mode": None,
+            "predictive_utility_mode": "stl_robustness",
+            "stl_active_clauses": ("exp", "cov", "hab"),
+        },
     }
 
 

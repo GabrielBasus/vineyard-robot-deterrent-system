@@ -33,6 +33,7 @@ import math
 import shutil
 import statistics as stats
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,8 @@ SOURCE_FILES = {
     "preemption_2em05": RESULTS / "habituation_stl_preemption_variant" / "mu_2em05" / "per_run_metrics.csv",
     "preemption_1em04": RESULTS / "habituation_stl_preemption_variant" / "mu_1em04" / "per_run_metrics.csv",
     "preemption_4em04": RESULTS / "habituation_stl_preemption_variant" / "mu_4em04" / "per_run_metrics.csv",
+    # 2×2 cost-decomposition (fixed-cue vs. multi-cue, hab-on vs. hab-off)
+    "2x2_overhead": RESULTS / "acc_merged" / "2x2_overhead_corrected.csv",
 }
 
 # ── Label maps ────────────────────────────────────────────────────────────────
@@ -82,6 +85,11 @@ SYSTEM_LABELS: dict[str, str] = {
 # Footnote used by Fig 1 and Fig 5 to label systems
 SYS_FOOTNOTE = ("B1=Greedy, B2=Res.+ΔJ, B3=STL/no-hab, "
                 "B4★=STL+Hab (proposed), B5=Greedy+Hab")
+# Pre-wrapped at ~40 chars/line so neither line exceeds 3.5" at 7pt
+SYS_FOOTNOTE_WRAPPED = (
+    "B1=Greedy, B2=Res.+ΔJ, B3=STL/no-hab,\n"
+    "B4★=STL+Hab (proposed), B5=Greedy+Hab"
+)
 
 # Short labels used for inline annotations in Fig 3
 SLACK_LABELS_SHORT: dict[str, str] = {
@@ -190,7 +198,8 @@ def _savefig(fig: plt.Figure, stem: str, outdir: Path) -> None:
     fig_dir.mkdir(parents=True, exist_ok=True)
     fig.savefig(fig_dir / f"{stem}.pdf", bbox_inches="tight")
     fig.savefig(fig_dir / f"{stem}.svg", bbox_inches="tight")
-    print(f"  saved {stem}.pdf / .svg")
+    fig.savefig(fig_dir / f"{stem}.eps", bbox_inches="tight", format="eps")
+    print(f"  saved {stem}.pdf / .svg / .eps")
     plt.close(fig)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -267,11 +276,13 @@ def _fig1_ladder(outdir: Path) -> list[dict]:
     b3_n = len(grouped.get(("B3_res_stl_nohab_fixedcue", "hab_on"), []))
     seed_note = "n=30 (all)" if min(b2_n, b3_n) >= 30 else f"n=30 (B1,B4,B5); n={min(b2_n,b3_n)} (B2,B3)"
     ax.set_title(f"B1–B5  |  µ=2×10⁻⁵, κ=0.50  |  {seed_note}", fontsize=9, pad=4)
-    ax.legend(framealpha=0.9, loc="lower right", edgecolor="#cccccc", fontsize=8.5)
+    ax.legend(framealpha=0.9, loc="upper center", bbox_to_anchor=(0.5, -0.16),
+              ncol=2, edgecolor="#cccccc", fontsize=8.5)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v/1e3:.0f}k"))
     fig.tight_layout(pad=0.6)
-    fig.text(0.5, -0.04, SYS_FOOTNOTE, ha="center", va="bottom",
-             fontsize=7, color="#555555", style="italic")
+    fig.subplots_adjust(bottom=0.22)
+    fig.text(0.5, -0.01, SYS_FOOTNOTE_WRAPPED, ha="center", va="top",
+             fontsize=8.5, color="#555555", style="italic")
     _savefig(fig, "fig1_baseline_ladder", outdir)
 
     # Build table rows (% change vs B1 reference)
@@ -376,13 +387,16 @@ def _fig2_kappa_dose_response(outdir: Path) -> None:
         ax.set_title(f"({panel_letter})  {hab_label}", fontsize=10)
         ax.set_xticks(kap_vals)
         ax.set_xticklabels([f"{k:.2f}" for k in kap_vals], fontsize=8.5)
-        ax.legend(fontsize=8, framealpha=0.9, loc="best", edgecolor="#cccccc",
-                  handlelength=1.8, borderpad=0.5)
-
     ax_off.set_xlabel("Habituation strength κ", fontsize=9)
     fig.suptitle("B4 vs. B1: κ dose-response  (* p<0.05, Wilcoxon, n=10)",
                  fontsize=9)
     fig.tight_layout(pad=0.7)
+    handles, labels = ax_on.get_legend_handles_labels()
+    fig.legend(handles, labels,
+               fontsize=8, framealpha=0.9, edgecolor="#cccccc",
+               ncol=2, handlelength=1.8, borderpad=0.5,
+               loc="lower center", bbox_to_anchor=(0.5, 0.01))
+    fig.subplots_adjust(bottom=0.20)
     _savefig(fig, "fig2_kappa_dose_response", outdir)
 
 
@@ -523,14 +537,15 @@ def _fig3_tradeoff_scatter(outdir: Path) -> list[dict]:
         plt.Line2D([0],[0], marker="^", color=mu_colors[4e-4], ls="", ms=5.5,
                    label="Overloaded  (µ=4×10⁻⁴)"),
     ]
-    ax_exp.legend(handles=legend_handles, loc="lower right", ncol=1,
-                  fontsize=7.5, framealpha=0.92, edgecolor="#cccccc")
-
     fig.suptitle(
         "B4 Override Variants vs. B1\nhab. ON, n=10 seeds, 95% CI  |  ✦ best at heavy spare",
         fontsize=9, y=1.01,
     )
     fig.tight_layout(pad=0.6)
+    fig.legend(handles=legend_handles, ncol=1, fontsize=7.5,
+               framealpha=0.92, edgecolor="#cccccc",
+               loc="lower center", bbox_to_anchor=(0.5, 0.04))
+    fig.subplots_adjust(bottom=0.26)
     _savefig(fig, "fig3_tradeoff_scatter", outdir)
     return table_rows
 
@@ -570,8 +585,10 @@ def _fig4_override_counts(outdir: Path) -> None:
     ax.set_xticklabels([MU_LABELS_SHORT.get(m, str(m)) for m in mu_vals], fontsize=8.5, linespacing=1.2)
     ax.set_ylabel("Mean overrides per run", fontsize=9)
     ax.set_title("Override Frequency by Load  |  hab. ON, n=10", fontsize=9, pad=4)
-    ax.legend(title="Slack (★=90 s default)", title_fontsize=8, fontsize=8.5, framealpha=0.8)
+    ax.legend(title="Slack (★=90 s default)", title_fontsize=8, fontsize=8.5, framealpha=0.8,
+              loc="upper center", bbox_to_anchor=(0.5, -0.26), ncol=2)
     fig.tight_layout(pad=0.6)
+    fig.subplots_adjust(bottom=0.24)
     _savefig(fig, "fig4_override_counts", outdir)
 
 
@@ -665,6 +682,7 @@ COPY_MAP = {
     "preemption_spare_per_run_metrics.csv":   SOURCE_FILES["preemption_2em05"],
     "preemption_heavy_per_run_metrics.csv":   SOURCE_FILES["preemption_1em04"],
     "preemption_overload_per_run_metrics.csv": SOURCE_FILES["preemption_4em04"],
+    "2x2_overhead_corrected.csv":             SOURCE_FILES["2x2_overhead"],
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -791,12 +809,14 @@ def _fig5_full_ladder_by_load(outdir: Path) -> None:
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:+.0f}%"))
     ax.set_ylabel("Exposure change vs. B1 (%)\n(negative = stronger deterrence)", fontsize=9)
     ax.set_title("Ladder across load regimes  |  hab. ON, κ=0.50", fontsize=9, pad=4)
-    ax.legend(fontsize=8, framealpha=0.9, edgecolor="#cccccc", loc="lower left")
+    ax.legend(fontsize=8, framealpha=0.9, edgecolor="#cccccc",
+              loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=1)
     ax.grid(True, alpha=0.3, ls="--")
     fig.tight_layout(pad=0.6)
-    fig.text(0.5, -0.04,
-             SYS_FOOTNOTE + "  |  n=30 (B4); n=10–30 (others)",
-             ha="center", va="bottom", fontsize=7, color="#555555", style="italic")
+    fig.subplots_adjust(bottom=0.38)
+    _note5 = SYS_FOOTNOTE_WRAPPED + "\nn=30 (B4); n=10–30 (others)"
+    fig.text(0.5, 0.05, _note5, ha="center", va="top",
+             fontsize=7, color="#555555", style="italic")
     _savefig(fig, "fig5_full_ladder_by_load", outdir)
 
 
@@ -1073,13 +1093,73 @@ def _fig7_preemption_comparison(outdir: Path) -> None:
     ax_miss.set_ylabel("Miss-rate gap vs. B1 (pp)\n(positive = more misses)", fontsize=9)
     ax_exp.set_title("(a)  Deterrence", fontsize=10, pad=4)
     ax_miss.set_title("(b)  Reactive service", fontsize=10, pad=4)
-    ax_exp.legend(fontsize=8.5, framealpha=0.9, edgecolor="#cccccc")
     fig.suptitle(
         f"Preemption Variant: B4-base vs. B4+preempt\nhab. ON, κ=0.50, n={n_seeds} seeds",
         fontsize=9, y=1.01,
     )
     fig.tight_layout(pad=0.7)
+    handles, labels = ax_exp.get_legend_handles_labels()
+    fig.legend(handles, labels,
+               fontsize=8.5, framealpha=0.9, edgecolor="#cccccc",
+               ncol=2, loc="lower center", bbox_to_anchor=(0.5, 0.01))
+    fig.subplots_adjust(bottom=0.16)
     _savefig(fig, "fig7_preemption_comparison", outdir)
+
+
+def _table4_2x2_overhead(outdir: Path) -> list[dict]:
+    """Cost decomposition: fixed-cue vs. multi-cue overhead across hab conditions.
+
+    5 systems × 2 hab conditions; reports mean exposure pct vs B1 with 95% CI.
+    """
+    from collections import defaultdict
+    csv_path = SOURCE_FILES.get("2x2_overhead")
+    rows = _read_csv(csv_path)
+    if not rows:
+        print("  [table4] 2×2 overhead data not available — skipping.")
+        return []
+
+    DISPLAY = {
+        "B1_greedy_fixedcue":        "B1 (reference)",
+        "B3_res_stl_nohab_fixedcue": "B3 fixed-cue",
+        "B3_res_stl_nohab_multicue": "B3 multi-cue",
+        "B4_res_stl_full_fixedcue":  "B4 fixed-cue",
+        "B4_res_stl_full_multicue":  "B4★ multi-cue",
+    }
+    sys_order = list(DISPLAY.keys())
+
+    grouped: dict[tuple, list[float]] = defaultdict(list)
+    for r in rows:
+        b = r.get("baseline", "")
+        h = r.get("habituation_condition", "")
+        v = _safe(r.get("value_weighted_exposure", "nan"))
+        if b in DISPLAY and math.isfinite(v):
+            grouped[(b, h)].append(v)
+
+    b1_on  = stats.mean(grouped.get(("B1_greedy_fixedcue", "hab_on"),  [float("nan")]))
+    b1_off = stats.mean(grouped.get(("B1_greedy_fixedcue", "hab_off"), [float("nan")]))
+
+    out = []
+    for baseline in sys_order:
+        for hab, b1_mean in [("hab_on", b1_on), ("hab_off", b1_off)]:
+            vals = grouped.get((baseline, hab), [])
+            n = len(vals)
+            if not vals or not math.isfinite(b1_mean):
+                continue
+            if baseline == "B1_greedy_fixedcue":
+                pcts = [0.0] * n
+            else:
+                pcts = [(v - b1_mean) / b1_mean * 100 for v in vals]
+            m = stats.mean(pcts)
+            lo, hi = _ci95(pcts) if n > 1 else (float("nan"), float("nan"))
+            out.append({
+                "system":        DISPLAY[baseline],
+                "hab_condition": "Hab. ON" if hab == "hab_on" else "Hab. OFF",
+                "n_seeds":       n,
+                "pct_vs_B1":     f"{m:+.1f}%",
+                "ci_95":         (f"[{lo:+.1f}%, {hi:+.1f}%]"
+                                  if math.isfinite(lo) else "—"),
+            })
+    return out
 
 
 def _collect_data(outdir: Path) -> None:
@@ -1266,12 +1346,35 @@ def main(argv=None) -> None:
                      "(κ=0.50, hab. ON; negative = B4 better; bootstrap 95% CI, Wilcoxon signed-rank)",
                      outdir, tex_spec=t3_tex_spec)
 
+    print("[acc] Generating Table 4 — 2×2 cost decomposition …")
+    overhead_table = _table4_2x2_overhead(outdir)
+    if overhead_table:
+        t4_tex_spec = {
+            "caption": (
+                r"Cost decomposition: fixed-cue vs.\ multi-cue overhead under hab.\ ON and hab.\ OFF, "
+                r"$\mu = 2 \times 10^{-5}$, $\kappa = 0.50$. "
+                r"Values are mean value-weighted exposure relative to B1 (\%). "
+                r"Negative $=$ lower exposure than B1 (stronger deterrence). "
+                r"Bootstrap 95\,\% CI."
+            ),
+            "label": "tab:acc-2x2-overhead",
+            "col_fields": ["system", "hab_condition", "n_seeds", "pct_vs_B1", "ci_95"],
+            "col_headers": [r"System", r"Hab.\ condition", r"$n$",
+                            r"$\Delta$ vs B1 (\%)", r"95\,\% CI"],
+            "col_align": r"l l r r l",
+        }
+        _write_table(overhead_table,
+                     "table4_2x2_overhead_decomposition",
+                     "Table 4 — 2×2 Cost Decomposition: Fixed-cue vs. Multi-cue "
+                     "(µ=2×10⁻⁵, κ=0.50; % vs B1; bootstrap 95% CI)",
+                     outdir, tex_spec=t4_tex_spec)
+
     print("\n[acc] Collecting source data …")
     _collect_data(outdir)
 
     print(f"\n[acc] Done.  Package at: {outdir}")
-    print("  figures/   — 7 PDF + SVG figures")
-    print("  tables/    — 3 CSV + Markdown + LaTeX tables")
+    print("  figures/   — 7 PDF + SVG + EPS figures")
+    print("  tables/    — 4 CSV + Markdown + LaTeX tables")
     print("  data/      — source CSVs (copies only, originals untouched)")
 
 

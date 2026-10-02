@@ -482,6 +482,7 @@ def _resolve_dispatch_policy_settings(
         "res",
         "res-soft",
         "res-adaptive",
+        "res-queue",
         "res-feasible",
         "res-idle-feasible",
         "res-confidence",
@@ -490,7 +491,7 @@ def _resolve_dispatch_policy_settings(
     }:
         raise ValueError(
             "dispatch_policy must be one of ['react', 'reactive-first', 'unc', 'res', 'res-soft', 'res-adaptive', "
-            "'res-feasible', 'res-idle-feasible', 'res-confidence', 'res-idle-feasible-confidence', 'res-risk-adjusted'], "
+            "'res-queue', 'res-feasible', 'res-idle-feasible', 'res-confidence', 'res-idle-feasible-confidence', 'res-risk-adjusted'], "
             f"got: {dispatch_policy!r}"
         )
     rho = float(reservation_fraction)
@@ -700,11 +701,22 @@ def _effective_reservation_fraction(
     predictive_task_count: int,
     reservation_age_softening_beta: float = 0.0,
     reactive_age_norm: float = 0.0,
+    fleet_size: int = 0,
+    global_reactive_count: int = 0,
 ) -> float:
     """Compute the reservation fraction after softening or adaptive pressure adjustments."""
     rho = float(max(0.0, min(1.0, float(reservation_fraction))))
-    if str(dispatch_policy) not in {"res-soft", "res-adaptive"}:
+    if str(dispatch_policy) not in {"res-soft", "res-adaptive", "res-queue"}:
         return rho
+    if str(dispatch_policy) == "res-queue":
+        # Linear rolloff normalised to fleet size using the GLOBAL reactive queue
+        # depth (all robots combined), not this robot's local task list.
+        # rho -> 0 as global_reactive_count -> fleet_size (fully reactive at saturation).
+        n = int(fleet_size)
+        if n <= 0:
+            return rho
+        pressure = min(1.0, float(max(0, int(global_reactive_count))) / float(n))
+        return float(max(0.0, rho * (1.0 - pressure)))
     alpha = float(max(float(reservation_softening_alpha), 0.0))
     age_beta = float(max(float(reservation_age_softening_beta), 0.0))
     total_competing = int(max(0, int(reactive_task_count)) + max(0, int(predictive_task_count)))
@@ -1145,6 +1157,8 @@ def _select_dispatch_policy_task(
     risk_adjusted_reservation_beta: float = 2.0,
     robot_is_idle: bool = False,
     predictive_max_eta_s: float | None = None,
+    fleet_size: int = 0,
+    global_reactive_count: int = 0,
 ) -> tuple[dict | None, bool]:
     """Select one task from the candidate pool under the configured dispatch policy."""
     reactive_tasks = [task for task in active_tasks if _task_stream(task) == "reactive"]
@@ -1308,6 +1322,8 @@ def _select_dispatch_policy_task(
         reactive_task_count=len(reactive_tasks),
         predictive_task_count=len(predictive_tasks),
         reactive_age_norm=float(reactive_age_norm),
+        fleet_size=int(fleet_size),
+        global_reactive_count=int(global_reactive_count),
     )
 
     predictive_claim_tasks = list(predictive_tasks)
@@ -1335,6 +1351,7 @@ def _select_dispatch_policy_task(
             "res",
             "res-soft",
             "res-adaptive",
+            "res-queue",
             "res-feasible",
             "res-idle-feasible",
             "res-confidence",
@@ -6182,6 +6199,10 @@ def run_simulation_frames_persistent(
         if not assigned_tasks:
             return None, False
         robot_is_idle = bool(goal.get(rid) is None) and float(loiter_until.get(rid, 0.0)) <= float(now_t)
+        # Global reactive queue depth used by res-queue policy for fleet-level pressure.
+        n_global_reactive = sum(
+            1 for tr in active_tasks if _task_stream(tr) == "reactive"
+        )
         return _select_dispatch_policy_task(
             assigned_tasks,
             dispatch_policy=str(dispatch_policy),
@@ -6215,6 +6236,8 @@ def run_simulation_frames_persistent(
             risk_adjusted_reservation_beta=float(risk_adjusted_reservation_beta),
             robot_is_idle=bool(robot_is_idle),
             predictive_max_eta_s=predictive_max_eta_s,
+            fleet_size=len(robots),
+            global_reactive_count=n_global_reactive,
         )
 
     def _start_deterring_hold(rid, task_row, now_t):
