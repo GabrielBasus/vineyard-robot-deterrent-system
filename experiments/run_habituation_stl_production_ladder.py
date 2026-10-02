@@ -84,6 +84,9 @@ METRIC_FIELDS = [
     "stl_robustness_exp",
     "stl_robustness_cov",
     "stl_robustness_hab",
+    "urgent_reactive_override_total",
+    "preempt_predictive_override_total",
+    "reactive_generated_total",
 ]
 
 
@@ -152,13 +155,17 @@ def _proposed_generation_params() -> dict[str, Any]:
 
 
 def _reserved_dispatch_params(args: argparse.Namespace) -> dict[str, Any]:
-    return {
+    params: dict[str, Any] = {
         "dispatch_policy": "res",
         "reservation_fraction": float(args.reservation_fraction),
         "reservation_window_s": 600.0,
-        "reactive_override_slack_s": 90.0,
+        "reactive_override_slack_s": float(getattr(args, "reactive_override_slack_s", 90.0)),
         "predictive_selection_policy": "utility",
     }
+    predictive_max_eta_s = getattr(args, "predictive_max_eta_s", None)
+    if predictive_max_eta_s is not None:
+        params["predictive_max_eta_s"] = float(predictive_max_eta_s)
+    return params
 
 
 def _fixed_cue_params(args: argparse.Namespace) -> dict[str, Any]:
@@ -198,10 +205,24 @@ def _system_params(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
             "predictive_utility_mode": "stl_robustness",
             "stl_active_clauses": ("exp", "cov"),
         },
+        "B3_res_stl_nohab_fixedcue": {
+            **proposed,
+            **reserved,
+            **fixed_cue,
+            "predictive_utility_mode": "stl_robustness",
+            "stl_active_clauses": ("exp", "cov"),
+        },
         "B4_res_stl_full_multicue": {
             **proposed,
             **reserved,
             "predictive_fixed_deterring_mode": None,
+            "predictive_utility_mode": "stl_robustness",
+            "stl_active_clauses": ("exp", "cov", "hab"),
+        },
+        "B4_res_stl_full_fixedcue": {
+            **proposed,
+            **reserved,
+            **fixed_cue,
             "predictive_utility_mode": "stl_robustness",
             "stl_active_clauses": ("exp", "cov", "hab"),
         },
@@ -216,6 +237,37 @@ def _system_params(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
             **reserved,
             "predictive_fixed_deterring_mode": None,
             "predictive_utility_mode": "legacy_habituation",
+        },
+        # ── Adaptive-reservation variants of B4 (load-sensitive ρ_res) ────────
+        # B4_res_soft: ρ_res shrinks as the reactive queue fills (α=2.0), so
+        # under overload the reservation approaches zero without manual tuning.
+        "B4_res_soft_multicue": {
+            **proposed,
+            "dispatch_policy": "res-soft",
+            "reservation_fraction": float(args.reservation_fraction),
+            "reservation_window_s": 600.0,
+            "reactive_override_slack_s": 90.0,
+            "predictive_selection_policy": "utility",
+            "reservation_softening_alpha": 2.0,
+            "predictive_fixed_deterring_mode": None,
+            "predictive_utility_mode": "stl_robustness",
+            "stl_active_clauses": ("exp", "cov", "hab"),
+        },
+        # B4_res_adaptive: additionally gates predictive dispatch when the oldest
+        # reactive task is already half-expired (age_gate=0.5 × slack=90s → 45s).
+        "B4_res_adaptive_multicue": {
+            **proposed,
+            "dispatch_policy": "res-adaptive",
+            "reservation_fraction": float(args.reservation_fraction),
+            "reservation_window_s": 600.0,
+            "reactive_override_slack_s": 90.0,
+            "predictive_selection_policy": "utility",
+            "reservation_softening_alpha": 2.0,
+            "reservation_age_softening_beta": 2.0,
+            "reservation_age_gate": 0.5,
+            "predictive_fixed_deterring_mode": None,
+            "predictive_utility_mode": "stl_robustness",
+            "stl_active_clauses": ("exp", "cov", "hab"),
         },
     }
 
@@ -837,10 +889,11 @@ def _build_jobs(args: argparse.Namespace) -> list[dict[str, Any]]:
         "B1_unc_legacy": "B1_greedy_fixedcue",
         "B2_res_deltaJ": "B2_res_deltaJ_fixedcue",
         "B3_res_stl_nohab": "B3_res_stl_nohab_multicue",
-        "B3_res_stl_nohab_fixedcue": "B3_res_stl_nohab_multicue",
         "B4_res_stl_full": "B4_res_stl_full_multicue",
         "B5_greedy_habcue": "B5_greedy_habcue",
         "B5_res_habcue_multicue": "B5_res_habcue_multicue",
+        "B4_res_soft": "B4_res_soft_multicue",
+        "B4_res_adaptive": "B4_res_adaptive_multicue",
     }
     wanted = {
         aliases.get(str(name), str(name))
@@ -970,6 +1023,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-s", type=float, default=300.0)
     parser.add_argument("--task-replan-period-s", type=float, default=45.0)
     parser.add_argument("--reservation-fraction", type=float, default=0.25)
+    parser.add_argument("--reactive-override-slack-s", type=float, default=90.0)
+    parser.add_argument("--predictive-max-eta-s", type=float, default=None)
     parser.add_argument("--mu-true", type=float, default=1.0e-6)
     parser.add_argument("--alpha-true", type=float, default=0.3)
     parser.add_argument("--beta-true", type=float, default=0.25)

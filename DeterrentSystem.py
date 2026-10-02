@@ -1144,10 +1144,17 @@ def _select_dispatch_policy_task(
     risk_adjusted_reservation_alpha: float = 2.0,
     risk_adjusted_reservation_beta: float = 2.0,
     robot_is_idle: bool = False,
+    predictive_max_eta_s: float | None = None,
 ) -> tuple[dict | None, bool]:
     """Select one task from the candidate pool under the configured dispatch policy."""
     reactive_tasks = [task for task in active_tasks if _task_stream(task) == "reactive"]
     predictive_tasks = [task for task in active_tasks if _task_stream(task) == "predictive"]
+    # Travel cap: skip predictive tasks whose estimated travel time exceeds the cap.
+    if predictive_max_eta_s is not None and float(predictive_max_eta_s) > 0.0:
+        predictive_tasks = [
+            task for task in predictive_tasks
+            if float(eta_seconds_fn(task)) <= float(predictive_max_eta_s)
+        ]
     reactive_age_norm = _reactive_age_norm(
         reactive_tasks,
         now_t=float(now_t),
@@ -1981,6 +1988,7 @@ def run_simulation_frames_persistent(
     reservation_window_s=600.0,
     reactive_load_factor_window_s=None,
     reactive_override_slack_s=90.0,
+    predictive_max_eta_s=None,
     reservation_softening_alpha=1.0,
     reservation_age_softening_beta=0.0,
     reservation_age_gate=1.0,
@@ -2013,6 +2021,7 @@ def run_simulation_frames_persistent(
     max_active_patrolling_per_robot=2,
     max_active_model_deterring_per_robot=1,
     preempt_deterring_goals=True,
+    preempt_predictive_with_reactive=False,
     preempt_direct_detection_goals=True,
     preempt_model_scored_goals=False,
     use_live_robot_pose_for_task_planning=True,
@@ -3922,6 +3931,7 @@ def run_simulation_frames_persistent(
     reactive_dispatched_task_ids = set()
     predictive_dispatched_task_ids = set()
     urgent_reactive_override_total = 0
+    preempt_predictive_override_total = 0
     predictive_deadline_feasible_total = 0
     predictive_deadline_checked_total = 0
     predictive_confidence_sum = 0.0
@@ -4022,6 +4032,16 @@ def run_simulation_frames_persistent(
         gamma=float(planner_habituation_gamma),
     )
     hab = truth_hab
+    # Drop the φ_hab clause when habituation is disabled: with η≡1 frozen, the
+    # hab clause evaluates to a constant in every candidate, which dominates the
+    # softmin and collapses all utility scores toward zero, breaking task/mode
+    # selection. Without habituation the clause carries no information, so it
+    # should not participate in the softmin.
+    _effective_clauses = (
+        tuple(c for c in stl_active_clauses if c != "hab")
+        if not bool(enable_habituation)
+        else tuple(stl_active_clauses)
+    )
     stl_spec_params = SpecParams(
         E_star=float(stl_E_star),
         T_cov=float(stl_T_cov_s),
@@ -4032,7 +4052,7 @@ def run_simulation_frames_persistent(
         monitor_dt=float(stl_monitor_dt_s),
         theta=float(stl_theta),
         smooth=bool(stl_smooth),
-        active_clauses=tuple(stl_active_clauses),
+        active_clauses=_effective_clauses,
     )
     stl_dynamics = Dynamics(
         omega_e=float(omega),
@@ -4311,6 +4331,7 @@ def run_simulation_frames_persistent(
         predictive_completed_total=0,
         predictive_distinct_completed_total=0,
         reactive_completed_fraction=float("nan"),
+        reactive_expired_total=0,
         predictive_completed_fraction=float("nan"),
         predictive_expired_total=0,
         predictive_expired_fraction=float("nan"),
@@ -6193,6 +6214,7 @@ def run_simulation_frames_persistent(
             risk_adjusted_reservation_alpha=float(risk_adjusted_reservation_alpha),
             risk_adjusted_reservation_beta=float(risk_adjusted_reservation_beta),
             robot_is_idle=bool(robot_is_idle),
+            predictive_max_eta_s=predictive_max_eta_s,
         )
 
     def _start_deterring_hold(rid, task_row, now_t):
@@ -6716,6 +6738,7 @@ def run_simulation_frames_persistent(
         motion_commands = []
         current_task_by_robot = {}
         step_urgent_reactive_override_count = 0
+        step_preempt_predictive_override_count = 0
         graph_reservations_step = GraphReservationTable()
         for r in robots_def:
             rid = r['id']
@@ -6799,6 +6822,23 @@ def run_simulation_frames_persistent(
                     current_goal_task = _match_active_task_for_robot_goal(rid, goal[rid])
                     policy_task = None
                     urgent_override = False
+                    # Preempt mid-flight predictive tasks when a reactive task is waiting.
+                    if (preempt_predictive_with_reactive
+                            and goal[rid] is not None
+                            and current_goal_task is not None
+                            and _task_stream(current_goal_task) == "predictive"
+                            and current_goal_task.get("started_hold") is None):
+                        reactive_waiting = [tr for tr in _active_tasks_for_robot(rid)
+                                            if _task_stream(tr) == "reactive"]
+                        if reactive_waiting:
+                            best_reactive = min(
+                                reactive_waiting,
+                                key=lambda tr: float(tr.get("time", float("inf"))),
+                            )
+                            goal[rid] = _task_goal_xy(best_reactive)
+                            step_preempt_predictive_override_count += 1
+                            command_source = "preempt_predictive"
+                            command_type = "move"
                     if preempt_deterring_goals or goal[rid] is None:
                         policy_task, urgent_override = _select_policy_task_for_robot(rid, t)
                     if urgent_override and policy_task is not None:
@@ -6995,6 +7035,7 @@ def run_simulation_frames_persistent(
             goal=goal,
         )
         urgent_reactive_override_total += int(step_urgent_reactive_override_count)
+        preempt_predictive_override_total += int(step_preempt_predictive_override_count)
 
         # --------------------------------------------------------------------
         # Stage 5: Telemetry, model advance, and forecast evaluation
@@ -7221,6 +7262,7 @@ def run_simulation_frames_persistent(
             float(reactive_completed_total) / float(reactive_generated_total)
             if reactive_generated_total > 0 else float("nan")
         )
+        reactive_expired_total = max(0, int(reactive_generated_total) - int(reactive_completed_total))
         predictive_completed_fraction = (
             float(predictive_completed_total) / float(predictive_generated_total)
             if predictive_generated_total > 0 else float("nan")
@@ -7381,6 +7423,7 @@ def run_simulation_frames_persistent(
             "robots_zero_distance_count": int(sum(1 for rid in travel_distance_by_robot if travel_distance_by_robot[rid] <= 1e-6)),
             "stale_goal_clears": int(stale_goal_clears),
             "urgent_reactive_override_total": int(urgent_reactive_override_total),
+            "preempt_predictive_override_total": int(preempt_predictive_override_total),
             "predictive_deadline_feasible_total": int(predictive_deadline_feasible_total),
             "predictive_deadline_checked_total": int(predictive_deadline_checked_total),
             "predictive_deadline_feasible_fraction": (
@@ -7434,6 +7477,7 @@ def run_simulation_frames_persistent(
             "predictive_completed_total": int(predictive_completed_total),
             "predictive_distinct_completed_total": int(len(predictive_distinct_completed_keys)),
             "reactive_completed_fraction": float(reactive_completed_fraction),
+            "reactive_expired_total": int(reactive_expired_total),
             "predictive_completed_fraction": float(predictive_completed_fraction),
             "predictive_expired_total": int(predictive_expired_total),
             "predictive_expired_fraction": float(predictive_expired_fraction),
@@ -7626,6 +7670,7 @@ def run_simulation_frames_persistent(
             "predictive_completed_total": int(predictive_completed_total),
             "predictive_distinct_completed_total": int(len(predictive_distinct_completed_keys)),
             "reactive_completed_fraction": float(reactive_completed_fraction),
+            "reactive_expired_total": int(reactive_expired_total),
             "predictive_completed_fraction": float(predictive_completed_fraction),
             "predictive_expired_total": int(predictive_expired_total),
             "predictive_expired_fraction": float(predictive_expired_fraction),
@@ -7648,6 +7693,7 @@ def run_simulation_frames_persistent(
             "reactive_load_factor_estimate": float(reactive_load_factor_estimate),
             **_current_reactive_load_factor_metrics(t),
             "urgent_reactive_override_total": int(urgent_reactive_override_total),
+            "preempt_predictive_override_total": int(preempt_predictive_override_total),
             "predictive_deadline_feasible_total": int(predictive_deadline_feasible_total),
             "predictive_deadline_checked_total": int(predictive_deadline_checked_total),
             "predictive_deadline_feasible_fraction": (
@@ -7935,6 +7981,7 @@ def run_simulation_frames_persistent(
             predictive_completed_total=int(final_metrics.get("predictive_completed_total", 0)),
             predictive_distinct_completed_total=int(final_metrics.get("predictive_distinct_completed_total", 0)),
             reactive_completed_fraction=float(final_metrics.get("reactive_completed_fraction", float("nan"))),
+            reactive_expired_total=int(final_metrics.get("reactive_expired_total", 0)),
             predictive_completed_fraction=float(final_metrics.get("predictive_completed_fraction", float("nan"))),
             predictive_expired_total=int(final_metrics.get("predictive_expired_total", 0)),
             predictive_expired_fraction=float(final_metrics.get("predictive_expired_fraction", float("nan"))),
@@ -8259,6 +8306,7 @@ def run_metrics_experiments(
             "reactive_completed_total",
             "predictive_completed_total",
             "reactive_completed_fraction",
+            "reactive_expired_total",
             "predictive_completed_fraction",
             "predictive_confidence_mean",
             "predictive_confidence_completed_mean",
@@ -8414,6 +8462,7 @@ def run_metrics_experiments(
         "predictive_completed_total": _safe_stats("predictive_completed_total"),
         "predictive_distinct_completed_total": _safe_stats("predictive_distinct_completed_total"),
         "reactive_completed_fraction": _safe_stats("reactive_completed_fraction"),
+        "reactive_expired_total": _safe_stats("reactive_expired_total"),
         "predictive_completed_fraction": _safe_stats("predictive_completed_fraction"),
         "predictive_expired_total": _safe_stats("predictive_expired_total"),
         "predictive_expired_fraction": _safe_stats("predictive_expired_fraction"),

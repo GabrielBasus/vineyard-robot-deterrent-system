@@ -796,6 +796,7 @@ class MetricsStageResult:
     predictive_completed_total: int
     predictive_distinct_completed_total: int
     reactive_completed_fraction: float
+    reactive_expired_total: int
     predictive_completed_fraction: float
     predictive_expired_total: int
     predictive_expired_fraction: float
@@ -895,6 +896,7 @@ class MetricsStageResult:
             "predictive_completed_total": int(self.predictive_completed_total),
             "predictive_distinct_completed_total": int(self.predictive_distinct_completed_total),
             "reactive_completed_fraction": float(self.reactive_completed_fraction),
+            "reactive_expired_total": int(self.reactive_expired_total),
             "predictive_completed_fraction": float(self.predictive_completed_fraction),
             "predictive_expired_total": int(self.predictive_expired_total),
             "predictive_expired_fraction": float(self.predictive_expired_fraction),
