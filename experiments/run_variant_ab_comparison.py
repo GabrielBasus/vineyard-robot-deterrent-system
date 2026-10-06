@@ -1,16 +1,25 @@
 """
-run_variant_ab_comparison.py -- A vs B controlled comparison experiment.
+run_variant_ab_comparison.py -- A vs B vs C controlled comparison experiment.
 
-Runs B4_res_stl_full_multicue under two forecast-correction settings:
-  variant_A: stl_forecast_correction=False  (original submitted system)
-  variant_B: stl_forecast_correction=True   (Proposal §2 corrections)
+Runs B4_res_stl_full_multicue under three forecast-correction settings:
+  variant_A: both corrections off  (original submitted system)
+  variant_B: stl_forecast_correction=True   (Proposal §2: Eqs 1,2 + pending events
+             + post-apply recovery + eta-weighted historical suppression)
+  variant_C: variant_B + stl_forward_trajectory_correction=True
+             (adds corrected e_nom: propagates background, trigger, inhibitory
+             components separately over the planning horizon)
 
 Uses 30 fresh evaluation seeds (155-184) to keep confirmatory seeds 125-154
-frozen as published results.  Both variants run on the same seed set and
-identical configuration so the comparison is paired.
+frozen as published results.  All variants run on the same seed set and
+identical configuration so comparisons are paired.
+
+Paired comparisons in the output:
+  B vs A: effect of Eqs 1,2 + pending events + eta-weighted suppression
+  C vs B: effect of forward trajectory correction specifically
+  C vs A: all corrections combined
 
 Output: results/testbench/variant_ab/
-  per_run_metrics.csv, summary_by_system.csv, variant_ab_comparison.md
+  per_run_metrics.csv, summary_by_system.csv, variant_abc_comparison.md
 """
 from __future__ import annotations
 
@@ -108,16 +117,25 @@ def _hab_params(enabled: bool) -> dict:
     }
 
 
+_VARIANTS = [
+    # (name, stl_forecast_correction, stl_forward_trajectory_correction)
+    ("variant_A", False, False),   # original submitted system
+    ("variant_B", True,  False),   # Eqs 1,2 + pending events + eta-weighted suppression
+    ("variant_C", True,  True),    # variant_B + corrected forward trajectory
+]
+
+
 def _build_jobs(seed_start: int, seed_count: int) -> list[dict]:
     jobs = []
     for seed in range(seed_start, seed_start + seed_count):
-        for variant, forecast_correction in [("variant_A", False), ("variant_B", True)]:
+        for variant, fc, ftc in _VARIANTS:
             for hab_enabled in (True, False):
                 hab = _hab_params(hab_enabled)
                 params = dict(_COMMON)
                 params.update(_B4_SYS)
                 params.update(hab)
-                params["stl_forecast_correction"] = forecast_correction
+                params["stl_forecast_correction"] = fc
+                params["stl_forward_trajectory_correction"] = ftc
                 system = f"{variant}_{hab['habituation_condition']}"
                 jobs.append({
                     "system": system,
@@ -188,37 +206,68 @@ def _summarize(rows: list[dict]) -> list[dict]:
     return sorted(summary, key=lambda r: (r["baseline"], r["habituation_condition"]))
 
 
-def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
-    deltas = _paired_deltas(rows, "variant_A", "variant_B", "value_weighted_exposure")
-    n = len(deltas)
-    if n == 0:
-        (outdir / "variant_ab_comparison.md").write_text("No paired data.\n", encoding="utf-8")
-        return
-    mean_d = stats.mean(deltas)
-    mean_pct = mean_d / stats.mean(
+def _mean_exposure(rows: list[dict], baseline: str) -> float:
+    vals = [
         _safe_float(r.get("value_weighted_exposure"))
         for r in rows
-        if r["baseline"] == "variant_A" and r["habituation_condition"] == "hab_on"
+        if r["baseline"] == baseline and r["habituation_condition"] == "hab_on"
         and math.isfinite(_safe_float(r.get("value_weighted_exposure")))
-    ) * 100.0
+    ]
+    return stats.mean(vals) if vals else float("nan")
+
+
+def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
+    metric = "value_weighted_exposure"
+    comparisons = [
+        ("variant_A", "variant_B", "B vs A (Eqs 1,2 + pending + eta-suppression)"),
+        ("variant_B", "variant_C", "C vs B (forward trajectory correction only)"),
+        ("variant_A", "variant_C", "C vs A (all corrections combined)"),
+    ]
 
     lines = [
-        "# Variant A vs B Comparison",
+        "# Variant A / B / C Comparison",
         "",
-        "- variant_A: stl_forecast_correction=False (submitted B4)",
-        "- variant_B: stl_forecast_correction=True  (Proposal §2 corrections)",
-        f"- Seeds: {SEED_START}-{SEED_START + SEED_COUNT - 1} (n={n} paired)",
+        "- variant_A: all corrections off (submitted B4)",
+        "- variant_B: stl_forecast_correction=True (Eqs 1,2 + pending events + eta-weighted suppression)",
+        "- variant_C: variant_B + stl_forward_trajectory_correction=True (corrected e_nom forward trajectory)",
+        f"- Seeds: {SEED_START}-{SEED_START + SEED_COUNT - 1}",
         "",
         "## Primary Metric: value_weighted_exposure (hab_on)",
-        "",
-        f"Mean B - A = {mean_d:+.4f} ({mean_pct:+.1f}%)",
-        "(negative = variant B lower exposure = improvement)",
-        "",
-        "## Raw Deltas",
+        "(negative delta = lower exposure = improvement)",
         "",
     ]
-    lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas)]
-    (outdir / "variant_ab_comparison.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    any_data = False
+    for sys_a, sys_b, label in comparisons:
+        deltas = _paired_deltas(rows, sys_a, sys_b, metric)
+        n = len(deltas)
+        if n == 0:
+            lines += [f"### {label}", "", "  (no paired data)", ""]
+            continue
+        any_data = True
+        mean_d = stats.mean(deltas)
+        base_mean = _mean_exposure(rows, sys_a)
+        mean_pct = (mean_d / base_mean * 100.0) if math.isfinite(base_mean) and base_mean != 0 else float("nan")
+        lines += [
+            f"### {label}",
+            "",
+            f"n = {n} paired seeds",
+            f"Mean delta = {mean_d:+.4f} ({mean_pct:+.1f}% of {sys_a} mean)",
+            "",
+        ]
+
+    if not any_data:
+        lines += ["No paired data available."]
+
+    lines += ["## Raw Deltas (B - A)", ""]
+    deltas_ba = _paired_deltas(rows, "variant_A", "variant_B", metric)
+    lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas_ba)]
+
+    lines += ["", "## Raw Deltas (C - B)", ""]
+    deltas_cb = _paired_deltas(rows, "variant_B", "variant_C", metric)
+    lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas_cb)]
+
+    (outdir / "variant_abc_comparison.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def run(args: argparse.Namespace) -> None:

@@ -398,11 +398,32 @@ def estimate_stl_counterfactual_value(
         stl_travel_recovery_delta = float("nan")
 
     states = {}
+    use_ftc = bool(getattr(dynamics, "forward_trajectory_correction", False))
     for cid in cells:
-        e0 = cell_exposure_rate(model, cell_polys[cid], weight_fn=weight_fn)
+        poly = cell_polys[cid]
+        e0 = cell_exposure_rate(model, poly, weight_fn=weight_fn)
         last_t = float(last_service_t_by_cell.get(cid, 0.0))
         g0 = max(0.0, float(now_t) - last_t)
-        states[int(cid)] = CellState(e0=float(e0), g0=float(g0))
+        if use_ftc:
+            # Proposal §2 forward-trajectory correction: read background, trigger, and
+            # inhibitory mass grids separately so _nominal_signals() can propagate each
+            # component at its own decay rate rather than collapsing to e0*exp(-s/omega_e).
+            try:
+                inhib0 = cell_exposure_rate(model, poly, weight_fn=weight_fn,
+                                            field_grid=model.inhib_mass)
+                mu0_t = (cell_exposure_rate(model, poly, weight_fn=weight_fn,
+                                            field_grid=model.mu)
+                         * float(model.time_multiplier(float(now_t))))
+                trigger0 = cell_exposure_rate(model, poly, weight_fn=weight_fn,
+                                              field_grid=model.trigger_mass)
+            except Exception:
+                inhib0 = mu0_t = trigger0 = 0.0
+            states[int(cid)] = CellState(e0=float(e0), g0=float(g0),
+                                         trigger0=float(trigger0),
+                                         inhib0=float(inhib0),
+                                         mu0_t=float(mu0_t))
+        else:
+            states[int(cid)] = CellState(e0=float(e0), g0=float(g0))
 
     u_value = counterfactual_value(
         (int(target_cell_id), int(mode_id), float(completion_lead_s)),

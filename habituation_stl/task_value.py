@@ -43,6 +43,11 @@ class Dynamics:
     # chronological intervening events, post-application recovery trace).
     # When False (default), preserves variant A behavior exactly.
     forecast_correction: bool = False
+    # Proposal §2 (forward trajectory): when True, propagates background, trigger, and
+    # inhibitory components of e_nom separately over the horizon instead of collapsing
+    # them into a single e0*exp(-s/omega_e) curve.  Requires CellState.trigger0,
+    # inhib0, and mu0_t to be populated by the caller.  Independent of forecast_correction.
+    forward_trajectory_correction: bool = False
 
 
 @dataclass
@@ -50,6 +55,11 @@ class CellState:
     """Current observed state of one local cell."""
     e0: float        # current value-weighted exposure rate
     g0: float        # current coverage age (s since last serviced)
+    # Optional fields for forward_trajectory_correction (Proposal §2).
+    # Default 0.0 preserves existing behavior when not supplied.
+    trigger0: float = 0.0   # cell-integrated trigger/excitation mass at decision time
+    inhib0: float = 0.0     # cell-integrated inhibitory mass at decision time
+    mu0_t: float = 0.0      # cell-integrated background rate * time_multiplier at t
 
 
 def _times(params: SpecParams):
@@ -61,7 +71,19 @@ def _nominal_signals(cells, cell_states, times, dyn: Dynamics):
     sig = {}
     for c in cells:
         st = cell_states[c]
-        sig[f"e_{c}"] = st.e0 * np.exp(-times / dyn.omega_e)
+        if dyn.forward_trajectory_correction and (st.inhib0 > 0.0 or st.mu0_t > 0.0):
+            # Corrected forward trajectory: propagate background (constant), trigger
+            # (decays at omega_e), and inhibitory mass (decays at omega_u) separately.
+            # e(t+s) = mu0_t + trigger0*exp(-s/omega_e) - inhib0*exp(-s/omega_u).
+            # Clipped at 0: rates cannot be negative.
+            e_nom = np.maximum(0.0,
+                st.mu0_t
+                + st.trigger0 * np.exp(-times / dyn.omega_e)
+                - st.inhib0 * np.exp(-times / dyn.omega_u)
+            )
+        else:
+            e_nom = st.e0 * np.exp(-times / dyn.omega_e)
+        sig[f"e_{c}"] = e_nom
         sig[f"g_{c}"] = st.g0 + times
         sig[f"eta_{c}"] = np.ones_like(times)  # no active deterrence -> vacuous
     return sig

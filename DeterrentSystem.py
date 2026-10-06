@@ -2115,6 +2115,9 @@ def run_simulation_frames_persistent(
     stl_active_clauses=("exp", "cov", "hab"),
     # Proposal §2: when True, activates consistent-forecast corrections (variant B).
     stl_forecast_correction=False,
+    # Proposal §2 (forward trajectory): when True, propagates background, trigger, and
+    # inhibitory components of e_nom separately over the horizon (variant C).
+    stl_forward_trajectory_correction=False,
     # Forecast quality metrics
     forecast_horizon_s=300.0,
     forecast_match_radius_m=20.0,
@@ -4081,6 +4084,7 @@ def run_simulation_frames_persistent(
             for mode in mode_labels
         ),
         forecast_correction=bool(stl_forecast_correction),
+        forward_trajectory_correction=bool(stl_forward_trajectory_correction),
     )
     last_service_t_by_cell = {cell_id: 0.0 for cell_id in range(len(cells))}
     eta_at_apply_samples = []

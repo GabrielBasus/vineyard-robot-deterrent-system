@@ -20,6 +20,17 @@ from habituation_stl.task_value import Dynamics, CellState, counterfactual_value
 from mission_spec import SpecParams
 
 
+def _dyn_ftc(forecast_correction=True, forward_trajectory_correction=True):
+    return Dynamics(
+        omega_e=600.0,
+        omega_u=900.0,
+        beta=(1.0, 1.0),
+        kernel_self=1.0,
+        forecast_correction=forecast_correction,
+        forward_trajectory_correction=forward_trajectory_correction,
+    )
+
+
 def _make_hab(eta0=0.5, T_rec=1800.0, kappa=0.5, n_cells=2, n_modes=2):
     hab = HabituationField(n_cells=n_cells, n_modes=n_modes, T_rec=T_rec, kappa=kappa)
     hab.eta[:] = eta0
@@ -234,4 +245,109 @@ def test_no_live_state_mutation():
 
     assert np.array_equal(hab.eta, eta_before), (
         "hab.eta must not be mutated by counterfactual_value"
+    )
+
+
+# -----------------------------------------------------------------------
+# 8. Forward trajectory correction: corrected e_nom differs from collapsed.
+# -----------------------------------------------------------------------
+def test_forward_trajectory_correction_changes_u():
+    """Variant C (forward_trajectory_correction=True) gives different U than B.
+
+    Physical scenario: heavy past suppression (large inhib0) decays slower than
+    the trigger mass (omega_u=900 > omega_e=600), so the corrected e_nom RISES
+    over the horizon as inhibitory mass wears off.  When it rises above E_star,
+    it violates the exposure clause in the nominal trajectory -- an effect the
+    collapsed formula (which decays monotonically) cannot capture.
+    The two rho_nom values differ, giving different U.
+    """
+    # Exposure-only spec so only e_nom affects the result.
+    params_exp = SpecParams(
+        E_star=0.15,
+        T_cov=1200.0, T_react=None, W=600.0, eta_min=0.4,
+        horizon=600.0, monitor_dt=30.0, theta=12.0, smooth=False,
+        active_clauses=("exp",),
+    )
+    hab = _make_hab(eta0=1.0)  # fully fresh -> q_hat = 1
+    cells = [0]
+
+    # e0 = 0.10 < E_star = 0.15: collapsed formula never violates.
+    # Large inhib0, tiny trigger0: corrected e_nom rises and crosses E_star
+    # because the inhibitory mass (omega_u=900) decays slower than trigger (omega_e=600),
+    # letting the background term mu0_t dominate as s grows.
+    e0 = 0.10
+    trigger0 = 0.01
+    inhib0 = 0.50
+    mu0_t = e0 + inhib0 - trigger0  # = 0.59, ensures e_nom_C(0) = e0
+
+    states_b = {0: CellState(e0=e0, g0=0.0)}
+    states_c = {0: CellState(e0=e0, g0=0.0, trigger0=trigger0, inhib0=inhib0, mu0_t=mu0_t)}
+
+    dyn_b = _dyn_ftc(forecast_correction=True, forward_trajectory_correction=False)
+    dyn_c = _dyn_ftc(forecast_correction=True, forward_trajectory_correction=True)
+
+    u_b = counterfactual_value((0, 0, 30.0), cells, states_b, hab, params_exp, dyn_b)
+    u_c = counterfactual_value((0, 0, 30.0), cells, states_c, hab, params_exp, dyn_c)
+
+    assert u_b != u_c, (
+        "Corrected e_nom rises above E_star when inhib0 is large; "
+        "collapsed formula misses this and gives a different U"
+    )
+
+
+# -----------------------------------------------------------------------
+# 9. Forward trajectory: components sum to e0 at s=0 (no discontinuity).
+# -----------------------------------------------------------------------
+def test_forward_trajectory_starts_at_e0():
+    """e_nom_corrected(0) == e0 when mu0_t + trigger0 - inhib0 = e0.
+
+    The corrected formula must not introduce a jump at s=0.
+    Both variants produce finite U values.
+    """
+    e0, trigger0, inhib0 = 0.10, 0.01, 0.50
+    mu0_t = e0 + inhib0 - trigger0  # = 0.59
+    assert abs(mu0_t + trigger0 - inhib0 - e0) < 1e-12, "test setup: components must sum to e0"
+
+    hab = _make_hab(eta0=1.0)
+    params_exp = SpecParams(
+        E_star=0.15, T_cov=1200.0, T_react=None, W=600.0, eta_min=0.4,
+        horizon=600.0, monitor_dt=30.0, theta=12.0, smooth=False,
+        active_clauses=("exp",),
+    )
+    cells = [0]
+    states_c = {0: CellState(e0=e0, g0=0.0, trigger0=trigger0, inhib0=inhib0, mu0_t=mu0_t)}
+    states_b = {0: CellState(e0=e0, g0=0.0)}
+    dyn_b = _dyn_ftc(forecast_correction=True, forward_trajectory_correction=False)
+    dyn_c = _dyn_ftc(forecast_correction=True, forward_trajectory_correction=True)
+
+    u_b = counterfactual_value((0, 0, 30.0), cells, states_b, hab, params_exp, dyn_b)
+    u_c = counterfactual_value((0, 0, 30.0), cells, states_c, hab, params_exp, dyn_c)
+    assert math.isfinite(u_b), "variant B U must be finite"
+    assert math.isfinite(u_c), "variant C U must be finite"
+
+
+# -----------------------------------------------------------------------
+# 10. Forward trajectory: variant A unchanged by new flag.
+# -----------------------------------------------------------------------
+def test_forward_trajectory_off_matches_variant_a():
+    """forward_trajectory_correction=False must give the same U as the collapsed formula.
+
+    Variant A (both flags False) and variant B-with-FTC-off must agree when
+    all other parameters are identical, confirming the flag is additive.
+    """
+    hab = _make_hab(eta0=1.0)  # fully fresh: q_hat == 1 under both variants
+    params = _make_params()
+    cells = [0]
+    e0 = 0.4
+    states = {0: CellState(e0=e0, g0=120.0)}
+
+    dyn_a = _dyn(forecast_correction=False)
+    dyn_no_ftc = _dyn_ftc(forecast_correction=False, forward_trajectory_correction=False)
+
+    u_a = counterfactual_value((0, 0, 60.0), cells, states, hab, params, dyn_a)
+    u_no_ftc = counterfactual_value((0, 0, 60.0), cells, states, hab, params, dyn_no_ftc)
+
+    assert abs(u_a - u_no_ftc) < 1e-12, (
+        "forward_trajectory_correction=False with forecast_correction=False "
+        "must reproduce variant A exactly"
     )

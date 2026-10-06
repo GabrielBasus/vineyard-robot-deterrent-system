@@ -127,28 +127,42 @@ model will differ from truth, biasing the e0 snapshot at the next planning episo
 
 ---
 
-## A8. Forward trajectory approximation -- historical suppression decay not modeled
+## A8. Forward trajectory correction -- implemented as variant C flag
 
 **Equation reference**: nominal signal e_nom used in U(a,r).
 
-**Assumption**: the nominal exposure trajectory is `e_nom = e0 * exp(-t / omega_e)`,
-where `e0` is the current cell exposure rate at decision time. `e0` already benefits
-from the eta-weighted historical suppression fix (A7), so it is a better snapshot than
-before. However, as past applications' inhibitory mass decays during the planning
-horizon [t, t+H], the true future exposure rate rises back toward background -- this
-forward decay of historical inhibition is not modeled. The predictor underestimates
-the rate at which exposure rebounds after old applications wear off.
+**Status**: IMPLEMENTED and measurable. `Dynamics.forward_trajectory_correction=True`
+(variant C) activates the corrected forward trajectory. Variant B leaves this off.
+The A/B/C comparison experiment (`experiments/run_variant_ab_comparison.py`) runs
+both and reports the incremental effect of this correction (C vs B delta).
 
-**Where**: `task_value.py`, `_nominal_signals()`, and near the `e_nom_cell` / `supp`
-computation in `counterfactual_value()`. A comment is present at that location.
+**What the corrected formula does**: propagates the three components of the SESTPP
+intensity separately over the planning horizon instead of collapsing to e0*exp(-s/omega_e):
 
-**Consequence**: the forward predictor is overly optimistic about how long suppression
-from past events holds. This creates a shared baseline error for all candidates (both
-rho_nom and rho_wa use the same e_nom baseline), so the error partially cancels in the
-U = rho_wa - rho_nom difference. Residual error is larger when past suppression mass
-is high and decaying rapidly (low omega_u, recent applications). This approximation
-was present in variant A and is not fixed by Section 2; documenting it here is the
-plan's stated requirement.
+```
+e_nom_corrected(s) = mu0_t + trigger0 * exp(-s/omega_e) - inhib0 * exp(-s/omega_u)
+```
+
+where:
+- `mu0_t = cell_integrated(model.mu) * time_multiplier(t_now)` (background, treated
+  as constant over the short horizon -- circadian variation over H=300s is small)
+- `trigger0 = cell_integrated(model.trigger_mass)`
+- `inhib0 = cell_integrated(model.inhib_mass)` (total across all modes)
+
+**Key physical effect**: when `inhib0` is large (heavy past suppression) and
+`omega_u > omega_e` (inhibitory decay slower than trigger decay), the corrected e_nom
+can RISE over the horizon as background dominates once inhibitory mass wears off. The
+collapsed formula (`e0 * exp(-s/omega_e)`) always decays toward 0 and misses this
+rebound. A rising e_nom can violate the exposure clause at interior horizon times even
+when the snapshot e0 < E_star, changing rho_nom and therefore U.
+
+**Where**: `task_value.py` `_nominal_signals()`, `planner_task_estimation.py` states
+loop, `DeterrentSystem.py` `stl_forward_trajectory_correction` parameter.
+
+**Remaining approximation within variant C**: the background term `mu0_t` is treated
+as constant over the horizon. The true background is `mu0 * time_multiplier(t+s)`,
+which has circadian variation (amplitude ±0.4 over 24h). Over H=300s, this variation
+is at most a few percent and is acceptable for the planning horizon length used.
 
 ---
 
