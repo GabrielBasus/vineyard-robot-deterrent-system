@@ -117,6 +117,12 @@ def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
 
     beta_c = float(dyn.beta[a_mode]) if a_mode < len(dyn.beta) else float(dyn.beta[-1])
     e_nom_cell = nom[f"e_{a_cell}"]
+    # Remaining approximation: e_nom_cell decays monotonically from the snapshot e0.
+    # Historical suppression from past applications is folded into e0 via eta-weighted
+    # feedback (Proposal §2 historical-suppression fix), but the forward decay of that
+    # inhibitory mass over the horizon [t, t+H] is not modeled -- so the predictor
+    # underestimates the rate at which exposure rises back toward background as old
+    # applications wear off. This is documented in docs/section2_assumptions.md §A8.
     supp = np.zeros_like(times)
     after = times >= lead
     # Suppression scales by q̂_a — effectiveness at application, before depletion jump.
