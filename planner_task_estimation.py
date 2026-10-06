@@ -371,14 +371,26 @@ def estimate_stl_counterfactual_value(
     stl_travel_recovery_delta = 0.0
     try:
         if "hab" in set(str(clause) for clause in spec_params.active_clauses):
-            import math as _math
             eta_now = float(hab.effectiveness(int(target_cell_id), int(mode_id)))
-            _T_rec = float(getattr(hab, "T_rec", 1.0))
-            q_hat_diag = 1.0 - (1.0 - eta_now) * _math.exp(-float(completion_lead_s) / _T_rec)
-            stl_travel_recovery_delta = q_hat_diag - eta_now
-            # Proposal §2: report corrected η when forecast_correction is active.
             use_correction = bool(getattr(dynamics, "forecast_correction", False))
-            stl_eta_at_apply = q_hat_diag if use_correction else eta_now
+            if use_correction:
+                # Compute q̂_a exactly: process pending events chronologically through
+                # a hab copy, matching the computation inside counterfactual_value().
+                hab_diag = hab.copy()
+                t_cursor = 0.0
+                for t_ev, c_ev, m_ev in sorted(pending_events or [], key=lambda e: e[0]):
+                    if t_ev >= float(completion_lead_s):
+                        break
+                    hab_diag.recover(t_ev - t_cursor)
+                    hab_diag.apply(c_ev, m_ev)
+                    t_cursor = t_ev
+                hab_diag.recover(float(completion_lead_s) - t_cursor)
+                q_hat = float(hab_diag.effectiveness(int(target_cell_id), int(mode_id)))
+                stl_travel_recovery_delta = q_hat - eta_now
+                stl_eta_at_apply = q_hat
+            else:
+                stl_travel_recovery_delta = 0.0
+                stl_eta_at_apply = eta_now
         else:
             stl_eta_at_apply = 1.0
     except Exception:

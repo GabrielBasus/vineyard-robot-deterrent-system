@@ -145,7 +145,8 @@ def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
 
 
 def best_action_for_cell(a_cell, cells, cell_states, hab, params: SpecParams,
-                         dyn: Dynamics, completion_lead=60.0, reactive_ids=None):
+                         dyn: Dynamics, completion_lead=60.0, reactive_ids=None,
+                         pending_events=None):
     """Pick the cue mode maximizing U for a candidate cell; return (mode, U).
 
     The habituation clause makes this prefer un-habituated modes automatically.
@@ -153,7 +154,8 @@ def best_action_for_cell(a_cell, cells, cell_states, hab, params: SpecParams,
     best_m, best_u = 0, -np.inf
     for m in range(hab.n_modes):
         u = counterfactual_value((a_cell, m, completion_lead), cells, cell_states,
-                                 hab, params, dyn, reactive_ids)
+                                 hab, params, dyn, reactive_ids,
+                                 pending_events=pending_events)
         if u > best_u:
             best_m, best_u = m, u
     return best_m, float(best_u)

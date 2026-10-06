@@ -4156,19 +4156,21 @@ def run_simulation_frames_persistent(
         return {str(rid): _local_cell_ids_for_robot(str(rid)) for rid in ids}
 
     def _stl_pending_events_by_robot(now_t, robot_ids=None):
-        """Collect pending committed deterrence completions per robot.
+        """Collect pending committed deterrence completions visible to all planners.
 
         Proposal §2 item 2.3: known intervening applications are processed
         chronologically inside counterfactual_value when forecast_correction=True.
+        In the centralized architecture all active tasks are visible, so every
+        robot's candidate evaluation receives the full set of pending deterrence
+        completions -- not only its own -- so the hab copy correctly propagates
+        all intervening depletions before computing q̂_a.
         Returns {robot_id: [(rel_completion_s, cell_id, mode_id), ...]} where
-        rel_completion_s is seconds from now_t until the application event.
+        rel_completion_s is seconds from now_t until the application event, and
+        every robot receives the same merged list.
         """
         ids = set(str(r) for r in (robot_ids if robot_ids is not None else robots.keys()))
-        events_by_robot: dict = {r: [] for r in ids}
+        all_events: list = []
         for task in list(active_tasks):
-            rid = str(task.get("assigned_primary", ""))
-            if rid not in ids:
-                continue
             if str(task.get("type", "")).strip().lower() != "deterring":
                 continue
             try:
@@ -4198,10 +4200,9 @@ def run_simulation_frames_persistent(
             mode_id = mode_to_id.get(str(task.get("mode", "")))
             if mode_id is None:
                 continue
-            events_by_robot[rid].append((float(rel_t), int(cell_id), int(mode_id)))
-        for rid in events_by_robot:
-            events_by_robot[rid].sort(key=lambda e: e[0])
-        return events_by_robot
+            all_events.append((float(rel_t), int(cell_id), int(mode_id)))
+        all_events.sort(key=lambda e: e[0])
+        return {str(r): list(all_events) for r in ids}
 
     stl_monitors_by_robot = {
         str(rid): RobotMonitor(_local_cell_ids_for_robot(str(rid)), stl_spec_params)
