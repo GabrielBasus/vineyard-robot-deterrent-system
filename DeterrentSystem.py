@@ -4155,6 +4155,54 @@ def run_simulation_frames_persistent(
         ids = list(robots.keys()) if robot_ids is None else list(robot_ids)
         return {str(rid): _local_cell_ids_for_robot(str(rid)) for rid in ids}
 
+    def _stl_pending_events_by_robot(now_t, robot_ids=None):
+        """Collect pending committed deterrence completions per robot.
+
+        Proposal §2 item 2.3: known intervening applications are processed
+        chronologically inside counterfactual_value when forecast_correction=True.
+        Returns {robot_id: [(rel_completion_s, cell_id, mode_id), ...]} where
+        rel_completion_s is seconds from now_t until the application event.
+        """
+        ids = set(str(r) for r in (robot_ids if robot_ids is not None else robots.keys()))
+        events_by_robot: dict = {r: [] for r in ids}
+        for task in list(active_tasks):
+            rid = str(task.get("assigned_primary", ""))
+            if rid not in ids:
+                continue
+            if str(task.get("type", "")).strip().lower() != "deterring":
+                continue
+            try:
+                svc = float(task_action_service_time_s(
+                    task,
+                    deterring_modes=deterring_modes,
+                    default_service_time_s=float(tau_service_s),
+                ))
+            except Exception:
+                svc = float(tau_service_s)
+            started_hold = task.get("started_hold")
+            if started_hold is not None:
+                rel_t = float(started_hold) + svc - float(now_t)
+            else:
+                t_arr = float(task.get("t_assigned", now_t)) + float(task.get("assigned_eta_s", 0.0))
+                rel_t = t_arr + svc - float(now_t)
+            if rel_t < 0.0:
+                continue
+            cell_id = None
+            if callable(_cell_id_for_xy):
+                try:
+                    cell_id = _cell_id_for_xy(float(task.get("x", 0.0)), float(task.get("y", 0.0)))
+                except Exception:
+                    pass
+            if cell_id is None:
+                continue
+            mode_id = mode_to_id.get(str(task.get("mode", "")))
+            if mode_id is None:
+                continue
+            events_by_robot[rid].append((float(rel_t), int(cell_id), int(mode_id)))
+        for rid in events_by_robot:
+            events_by_robot[rid].sort(key=lambda e: e[0])
+        return events_by_robot
+
     stl_monitors_by_robot = {
         str(rid): RobotMonitor(_local_cell_ids_for_robot(str(rid)), stl_spec_params)
         for rid in robots
@@ -4761,7 +4809,7 @@ def run_simulation_frames_persistent(
             stl_dynamics=stl_dynamics,
             stl_cell_polys=cells,
             stl_local_cell_ids_by_robot=_local_cell_ids_by_robot(planning_robots.keys()),
-            stl_pending_events_by_robot=None,
+            stl_pending_events_by_robot=_stl_pending_events_by_robot(now_t, planning_robots.keys()),
             stl_last_service_t_by_cell=last_service_t_by_cell,
             stl_mode_to_id=mode_to_id,
             stl_cell_id_for_xy_fn=_cell_id_for_xy,
@@ -4894,7 +4942,7 @@ def run_simulation_frames_persistent(
                 "stl_dynamics": stl_dynamics,
                 "stl_cell_polys": cells,
                 "stl_local_cell_ids_by_robot": _local_cell_ids_by_robot(_active_robot_ids()),
-                "stl_pending_events_by_robot": None,
+                "stl_pending_events_by_robot": _stl_pending_events_by_robot(now_t, _active_robot_ids()),
                 "stl_last_service_t_by_cell": last_service_t_by_cell,
                 "stl_mode_to_id": mode_to_id,
                 "stl_cell_id_for_xy_fn": _cell_id_for_xy,
@@ -6304,8 +6352,13 @@ def run_simulation_frames_persistent(
         habituation_mode_label = _habituation_mode_label(mode_label)
         mode_idx = _mode_id_for_label(habituation_mode_label)
 
+        # Proposal §2 "Historical suppression": read planner η BEFORE depletion
+        # so the planner model is stamped with η-weighted suppression amplitude.
+        planner_eta_at_apply = 1.0
         if bool(enable_habituation) and cell_id is not None and mode_idx is not None:
             eta_at_apply = truth_hab.effectiveness(cell_id, mode_idx)
+            if bool(stl_forecast_correction):
+                planner_eta_at_apply = planner_hab.effectiveness(cell_id, mode_idx)
             _apply_habituation_update(truth_hab, cell_id, mode_idx, truth_habituation_update_model)
             _apply_habituation_update(planner_hab, cell_id, mode_idx, planner_habituation_update_model)
         if cell_id is not None:
@@ -6332,6 +6385,14 @@ def run_simulation_frames_persistent(
         feedback_beta = float(params.get("beta", 1.0))
         feedback_omega = float(params.get("omega", robots[rid].m.omega_inhib)) * float(model_feedback_omega_scale)
         feedback_sigma = float(params.get("sigma", robots[rid].m.sigma)) * float(model_feedback_sigma_scale)
+        # Proposal §2: planner models receive η-weighted suppression when
+        # forecast_correction is active, so û_r matches the plan's Eq. for
+        # historical suppression (q̂_j · β_{c_j} · K · decay).
+        effective_feedback_beta = (
+            float(planner_eta_at_apply) * feedback_beta
+            if bool(stl_forecast_correction)
+            else feedback_beta
+        )
         if enable_intervention_feedback:
             nonlocal step_intervention_feedback_applied
             step_intervention_feedback_applied += 1
@@ -6340,7 +6401,7 @@ def run_simulation_frames_persistent(
                 global_predictive_model.add_intervention_event(
                     task_row["x"],
                     task_row["y"],
-                    weight=feedback_beta,
+                    weight=effective_feedback_beta,
                     sigma=feedback_sigma,
                     omega_inhib=feedback_omega,
                     mode=mode_label,
@@ -6349,22 +6410,22 @@ def run_simulation_frames_persistent(
                 task_row["x"],
                 task_row["y"],
                 now_t,
-                weight=feedback_beta,
+                weight=effective_feedback_beta,
                 sigma=feedback_sigma,
                 omega_inhib=feedback_omega,
                 mode=mode_label,
-                beta=feedback_beta,
+                beta=effective_feedback_beta,
                 action_id=action_id,
             )
             b = robots[rid].intervention_boundary_events(
                 task_row["x"],
                 task_row["y"],
                 now_t,
-                weight=feedback_beta,
+                weight=effective_feedback_beta,
                 mode=mode_label,
                 sigma=feedback_sigma,
                 omega_inhib=feedback_omega,
-                beta=feedback_beta,
+                beta=effective_feedback_beta,
                 action_id=action_id,
             )
             bus.send_intervention_events(
