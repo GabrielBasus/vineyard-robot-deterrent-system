@@ -35,10 +35,14 @@ from mission_spec import SpecParams, build_spec
 @dataclass
 class Dynamics:
     """Forward-prediction dynamics parameters."""
-    omega_e: float = 600.0     # passive exposure-decay time constant (s)
-    omega_u: float = 900.0     # suppression-decay time constant (s)
-    beta: tuple = (1.0,)       # per-mode nominal suppression strength
-    kernel_self: float = 1.0   # self-cell suppression kernel peak (normalized)
+    omega_e: float = 600.0          # passive exposure-decay time constant (s)
+    omega_u: float = 900.0          # suppression-decay time constant (s)
+    beta: tuple = (1.0,)            # per-mode nominal suppression strength
+    kernel_self: float = 1.0        # self-cell suppression kernel peak (normalized)
+    # Proposal §2: when True, activates consistent-forecast corrections (Eqs. 1, 2,
+    # chronological intervening events, post-application recovery trace).
+    # When False (default), preserves variant A behavior exactly.
+    forecast_correction: bool = False
 
 
 @dataclass
@@ -64,7 +68,7 @@ def _nominal_signals(cells, cell_states, times, dyn: Dynamics):
 
 
 def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
-                         dyn: Dynamics, reactive_ids=None):
+                         dyn: Dynamics, reactive_ids=None, pending_events=None):
     """U(a, r) for a candidate predictive action.
 
     action      : (cell, mode, completion_lead_s)
@@ -83,29 +87,55 @@ def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
 
     # With-action trajectory xi^{+a}: copy nominal, modify the action cell.
     wa = {k: v.copy() for k, v in nom.items()}
-    if "hab" in set(str(clause) for clause in params.active_clauses):
-        eta_app = hab.effectiveness(a_cell, a_mode)        # effectiveness AT application
-    else:
-        eta_app = 1.0                                    # no-hab STL baselines assume a fresh cue
-    beta_c = float(dyn.beta[a_mode]) if a_mode < len(dyn.beta) else float(dyn.beta[-1])
 
+    if "hab" in set(str(clause) for clause in params.active_clauses):
+        if dyn.forecast_correction:
+            # Proposal §2: copy hab so the live state is never mutated (item 2.6).
+            hab_fc = hab.copy()
+            t_cursor = 0.0
+            # Proposal §2: process known intervening committed applications
+            # chronologically, alternating recovery with depletion jumps (item 2.3).
+            for t_ev, c_ev, m_ev in sorted(pending_events or [], key=lambda e: e[0]):
+                if t_ev >= lead:
+                    break
+                hab_fc.recover(t_ev - t_cursor)
+                hab_fc.apply(c_ev, m_ev)
+                t_cursor = t_ev
+            # Eq. (1): q̂_a = 1 − [1 − η̂(t)] exp(−δ_a / T̂_rec)
+            hab_fc.recover(lead - t_cursor)
+            q_hat = hab_fc.effectiveness(a_cell, a_mode)
+            # Eq. (2): η̂(t_a+) = (1 − κ̂) q̂_a
+            kappa_m = float(hab.kappa[a_mode]) if a_mode < len(hab.kappa) else float(hab.kappa[-1])
+            eta_post = (1.0 - kappa_m) * q_hat
+        else:
+            # Variant A: reads η at decision time, no travel-time recovery.
+            q_hat = hab.effectiveness(a_cell, a_mode)
+            eta_post = q_hat
+    else:
+        q_hat = 1.0
+        eta_post = 1.0
+
+    beta_c = float(dyn.beta[a_mode]) if a_mode < len(dyn.beta) else float(dyn.beta[-1])
     e_nom_cell = nom[f"e_{a_cell}"]
     supp = np.zeros_like(times)
     after = times >= lead
-    # effectiveness-scaled, decaying suppression injected from completion (Eq. 26),
-    # capped by the available exposure in the cell.
-    supp[after] = (eta_app * beta_c * dyn.kernel_self
+    # Suppression scales by q̂_a — effectiveness at application, before depletion jump.
+    supp[after] = (q_hat * beta_c * dyn.kernel_self
                    * np.exp(-(times[after] - lead) / dyn.omega_u))
     wa[f"e_{a_cell}"] = np.maximum(0.0, e_nom_cell - np.minimum(e_nom_cell, supp))
 
-    # coverage reset at completion
+    # Coverage reset at completion.
     g = wa[f"g_{a_cell}"].copy()
     g[after] = times[after] - lead
     wa[f"g_{a_cell}"] = g
 
-    # anti-habituation: chosen mode's application effectiveness from completion on
     eta_sig = wa[f"eta_{a_cell}"].copy()
-    eta_sig[after] = eta_app
+    if dyn.forecast_correction:
+        # Proposal §2: η recovers exponentially from η_post toward 1 after the action.
+        eta_sig[after] = 1.0 - (1.0 - eta_post) * np.exp(-(times[after] - lead) / hab.T_rec)
+    else:
+        # Variant A: flat trace at q̂_a from completion onward.
+        eta_sig[after] = q_hat
     wa[f"eta_{a_cell}"] = eta_sig
 
     wa_trace = Trace(times, wa)

@@ -310,6 +310,7 @@ def estimate_stl_counterfactual_value(
     completion_lead_s: float,
     weight_fn=None,
     target_cell_id: int | None = None,
+    pending_events=None,
 ) -> dict:
     """Compute proposal U(a,r) for one candidate deterrence action.
 
@@ -367,13 +368,22 @@ def estimate_stl_counterfactual_value(
             "stl_mode_id": int(mode_id),
         }
 
+    stl_travel_recovery_delta = 0.0
     try:
         if "hab" in set(str(clause) for clause in spec_params.active_clauses):
-            stl_eta_at_apply = float(hab.effectiveness(int(target_cell_id), int(mode_id)))
+            import math as _math
+            eta_now = float(hab.effectiveness(int(target_cell_id), int(mode_id)))
+            _T_rec = float(getattr(hab, "T_rec", 1.0))
+            q_hat_diag = 1.0 - (1.0 - eta_now) * _math.exp(-float(completion_lead_s) / _T_rec)
+            stl_travel_recovery_delta = q_hat_diag - eta_now
+            # Proposal §2: report corrected η when forecast_correction is active.
+            use_correction = bool(getattr(dynamics, "forecast_correction", False))
+            stl_eta_at_apply = q_hat_diag if use_correction else eta_now
         else:
             stl_eta_at_apply = 1.0
     except Exception:
         stl_eta_at_apply = float("nan")
+        stl_travel_recovery_delta = float("nan")
 
     states = {}
     for cid in cells:
@@ -389,6 +399,7 @@ def estimate_stl_counterfactual_value(
         hab,
         spec_params,
         dynamics,
+        pending_events=pending_events,
     )
     return {
         "predictive_stl_U": float(u_value),
@@ -397,6 +408,7 @@ def estimate_stl_counterfactual_value(
         "stl_target_cell": int(target_cell_id),
         "stl_mode_id": int(mode_id),
         "stl_eta_at_apply": float(stl_eta_at_apply),
+        "stl_travel_recovery_delta": float(stl_travel_recovery_delta),
         "stl_local_cell_count": int(len(cells)),
         "stl_completion_lead_s": float(completion_lead_s),
         "stl_target_exposure_rate": float(states[int(target_cell_id)].e0),

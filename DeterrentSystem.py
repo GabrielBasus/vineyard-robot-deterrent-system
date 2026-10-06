@@ -2113,6 +2113,8 @@ def run_simulation_frames_persistent(
     stl_theta=12.0,
     stl_smooth=True,
     stl_active_clauses=("exp", "cov", "hab"),
+    # Proposal §2: when True, activates consistent-forecast corrections (variant B).
+    stl_forecast_correction=False,
     # Forecast quality metrics
     forecast_horizon_s=300.0,
     forecast_match_radius_m=20.0,
@@ -4078,6 +4080,7 @@ def run_simulation_frames_persistent(
             float(deterring_modes.get(mode, {}).get("beta", beta_true))
             for mode in mode_labels
         ),
+        forecast_correction=bool(stl_forecast_correction),
     )
     last_service_t_by_cell = {cell_id: 0.0 for cell_id in range(len(cells))}
     eta_at_apply_samples = []
@@ -4758,6 +4761,7 @@ def run_simulation_frames_persistent(
             stl_dynamics=stl_dynamics,
             stl_cell_polys=cells,
             stl_local_cell_ids_by_robot=_local_cell_ids_by_robot(planning_robots.keys()),
+            stl_pending_events_by_robot=None,
             stl_last_service_t_by_cell=last_service_t_by_cell,
             stl_mode_to_id=mode_to_id,
             stl_cell_id_for_xy_fn=_cell_id_for_xy,
@@ -4890,6 +4894,7 @@ def run_simulation_frames_persistent(
                 "stl_dynamics": stl_dynamics,
                 "stl_cell_polys": cells,
                 "stl_local_cell_ids_by_robot": _local_cell_ids_by_robot(_active_robot_ids()),
+                "stl_pending_events_by_robot": None,
                 "stl_last_service_t_by_cell": last_service_t_by_cell,
                 "stl_mode_to_id": mode_to_id,
                 "stl_cell_id_for_xy_fn": _cell_id_for_xy,
