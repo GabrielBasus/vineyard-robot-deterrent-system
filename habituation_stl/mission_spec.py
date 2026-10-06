@@ -44,7 +44,14 @@ class SpecParams:
     smooth: bool = True        # use smooth (softmin/softmax) aggregation
     active_clauses: tuple = ("exp", "cov", "hab")  # which clauses are in Phi
     clause_weights: dict = field(default_factory=lambda: {
-        "exp": 1.0, "cov": 1.0, "hab": 1.0, "react": 1.0})
+        "exp": 1.0, "cov": 1.0, "hab": 1.0, "react": 1.0,
+        "timed_recovery": 1.0})
+    # Proposal §3.3 (Eq. 4): timed recovery clause parameters.
+    # Active when "timed_recovery" is in active_clauses and all three are set.
+    #   □[(e_z > E_high) => ◇_{[0,T_response]}(e_z <= E_low)]
+    E_high: float = None       # trigger threshold (exposure must fall below this)
+    E_low: float = None        # recovery target (E_low < E_high)
+    T_response: float = None   # max time (s) to recover after exceeding E_high
 
     def aggregator(self) -> Aggregator:
         return Aggregator("smooth", self.theta) if self.smooth else Aggregator("classical")
@@ -100,6 +107,27 @@ def build_clauses(cells, params: SpecParams, reactive_ids=None):
             react_terms.append(Implies(arr, Eventually(srv, 0.0, params.T_react, agg=agg), agg=agg))
         phi_react = Always(And(react_terms, agg=agg), 0.0, H, agg=agg)
         clauses["react"] = phi_react
+
+    # phi_timed_recovery (Eq. 4): □[(e_z > E_high) => ◇_{[0,T_response]}(e_z <= E_low)]
+    # Active when "timed_recovery" in active_clauses and threshold params are set.
+    if ("timed_recovery" in params.active_clauses
+            and params.E_high is not None
+            and params.E_low is not None
+            and params.T_response is not None):
+        tr_terms = []
+        for c in cells:
+            # Trigger: e_z > E_high.  Antecedent robustness = (e_z - E_high)/E_high.
+            e_high_pred = signal_geq(f"e_{c}", params.E_high, scale=params.E_high,
+                                     label=f"e_{c}>=E_high")
+            # Recovery: e_z <= E_low within T_response.  Scale by gap for comparability.
+            scale_low = max(params.E_high - params.E_low, 1e-9)
+            e_low_pred = signal_leq(f"e_{c}", params.E_low, scale=scale_low,
+                                    label=f"e_{c}<=E_low")
+            eventually_low = Eventually(e_low_pred, 0.0, params.T_response, agg=agg)
+            tr_terms.append(Implies(e_high_pred, eventually_low, agg=agg))
+        phi_tr_inner = And(tr_terms, agg=agg) if len(tr_terms) > 1 else tr_terms[0]
+        phi_timed_recovery = Always(phi_tr_inner, 0.0, H, agg=agg)
+        clauses["timed_recovery"] = phi_timed_recovery
 
     return clauses
 

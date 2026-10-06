@@ -21,10 +21,15 @@ The forward predictor rolls the local per-cell signals over the horizon:
 Because U is a difference of robustness margins, choosing a habituated mode is
 penalized through phi_hab even when it would still reduce instantaneous
 exposure -- exactly the behavior a scalar exposure objective cannot produce.
+
+valuation_mode options (set on Dynamics):
+  "stl_robustness"       -- default; return rho(xi^{+a}) - rho(xi^{-a})
+  "integrated_exposure"  -- return integral of exposure reduction over [lead, H]
+                            (Plan §3 variant C objective)
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -48,6 +53,10 @@ class Dynamics:
     # them into a single e0*exp(-s/omega_e) curve.  Requires CellState.trigger0,
     # inhib0, and mu0_t to be populated by the caller.  Independent of forecast_correction.
     forward_trajectory_correction: bool = False
+    # Proposal §3.1: valuation objective.
+    #   "stl_robustness"      -- return rho(xi^{+a}) - rho(xi^{-a})  [default]
+    #   "integrated_exposure" -- return sum_s min(e_nom(s), supp(s)) * dt for s >= lead
+    valuation_mode: str = "stl_robustness"
 
 
 @dataclass
@@ -89,28 +98,13 @@ def _nominal_signals(cells, cell_states, times, dyn: Dynamics):
     return sig
 
 
-def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
-                         dyn: Dynamics, reactive_ids=None, pending_events=None):
-    """U(a, r) for a candidate predictive action.
+def _compute_q_hat(a_cell, a_mode, lead, hab, dyn, params, pending_events):
+    """Compute q_hat (application effectiveness) and eta_post (post-depletion eta).
 
-    action      : (cell, mode, completion_lead_s)
-    cells       : iterable of local cell ids comprising Phi_r
-    cell_states : dict cell -> CellState
-    hab         : HabituationField (read-only; not mutated)
+    Returns (q_hat, eta_post).  q_hat is used both in the suppression amplitude
+    and, for STL mode, in the eta trace after application.
     """
-    a_cell, a_mode, lead = int(action[0]), int(action[1]), float(action[2])
-    times = _times(params)
-    spec, _ = build_spec(cells, params, reactive_ids)
-
-    # Nominal trajectory xi^{-a}
-    nom = _nominal_signals(cells, cell_states, times, dyn)
-    nom_trace = Trace(times, nom)
-    rho_nom = robustness_at(spec, nom_trace, 0)
-
-    # With-action trajectory xi^{+a}: copy nominal, modify the action cell.
-    wa = {k: v.copy() for k, v in nom.items()}
-
-    if "hab" in set(str(clause) for clause in params.active_clauses):
+    if "hab" in set(str(c) for c in params.active_clauses):
         if dyn.forecast_correction:
             # Proposal §2: copy hab so the live state is never mutated (item 2.6).
             hab_fc = hab.copy()
@@ -136,20 +130,13 @@ def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
     else:
         q_hat = 1.0
         eta_post = 1.0
+    return q_hat, eta_post
 
-    beta_c = float(dyn.beta[a_mode]) if a_mode < len(dyn.beta) else float(dyn.beta[-1])
-    e_nom_cell = nom[f"e_{a_cell}"]
-    # Remaining approximation: e_nom_cell decays monotonically from the snapshot e0.
-    # Historical suppression from past applications is folded into e0 via eta-weighted
-    # feedback (Proposal §2 historical-suppression fix), but the forward decay of that
-    # inhibitory mass over the horizon [t, t+H] is not modeled -- so the predictor
-    # underestimates the rate at which exposure rises back toward background as old
-    # applications wear off. This is documented in docs/section2_assumptions.md §A8.
-    supp = np.zeros_like(times)
-    after = times >= lead
-    # Suppression scales by q̂_a — effectiveness at application, before depletion jump.
-    supp[after] = (q_hat * beta_c * dyn.kernel_self
-                   * np.exp(-(times[after] - lead) / dyn.omega_u))
+
+def _build_wa_signals(nom, a_cell, a_mode, lead, times, after, q_hat, eta_post,
+                      e_nom_cell, supp, hab, dyn):
+    """Build the with-action signal dict from the nominal signals."""
+    wa = {k: v.copy() for k, v in nom.items()}
     wa[f"e_{a_cell}"] = np.maximum(0.0, e_nom_cell - np.minimum(e_nom_cell, supp))
 
     # Coverage reset at completion.
@@ -157,6 +144,7 @@ def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
     g[after] = times[after] - lead
     wa[f"g_{a_cell}"] = g
 
+    # Eta signal: post-application depletion + exponential recovery.
     eta_sig = wa[f"eta_{a_cell}"].copy()
     if dyn.forecast_correction:
         # Proposal §2: η recovers exponentially from η_post toward 1 after the action.
@@ -165,11 +153,141 @@ def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
         # Variant A: flat trace at q̂_a from completion onward.
         eta_sig[after] = q_hat
     wa[f"eta_{a_cell}"] = eta_sig
+    return wa
 
+
+def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
+                         dyn: Dynamics, reactive_ids=None, pending_events=None):
+    """U(a, r) for a candidate predictive action.
+
+    action      : (cell, mode, completion_lead_s)
+    cells       : iterable of local cell ids comprising Phi_r
+    cell_states : dict cell -> CellState
+    hab         : HabituationField (read-only; not mutated)
+
+    When dyn.valuation_mode == "integrated_exposure", returns the exposure-reduction
+    integral sum_{s>=lead} min(e_nom(s), supp(s)) * dt instead of the STL
+    robustness difference.
+    """
+    a_cell, a_mode, lead = int(action[0]), int(action[1]), float(action[2])
+    times = _times(params)
+    nom = _nominal_signals(cells, cell_states, times, dyn)
+    e_nom_cell = nom[f"e_{a_cell}"]
+    after = times >= lead
+
+    q_hat, eta_post = _compute_q_hat(a_cell, a_mode, lead, hab, dyn, params, pending_events)
+
+    beta_c = float(dyn.beta[a_mode]) if a_mode < len(dyn.beta) else float(dyn.beta[-1])
+    # Remaining approximation: e_nom_cell decays monotonically from the snapshot e0.
+    # Historical suppression from past applications is folded into e0 via eta-weighted
+    # feedback (Proposal §2 historical-suppression fix), but the forward decay of that
+    # inhibitory mass over the horizon [t, t+H] is not modeled -- so the predictor
+    # underestimates the rate at which exposure rises back toward background as old
+    # applications wear off. This is documented in docs/section2_assumptions.md §A8.
+    supp = np.zeros_like(times)
+    # Suppression scales by q̂_a — effectiveness at application, before depletion jump.
+    supp[after] = (q_hat * beta_c * dyn.kernel_self
+                   * np.exp(-(times[after] - lead) / dyn.omega_u))
+
+    # Integrated exposure mode (Plan §3.1 variant C objective): return exposure-
+    # reduction integral directly without STL robustness computation.
+    if dyn.valuation_mode == "integrated_exposure":
+        reduction = np.minimum(e_nom_cell[after], supp[after])
+        return float(np.sum(reduction) * params.monitor_dt)
+
+    # STL robustness mode (default).
+    spec, _ = build_spec(cells, params, reactive_ids)
+    nom_trace = Trace(times, nom)
+    rho_nom = robustness_at(spec, nom_trace, 0)
+
+    wa = _build_wa_signals(nom, a_cell, a_mode, lead, times, after,
+                           q_hat, eta_post, e_nom_cell, supp, hab, dyn)
     wa_trace = Trace(times, wa)
     rho_wa = robustness_at(spec, wa_trace, 0)
-
     return float(rho_wa - rho_nom)
+
+
+def robustness_breakdown(action, cells, cell_states, hab, params: SpecParams,
+                         dyn: Dynamics, reactive_ids=None, pending_events=None):
+    """Diagnostic: per-clause robustness for nom and wa traces.
+
+    Returns a dict:
+      'nom'               : {clause_name: rho} for the nominal trace
+      'wa'                : {clause_name: rho} for the with-action trace
+      'binding_clause_nom': clause name with the lowest nom robustness
+      'binding_clause_wa' : clause name with the lowest wa robustness
+      'U_stl'             : overall rho_wa - rho_nom (weighted conjunction)
+      'U_ie'              : integrated exposure value (always computed)
+
+    This function is used to diagnose which clause and time drives the score,
+    and to verify whether masking (high e0 -> U_stl=0) is occurring while
+    U_ie remains positive.
+    """
+    a_cell, a_mode, lead = int(action[0]), int(action[1]), float(action[2])
+    times = _times(params)
+    nom = _nominal_signals(cells, cell_states, times, dyn)
+    e_nom_cell = nom[f"e_{a_cell}"]
+    after = times >= lead
+
+    q_hat, eta_post = _compute_q_hat(a_cell, a_mode, lead, hab, dyn, params, pending_events)
+
+    beta_c = float(dyn.beta[a_mode]) if a_mode < len(dyn.beta) else float(dyn.beta[-1])
+    supp = np.zeros_like(times)
+    supp[after] = (q_hat * beta_c * dyn.kernel_self
+                   * np.exp(-(times[after] - lead) / dyn.omega_u))
+
+    nom_trace = Trace(times, nom)
+    wa = _build_wa_signals(nom, a_cell, a_mode, lead, times, after,
+                           q_hat, eta_post, e_nom_cell, supp, hab, dyn)
+    wa_trace = Trace(times, wa)
+
+    spec, clauses = build_spec(cells, params, reactive_ids)
+    nom_rho = {name: float(robustness_at(clause, nom_trace, 0))
+               for name, clause in clauses.items()}
+    wa_rho = {name: float(robustness_at(clause, wa_trace, 0))
+              for name, clause in clauses.items()}
+
+    binding_nom = min(nom_rho, key=nom_rho.get) if nom_rho else None
+    binding_wa = min(wa_rho, key=wa_rho.get) if wa_rho else None
+
+    rho_nom = robustness_at(spec, nom_trace, 0)
+    rho_wa = robustness_at(spec, wa_trace, 0)
+
+    reduction = np.minimum(e_nom_cell[after], supp[after])
+    u_ie = float(np.sum(reduction) * params.monitor_dt)
+
+    return {
+        "nom": nom_rho,
+        "wa": wa_rho,
+        "binding_clause_nom": binding_nom,
+        "binding_clause_wa": binding_wa,
+        "U_stl": float(rho_wa - rho_nom),
+        "U_ie": u_ie,
+    }
+
+
+def cue_preservation_value(action, cells, cell_states, hab, params: SpecParams,
+                            dyn: Dynamics, reactive_ids=None, pending_events=None):
+    """Diagnostic: U with vs. without the effectiveness-floor (hab) clause.
+
+    Returns (U_full, U_no_hab, hab_contribution).
+      U_full         -- counterfactual_value with full active_clauses
+      U_no_hab       -- counterfactual_value with hab clause removed
+      hab_contribution -- U_full - U_no_hab; negative means the floor is
+                          penalizing this action (depleted cue), positive means
+                          the fresh-cue bonus exceeds the penalty.
+
+    This diagnostic determines whether the effectiveness floor is binding
+    (and by how much) vs. whether the exposure/coverage clauses dominate.
+    """
+    params_no_hab = replace(params,
+                            active_clauses=tuple(c for c in params.active_clauses
+                                                 if c != "hab"))
+    u_full = counterfactual_value(action, cells, cell_states, hab, params, dyn,
+                                   reactive_ids, pending_events)
+    u_no_hab = counterfactual_value(action, cells, cell_states, hab, params_no_hab, dyn,
+                                     reactive_ids, pending_events)
+    return u_full, u_no_hab, u_full - u_no_hab
 
 
 def best_action_for_cell(a_cell, cells, cell_states, hab, params: SpecParams,

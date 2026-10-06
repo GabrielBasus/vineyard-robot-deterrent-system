@@ -2118,6 +2118,10 @@ def run_simulation_frames_persistent(
     # Proposal §2 (forward trajectory): when True, propagates background, trigger, and
     # inhibitory components of e_nom separately over the horizon (variant C).
     stl_forward_trajectory_correction=False,
+    # Proposal §3.1: valuation objective for counterfactual_value().
+    #   "stl_robustness"      -- rho(xi^{+a}) - rho(xi^{-a})  [default]
+    #   "integrated_exposure" -- integral of exposure reduction over horizon
+    stl_valuation_mode="stl_robustness",
     # Forecast quality metrics
     forecast_horizon_s=300.0,
     forecast_match_radius_m=20.0,
@@ -4085,6 +4089,7 @@ def run_simulation_frames_persistent(
         ),
         forecast_correction=bool(stl_forecast_correction),
         forward_trajectory_correction=bool(stl_forward_trajectory_correction),
+        valuation_mode=str(stl_valuation_mode),
     )
     last_service_t_by_cell = {cell_id: 0.0 for cell_id in range(len(cells))}
     eta_at_apply_samples = []

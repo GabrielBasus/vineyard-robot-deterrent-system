@@ -1,24 +1,29 @@
 """
-run_variant_ab_comparison.py -- A vs B vs C controlled comparison experiment.
+run_variant_ab_comparison.py -- A/B/C/B_ie/C_ie controlled comparison experiment.
 
-Runs B4_res_stl_full_multicue under three forecast-correction settings:
-  variant_A: both corrections off  (original submitted system)
-  variant_B: stl_forecast_correction=True   (Proposal §2: Eqs 1,2 + pending events
-             + post-apply recovery + eta-weighted historical suppression)
-  variant_C: variant_B + stl_forward_trajectory_correction=True
-             (adds corrected e_nom: propagates background, trigger, inhibitory
-             components separately over the planning horizon)
+Runs B4_res_stl_full_multicue under five forecast/valuation settings:
+
+Plan-variant mapping (code variants vs. improvement-plan variants):
+  variant_A    : Plan A -- both corrections off  (original submitted system)
+  variant_B    : Plan B -- fc=True  (Eqs 1,2 + pending + eta-weighted suppression)
+  variant_C    : Plan B + ftc -- fc=True + forward trajectory correction
+  variant_B_ie : Plan C -- fc=True, valuation=integrated_exposure  (no ftc)
+  variant_C_ie : Plan C + ftc -- fc=True + ftc, valuation=integrated_exposure
+
+Note: "code variant C" (ftc) is a sub-variant of Plan B; "Plan variant C"
+(integrated exposure) is what the code calls "B_ie" and "C_ie".
 
 Uses 30 fresh evaluation seeds (155-184) to keep confirmatory seeds 125-154
 frozen as published results.  All variants run on the same seed set and
 identical configuration so comparisons are paired.
 
 Paired comparisons in the output:
-  B vs A: effect of Eqs 1,2 + pending events + eta-weighted suppression
-  C vs B: effect of forward trajectory correction specifically
-  C vs A: all corrections combined
+  B vs A   : effect of Eqs 1,2 + pending events + eta-weighted suppression
+  C vs B   : effect of forward trajectory correction specifically
+  B_ie vs B: effect of integrated-exposure valuation (Plan §3.1)
+  C_ie vs C: integrated exposure + ftc
 
-Output: results/testbench/variant_ab/
+Output: results/testbench/variant_abc/
   per_run_metrics.csv, summary_by_system.csv, variant_abc_comparison.md
 """
 from __future__ import annotations
@@ -118,17 +123,19 @@ def _hab_params(enabled: bool) -> dict:
 
 
 _VARIANTS = [
-    # (name, stl_forecast_correction, stl_forward_trajectory_correction)
-    ("variant_A", False, False),   # original submitted system
-    ("variant_B", True,  False),   # Eqs 1,2 + pending events + eta-weighted suppression
-    ("variant_C", True,  True),    # variant_B + corrected forward trajectory
+    # (name, stl_forecast_correction, stl_forward_trajectory_correction, stl_valuation_mode)
+    ("variant_A",    False, False, "stl_robustness"),     # original submitted system
+    ("variant_B",    True,  False, "stl_robustness"),     # Plan B: Eqs 1,2 + pending + eta-suppression
+    ("variant_C",    True,  True,  "stl_robustness"),     # Plan B + ftc
+    ("variant_B_ie", True,  False, "integrated_exposure"),# Plan C: Plan B + integrated-exposure valuation
+    ("variant_C_ie", True,  True,  "integrated_exposure"),# Plan C + ftc
 ]
 
 
 def _build_jobs(seed_start: int, seed_count: int) -> list[dict]:
     jobs = []
     for seed in range(seed_start, seed_start + seed_count):
-        for variant, fc, ftc in _VARIANTS:
+        for variant, fc, ftc, val_mode in _VARIANTS:
             for hab_enabled in (True, False):
                 hab = _hab_params(hab_enabled)
                 params = dict(_COMMON)
@@ -136,6 +143,7 @@ def _build_jobs(seed_start: int, seed_count: int) -> list[dict]:
                 params.update(hab)
                 params["stl_forecast_correction"] = fc
                 params["stl_forward_trajectory_correction"] = ftc
+                params["stl_valuation_mode"] = val_mode
                 system = f"{variant}_{hab['habituation_condition']}"
                 jobs.append({
                     "system": system,
@@ -219,17 +227,23 @@ def _mean_exposure(rows: list[dict], baseline: str) -> float:
 def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
     metric = "value_weighted_exposure"
     comparisons = [
-        ("variant_A", "variant_B", "B vs A (Eqs 1,2 + pending + eta-suppression)"),
-        ("variant_B", "variant_C", "C vs B (forward trajectory correction only)"),
-        ("variant_A", "variant_C", "C vs A (all corrections combined)"),
+        ("variant_A",    "variant_B",    "B vs A (Plan B: Eqs 1,2 + pending + eta-suppression)"),
+        ("variant_B",    "variant_C",    "C vs B (forward trajectory correction only)"),
+        ("variant_A",    "variant_C",    "C vs A (all §2 corrections combined)"),
+        ("variant_B",    "variant_B_ie", "B_ie vs B (Plan C: integrated-exposure valuation, no ftc)"),
+        ("variant_C",    "variant_C_ie", "C_ie vs C (Plan C + ftc: integrated-exposure valuation)"),
+        ("variant_B_ie", "variant_C_ie", "C_ie vs B_ie (ftc under integrated-exposure)"),
     ]
 
     lines = [
-        "# Variant A / B / C Comparison",
+        "# Variant A / B / C / B_ie / C_ie Comparison",
         "",
-        "- variant_A: all corrections off (submitted B4)",
-        "- variant_B: stl_forecast_correction=True (Eqs 1,2 + pending events + eta-weighted suppression)",
-        "- variant_C: variant_B + stl_forward_trajectory_correction=True (corrected e_nom forward trajectory)",
+        "Plan-variant mapping:",
+        "- variant_A    : Plan A -- all corrections off (submitted B4)",
+        "- variant_B    : Plan B -- fc=True (Eqs 1,2 + pending events + eta-weighted suppression)",
+        "- variant_C    : Plan B+ftc -- variant_B + corrected e_nom forward trajectory",
+        "- variant_B_ie : Plan C -- variant_B + integrated-exposure valuation",
+        "- variant_C_ie : Plan C+ftc -- variant_C + integrated-exposure valuation",
         f"- Seeds: {SEED_START}-{SEED_START + SEED_COUNT - 1}",
         "",
         "## Primary Metric: value_weighted_exposure (hab_on)",
@@ -266,6 +280,14 @@ def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
     lines += ["", "## Raw Deltas (C - B)", ""]
     deltas_cb = _paired_deltas(rows, "variant_B", "variant_C", metric)
     lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas_cb)]
+
+    lines += ["", "## Raw Deltas (B_ie - B)", ""]
+    deltas_bie = _paired_deltas(rows, "variant_B", "variant_B_ie", metric)
+    lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas_bie)]
+
+    lines += ["", "## Raw Deltas (C_ie - C)", ""]
+    deltas_cie = _paired_deltas(rows, "variant_C", "variant_C_ie", metric)
+    lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas_cie)]
 
     (outdir / "variant_abc_comparison.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
