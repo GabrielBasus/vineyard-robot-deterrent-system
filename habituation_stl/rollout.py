@@ -24,8 +24,8 @@ that time.
 
 Approximations (documented in docs/section4_assumptions.md):
   A4.1 -- Travel time is a constant avg_travel_s for all cells.
-  A4.2 -- The greedy policy always uses the best available cue mode (mode 0
-           if hab is not available, otherwise best_mode_for_cell).
+  A4.2 -- Greedy-step suppressions always use mode 0 effectiveness from the
+           snapshot hab object.  Mode selection is not simulated per step.
   A4.3 -- Subsequent greedy interventions do not update hab between steps;
            effectiveness is estimated from the snapshot at planning time.
   A4.4 -- Cell exposure at each greedy step is evaluated from the analytic
@@ -115,8 +115,8 @@ def greedy_rollout(
         else:
             robot_free = [lead]
         heapq.heapify(robot_free)
-
-    heapq.heapify(robot_free)
+    else:
+        heapq.heapify(robot_free)
 
     # Track which cells are being serviced and when they become unserviced.
     # cell -> next_free_at (time when the cell's robot leaves).
@@ -247,15 +247,15 @@ def service_feasibility(
         robot_free_cand = [lead]
     robot_free_cand.sort()
 
+    min_resp = float(avg_travel_s + service_hold_s)
     for task in reactive_tasks:
         deadline = float(task.get("deadline_s", float("inf")))
-        min_resp = float(avg_travel_s + service_hold_s)
-        # Feasible under baseline: any robot free before deadline - avg_travel_s.
-        feasible_base = any(t <= deadline - avg_travel_s for t in robot_free_base)
+        # Feasible when a robot can travel there AND complete service before deadline.
+        feasible_base = any(t <= deadline - min_resp for t in robot_free_base)
         if not feasible_base:
             continue  # not in F_0; skip
-        # Must remain feasible under candidate.
-        feasible_cand = any(t <= deadline - avg_travel_s for t in robot_free_cand)
+        # Must remain feasible under candidate (one robot busy until lead).
+        feasible_cand = any(t <= deadline - min_resp for t in robot_free_cand)
         if not feasible_cand:
             return False
 

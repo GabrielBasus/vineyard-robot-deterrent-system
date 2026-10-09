@@ -23,10 +23,10 @@ least as large as computed.
 
 ### A4.2 -- Mode-0 greedy interventions
 
-Subsequent greedy interventions (steps after the initial candidate commit) always
-use mode 0 (or the best available mode from the hab object).  The planner does not
-compute mode-specific effectiveness for each greedy step, since the mode that will
-be chosen at each future step is unknown at planning time.
+Subsequent greedy interventions always use mode 0 effectiveness from the hab
+snapshot at planning time.  The planner does not simulate mode selection at each
+future step, since the chosen mode depends on future robot and cell state that is
+unknown at planning time.
 
 ### A4.3 -- Frozen habituation state
 
