@@ -1,7 +1,7 @@
 """
-run_variant_ab_comparison.py -- A/B/C/B_ie/C_ie controlled comparison experiment.
+run_variant_ab_comparison.py -- A/B/C/B_ie/C_ie/D/E controlled comparison experiment.
 
-Runs B4_res_stl_full_multicue under five forecast/valuation settings:
+Runs B4_res_stl_full_multicue under seven forecast/valuation settings:
 
 Plan-variant mapping (code variants vs. improvement-plan variants):
   variant_A    : Plan A -- both corrections off  (original submitted system)
@@ -9,6 +9,8 @@ Plan-variant mapping (code variants vs. improvement-plan variants):
   variant_C    : Plan B + ftc -- fc=True + forward trajectory correction
   variant_B_ie : Plan C -- fc=True, valuation=integrated_exposure  (no ftc)
   variant_C_ie : Plan C + ftc -- fc=True + ftc, valuation=integrated_exposure
+  variant_D    : Plan D -- fc=True, valuation=continuation_rollout, benefit_gate=0
+  variant_E    : Plan E -- Plan D + service_protection=True
 
 Note: "code variant C" (ftc) is a sub-variant of Plan B; "Plan variant C"
 (integrated exposure) is what the code calls "B_ie" and "C_ie".
@@ -18,10 +20,12 @@ frozen as published results.  All variants run on the same seed set and
 identical configuration so comparisons are paired.
 
 Paired comparisons in the output:
-  B vs A   : effect of Eqs 1,2 + pending events + eta-weighted suppression
-  C vs B   : effect of forward trajectory correction specifically
-  B_ie vs B: effect of integrated-exposure valuation (Plan §3.1)
-  C_ie vs C: integrated exposure + ftc
+  B vs A    : effect of Eqs 1,2 + pending events + eta-weighted suppression
+  C vs B    : effect of forward trajectory correction specifically
+  B_ie vs B : effect of integrated-exposure valuation (Plan §3.1)
+  C_ie vs C : integrated exposure + ftc
+  D vs B    : effect of continuation rollout + benefit gate (Plan §4)
+  E vs D    : effect of service protection (Plan §4E)
 
 Output: results/testbench/variant_abc/
   per_run_metrics.csv, summary_by_system.csv, variant_abc_comparison.md
@@ -123,19 +127,23 @@ def _hab_params(enabled: bool) -> dict:
 
 
 _VARIANTS = [
-    # (name, stl_forecast_correction, stl_forward_trajectory_correction, stl_valuation_mode)
-    ("variant_A",    False, False, "stl_robustness"),     # original submitted system
-    ("variant_B",    True,  False, "stl_robustness"),     # Plan B: Eqs 1,2 + pending + eta-suppression
-    ("variant_C",    True,  True,  "stl_robustness"),     # Plan B + ftc
-    ("variant_B_ie", True,  False, "integrated_exposure"),# Plan C: Plan B + integrated-exposure valuation
-    ("variant_C_ie", True,  True,  "integrated_exposure"),# Plan C + ftc
+    # (name, stl_forecast_correction, stl_forward_trajectory_correction, stl_valuation_mode, extra_params)
+    ("variant_A",    False, False, "stl_robustness",      {}),  # original submitted system
+    ("variant_B",    True,  False, "stl_robustness",      {}),  # Plan B: Eqs 1,2 + pending + eta-suppression
+    ("variant_C",    True,  True,  "stl_robustness",      {}),  # Plan B + ftc
+    ("variant_B_ie", True,  False, "integrated_exposure", {}),  # Plan C: Plan B + integrated-exposure valuation
+    ("variant_C_ie", True,  True,  "integrated_exposure", {}),  # Plan C + ftc
+    ("variant_D",    True,  False, "continuation_rollout",
+     {"stl_benefit_gate": 0.0, "stl_service_protection": False}),  # Plan D: rollout + benefit gate
+    ("variant_E",    True,  False, "continuation_rollout",
+     {"stl_benefit_gate": 0.0, "stl_service_protection": True}),   # Plan E: Plan D + service protection
 ]
 
 
 def _build_jobs(seed_start: int, seed_count: int) -> list[dict]:
     jobs = []
     for seed in range(seed_start, seed_start + seed_count):
-        for variant, fc, ftc, val_mode in _VARIANTS:
+        for variant, fc, ftc, val_mode, extra in _VARIANTS:
             for hab_enabled in (True, False):
                 hab = _hab_params(hab_enabled)
                 params = dict(_COMMON)
@@ -144,6 +152,7 @@ def _build_jobs(seed_start: int, seed_count: int) -> list[dict]:
                 params["stl_forecast_correction"] = fc
                 params["stl_forward_trajectory_correction"] = ftc
                 params["stl_valuation_mode"] = val_mode
+                params.update(extra)
                 system = f"{variant}_{hab['habituation_condition']}"
                 jobs.append({
                     "system": system,
@@ -233,10 +242,12 @@ def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
         ("variant_B",    "variant_B_ie", "B_ie vs B (Plan C: integrated-exposure valuation, no ftc)"),
         ("variant_C",    "variant_C_ie", "C_ie vs C (Plan C + ftc: integrated-exposure valuation)"),
         ("variant_B_ie", "variant_C_ie", "C_ie vs B_ie (ftc under integrated-exposure)"),
+        ("variant_B",    "variant_D",    "D vs B (Plan D: continuation rollout + benefit gate)"),
+        ("variant_D",    "variant_E",    "E vs D (Plan E: Plan D + service protection)"),
     ]
 
     lines = [
-        "# Variant A / B / C / B_ie / C_ie Comparison",
+        "# Variant A / B / C / B_ie / C_ie / D / E Comparison",
         "",
         "Plan-variant mapping:",
         "- variant_A    : Plan A -- all corrections off (submitted B4)",
@@ -244,6 +255,8 @@ def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
         "- variant_C    : Plan B+ftc -- variant_B + corrected e_nom forward trajectory",
         "- variant_B_ie : Plan C -- variant_B + integrated-exposure valuation",
         "- variant_C_ie : Plan C+ftc -- variant_C + integrated-exposure valuation",
+        "- variant_D    : Plan D -- fc=True, valuation=continuation_rollout, benefit_gate=0",
+        "- variant_E    : Plan E -- Plan D + service_protection=True",
         f"- Seeds: {SEED_START}-{SEED_START + SEED_COUNT - 1}",
         "",
         "## Primary Metric: value_weighted_exposure (hab_on)",
@@ -273,21 +286,18 @@ def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
     if not any_data:
         lines += ["No paired data available."]
 
-    lines += ["## Raw Deltas (B - A)", ""]
-    deltas_ba = _paired_deltas(rows, "variant_A", "variant_B", metric)
-    lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas_ba)]
-
-    lines += ["", "## Raw Deltas (C - B)", ""]
-    deltas_cb = _paired_deltas(rows, "variant_B", "variant_C", metric)
-    lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas_cb)]
-
-    lines += ["", "## Raw Deltas (B_ie - B)", ""]
-    deltas_bie = _paired_deltas(rows, "variant_B", "variant_B_ie", metric)
-    lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas_bie)]
-
-    lines += ["", "## Raw Deltas (C_ie - C)", ""]
-    deltas_cie = _paired_deltas(rows, "variant_C", "variant_C_ie", metric)
-    lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas_cie)]
+    raw_sections = [
+        ("B - A",    "variant_A",    "variant_B"),
+        ("C - B",    "variant_B",    "variant_C"),
+        ("B_ie - B", "variant_B",    "variant_B_ie"),
+        ("C_ie - C", "variant_C",    "variant_C_ie"),
+        ("D - B",    "variant_B",    "variant_D"),
+        ("E - D",    "variant_D",    "variant_E"),
+    ]
+    for label, sys_a, sys_b in raw_sections:
+        lines += ["", f"## Raw Deltas ({label})", ""]
+        deltas = _paired_deltas(rows, sys_a, sys_b, metric)
+        lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas)]
 
     (outdir / "variant_abc_comparison.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

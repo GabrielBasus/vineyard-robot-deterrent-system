@@ -56,7 +56,17 @@ class Dynamics:
     # Proposal §3.1: valuation objective.
     #   "stl_robustness"      -- return rho(xi^{+a}) - rho(xi^{-a})  [default]
     #   "integrated_exposure" -- return sum_s min(e_nom(s), supp(s)) * dt for s >= lead
+    #   "continuation_rollout"-- Plan §4: J_H(pi_0) - J_H(pi_a) via greedy rollout
     valuation_mode: str = "stl_robustness"
+    # Plan §4: greedy rollout parameters (used when valuation_mode=="continuation_rollout").
+    n_robots: int = 4
+    avg_travel_s: float = 30.0
+    service_hold_s: float = 20.0
+    greedy_dt_s: float = 45.0
+    # Plan §4 admission gate: return 0 if U(a) <= benefit_gate (prevents negative-U actions).
+    benefit_gate: float = 0.0
+    # Plan §4E: if True, reject candidate when it delays a feasible reactive task.
+    service_protection: bool = False
 
 
 @dataclass
@@ -157,17 +167,20 @@ def _build_wa_signals(nom, a_cell, a_mode, lead, times, after, q_hat, eta_post,
 
 
 def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
-                         dyn: Dynamics, reactive_ids=None, pending_events=None):
+                         dyn: Dynamics, reactive_ids=None, pending_events=None,
+                         reactive_tasks=None):
     """U(a, r) for a candidate predictive action.
 
-    action      : (cell, mode, completion_lead_s)
-    cells       : iterable of local cell ids comprising Phi_r
-    cell_states : dict cell -> CellState
-    hab         : HabituationField (read-only; not mutated)
+    action         : (cell, mode, completion_lead_s)
+    cells          : iterable of local cell ids comprising Phi_r
+    cell_states    : dict cell -> CellState
+    hab            : HabituationField (read-only; not mutated)
+    reactive_tasks : list of {"deadline_s": float} for Plan §4E service protection
 
-    When dyn.valuation_mode == "integrated_exposure", returns the exposure-reduction
-    integral sum_{s>=lead} min(e_nom(s), supp(s)) * dt instead of the STL
-    robustness difference.
+    valuation_mode dispatch:
+      "stl_robustness"      -- rho(xi^{+a}) - rho(xi^{-a})
+      "integrated_exposure" -- sum_{s>=lead} min(e_nom(s), supp(s)) * dt
+      "continuation_rollout"-- J_H(pi_0) - J_H(pi_a) via greedy rollout (Plan §4)
     """
     a_cell, a_mode, lead = int(action[0]), int(action[1]), float(action[2])
     times = _times(params)
@@ -193,7 +206,33 @@ def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
     # reduction integral directly without STL robustness computation.
     if dyn.valuation_mode == "integrated_exposure":
         reduction = np.minimum(e_nom_cell[after], supp[after])
-        return float(np.sum(reduction) * params.monitor_dt)
+        u = float(np.sum(reduction) * params.monitor_dt)
+        return u if u > dyn.benefit_gate else 0.0
+
+    # Continuation rollout mode (Plan §4): J_H(pi_0) - J_H(pi_a).
+    if dyn.valuation_mode == "continuation_rollout":
+        from habituation_stl.rollout import continuation_value, service_feasibility
+        # Service protection check (Plan §4E): reject if a feasible reactive task is delayed.
+        if dyn.service_protection:
+            feasible = service_feasibility(
+                action, list(cells), cell_states, hab, params, dyn,
+                reactive_tasks=reactive_tasks,
+                pending_events=pending_events,
+                n_robots=dyn.n_robots,
+                avg_travel_s=dyn.avg_travel_s,
+                service_hold_s=dyn.service_hold_s,
+            )
+            if not feasible:
+                return 0.0
+        u = continuation_value(
+            action, list(cells), cell_states, hab, params, dyn,
+            pending_events=pending_events,
+            n_robots=dyn.n_robots,
+            avg_travel_s=dyn.avg_travel_s,
+            service_hold_s=dyn.service_hold_s,
+            greedy_dt_s=dyn.greedy_dt_s,
+        )
+        return u if u > dyn.benefit_gate else 0.0
 
     # STL robustness mode (default).
     spec, _ = build_spec(cells, params, reactive_ids)

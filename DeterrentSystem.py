@@ -2121,7 +2121,15 @@ def run_simulation_frames_persistent(
     # Proposal §3.1: valuation objective for counterfactual_value().
     #   "stl_robustness"      -- rho(xi^{+a}) - rho(xi^{-a})  [default]
     #   "integrated_exposure" -- integral of exposure reduction over horizon
+    #   "continuation_rollout"-- Plan §4: J_H(pi_0) - J_H(pi_a) via greedy rollout
     stl_valuation_mode="stl_robustness",
+    # Plan §4 rollout parameters (used when stl_valuation_mode=="continuation_rollout").
+    stl_n_robots=None,              # default: len(robots) at runtime
+    stl_avg_travel_s=30.0,
+    stl_service_hold_s=20.0,
+    stl_greedy_dt_s=45.0,
+    stl_benefit_gate=0.0,           # admit candidate only if U(a) > gate
+    stl_service_protection=False,   # Plan §4E: reject if a feasible reactive task is delayed
     # Forecast quality metrics
     forecast_horizon_s=300.0,
     forecast_match_radius_m=20.0,
@@ -4090,6 +4098,12 @@ def run_simulation_frames_persistent(
         forecast_correction=bool(stl_forecast_correction),
         forward_trajectory_correction=bool(stl_forward_trajectory_correction),
         valuation_mode=str(stl_valuation_mode),
+        n_robots=int(stl_n_robots) if stl_n_robots is not None else int(Nrobots),
+        avg_travel_s=float(stl_avg_travel_s),
+        service_hold_s=float(stl_service_hold_s),
+        greedy_dt_s=float(stl_greedy_dt_s),
+        benefit_gate=float(stl_benefit_gate),
+        service_protection=bool(stl_service_protection),
     )
     last_service_t_by_cell = {cell_id: 0.0 for cell_id in range(len(cells))}
     eta_at_apply_samples = []
@@ -4212,6 +4226,25 @@ def run_simulation_frames_persistent(
             all_events.append((float(rel_t), int(cell_id), int(mode_id)))
         all_events.sort(key=lambda e: e[0])
         return {str(r): list(all_events) for r in ids}
+
+    def _stl_reactive_tasks(now_t):
+        """Collect pending reactive tasks with relative deadlines for Plan §4E service protection."""
+        tasks = []
+        for task in list(active_tasks):
+            stream = str(task.get("type", "")).strip().lower()
+            if stream not in {"reactive", "urgent_reactive", "reactive_override"}:
+                continue
+            deadline_abs = task.get("deadline")
+            if deadline_abs is None:
+                continue
+            try:
+                deadline_rel = float(deadline_abs) - float(now_t)
+            except Exception:
+                continue
+            if deadline_rel <= 0.0:
+                continue
+            tasks.append({"deadline_s": float(deadline_rel)})
+        return tasks
 
     stl_monitors_by_robot = {
         str(rid): RobotMonitor(_local_cell_ids_for_robot(str(rid)), stl_spec_params)
@@ -4820,6 +4853,7 @@ def run_simulation_frames_persistent(
             stl_cell_polys=cells,
             stl_local_cell_ids_by_robot=_local_cell_ids_by_robot(planning_robots.keys()),
             stl_pending_events_by_robot=_stl_pending_events_by_robot(now_t, planning_robots.keys()),
+            stl_reactive_tasks=_stl_reactive_tasks(now_t),
             stl_last_service_t_by_cell=last_service_t_by_cell,
             stl_mode_to_id=mode_to_id,
             stl_cell_id_for_xy_fn=_cell_id_for_xy,
@@ -4953,6 +4987,7 @@ def run_simulation_frames_persistent(
                 "stl_cell_polys": cells,
                 "stl_local_cell_ids_by_robot": _local_cell_ids_by_robot(_active_robot_ids()),
                 "stl_pending_events_by_robot": _stl_pending_events_by_robot(now_t, _active_robot_ids()),
+                "stl_reactive_tasks": _stl_reactive_tasks(now_t),
                 "stl_last_service_t_by_cell": last_service_t_by_cell,
                 "stl_mode_to_id": mode_to_id,
                 "stl_cell_id_for_xy_fn": _cell_id_for_xy,

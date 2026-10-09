@@ -562,6 +562,7 @@ class TaskGenerator:
                              stl_cell_polys=None,
                              stl_local_cell_ids_by_robot: Mapping[str, list[int]] | None = None,
                              stl_pending_events_by_robot: Mapping[str, list] | None = None,
+                             stl_reactive_tasks: list | None = None,
                              stl_last_service_t_by_cell: Mapping[int, float] | None = None,
                              stl_mode_to_id: Mapping[str, int] | None = None,
                              stl_cell_id_for_xy_fn: Callable[[float, float], int | None] | None = None):
@@ -1055,6 +1056,7 @@ class TaskGenerator:
                         weight_fn=weight_fn,
                         target_cell_id=target_cell_id,
                         pending_events=(stl_pending_events_by_robot or {}).get(str(rid)),
+                        reactive_tasks=stl_reactive_tasks,
                     )
                     stl_u = float(stl_summary.get("predictive_stl_U", 0.0))
                     return {
