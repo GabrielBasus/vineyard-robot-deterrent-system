@@ -67,6 +67,12 @@ class Dynamics:
     benefit_gate: float = 0.0
     # Plan §4E: if True, reject candidate when it delays a feasible reactive task.
     service_protection: bool = False
+    # Plan §4 admission: when True, the task generator drops predictive candidates
+    # whose U(a) <= benefit_gate instead of dispatching them with a zero score.
+    strict_admission: bool = False
+    # Diagnostic only: ((field, value), ...) overrides used to re-score each
+    # candidate on the same snapshot (e.g. (('forecast_correction', False),)).
+    shadow_overrides: tuple = ()
 
 
 @dataclass

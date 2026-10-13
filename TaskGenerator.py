@@ -3,6 +3,7 @@ from Robot import Robot
 from ZonePartitioner import polygon_area, polygon_centroid, point_in_polygon, point_to_poly_distance
 from Robot import RobotProfile
 import math
+import time
 import numpy as np
 from planner_task_estimation import (
     _time_integral_factor,
@@ -49,6 +50,10 @@ class TaskGenerator:
         self._predictive_lead_time_buffer_s = 0.0
         self._predictive_lead_time_risk_power = 1.0
         self._predictive_timing_mode = "synthetic"
+        # Wall-clock seconds per STL/rollout valuation call (Plan §6 runtime diagnostic).
+        self.stl_eval_runtime_s: list[float] = []
+        # One row per STL/rollout valuation: (t, robot, cell, mode, U, U_shadow, gap, eta_now).
+        self.stl_eval_log: list[tuple] = []
         self.diag_counts = {
             "model_deterring_candidates_total": 0,
             "model_deterring_rejected_cooldown": 0,
@@ -1035,6 +1040,7 @@ class TaskGenerator:
                     target_cell_id = None
                     if callable(stl_cell_id_for_xy_fn):
                         target_cell_id = stl_cell_id_for_xy_fn(float(x), float(y))
+                    _stl_t0 = time.perf_counter()
                     stl_summary = estimate_stl_counterfactual_value(
                         rob.m,
                         x,
@@ -1061,6 +1067,15 @@ class TaskGenerator:
                         ),
                         reactive_tasks=stl_reactive_tasks,
                     )
+                    self.stl_eval_runtime_s.append(time.perf_counter() - _stl_t0)
+                    if stl_summary.get("stl_available", False):
+                        self.stl_eval_log.append((
+                            float(now_t), str(rid), stl_summary.get("stl_target_cell"), str(mode),
+                            float(stl_summary.get("predictive_stl_U", float("nan"))),
+                            float(stl_summary.get("predictive_stl_U_shadow", float("nan"))),
+                            float(stl_summary.get("stl_travel_recovery_gap", float("nan"))),
+                            float(stl_summary.get("stl_eta_now", float("nan"))),
+                        ))
                     stl_u = float(stl_summary.get("predictive_stl_U", 0.0))
                     return {
                         "predicted_reduction_raw": float(stl_u),
@@ -1589,6 +1604,14 @@ class TaskGenerator:
                     if float(cand.get("eta_s", float("inf"))) > max_eta_s:
                         self._diag_increment("model_deterring_rejected_eta")
                         continue
+                    # Plan §4 admission: execute the baseline unless U(a) > gate.
+                    if use_stl_robustness_value and bool(getattr(stl_dynamics, "strict_admission", False)):
+                        cand_u = cand.get("predictive_stl_U")
+                        gate_u = float(getattr(stl_dynamics, "benefit_gate", 0.0))
+                        if cand_u is None or not (float(cand_u) > gate_u):
+                            self._diag_increment("model_deterring_rejected_benefit_gate")
+                            continue
+                        self._diag_increment("model_deterring_pass_benefit_gate")
 
                     field_val = _field_score(x, y)
                     if (deterring_field_threshold is not None) and (field_val < float(deterring_field_threshold)):

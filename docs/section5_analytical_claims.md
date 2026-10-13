@@ -54,10 +54,20 @@ preserves this inequality because unsuccessful deviations revert to the
 baseline. []
 
 **Implementation note.** The code implements a maximizer of U(a) = J_H(pi_0) -
-J_H(pi_a), which is equivalent.  The benefit_gate parameter enforces the
-admission margin: candidates with U(a) <= benefit_gate are suppressed.  With
-benefit_gate = 0 (the default), any action with positive predicted benefit is
-admitted.
+J_H(pi_a), which is equivalent.  The benefit_gate parameter sets U(a) to 0 when
+U(a) <= benefit_gate.
+
+**Correction (2026-10-13).** Setting U(a) to 0 did not by itself withhold the
+candidate: under the heuristic preventive gate a zero-score candidate still
+became a predictive task, and the "utility" dispatch policy picks the highest
+priority predictive task regardless of score.  Variants D and E as run before
+this date therefore did not implement the admission step of the decision
+procedure.  `stl_strict_admission=True` (TaskGenerator candidate loop) now drops
+any candidate with U(a) <= benefit_gate before task creation, so the robot
+falls back to the baseline behaviour (reactive service, patrol or idle).  The
+counts appear as `predictive_rejected_benefit_gate_total` and
+`predictive_passed_benefit_gate_total` in the run metrics.  Proposition 1 holds
+only for runs with strict admission on.
 
 **Scope.** This is a design property of the fixed-state decision, not a
 closed-loop guarantee.  Repeated replanning, incomplete information, and

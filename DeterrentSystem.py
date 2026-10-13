@@ -2130,6 +2130,14 @@ def run_simulation_frames_persistent(
     stl_greedy_dt_s=45.0,
     stl_benefit_gate=0.0,           # admit candidate only if U(a) > gate
     stl_service_protection=False,   # Plan §4E: reject if a feasible reactive task is delayed
+    stl_strict_admission=False,     # Plan §4: drop predictive candidates with U(a) <= gate
+    reactive_service_deadline_s=90.0,  # Plan §6 service metrics: reactive deadline after detection (s)
+    stl_shadow_overrides=None,      # diagnostic: dict of Dynamics overrides for same-state re-scoring
+    # Plan §6 persistent operation:
+    habituation_initial_eta=1.0,    # starting cue effectiveness everywhere (1.0 = fresh)
+    mu_step_time_s=None,            # scored-run time at which truth demand changes (None = never)
+    mu_step_factor=1.0,             # multiplier applied to mu_true from mu_step_time_s onward
+    exposure_window_s=300.0,        # window width for value_weighted_exposure_windows
     # Forecast quality metrics
     forecast_horizon_s=300.0,
     forecast_match_radius_m=20.0,
@@ -3048,6 +3056,8 @@ def run_simulation_frames_persistent(
     pending_event_onsets = deque(maxlen=5000)  # dicts: {x,y,t,responded}
     response_times = []
     reactive_response_times = []
+    # Plan §6: age (s since task creation) of each reactive task at completion.
+    reactive_completion_ages_s = []
     direct_detection_task_refresh_active = 0
     direct_detection_task_refresh_skipped_unassigned = 0
     direct_detection_task_refresh_skipped_eta = 0
@@ -3083,6 +3093,7 @@ def run_simulation_frames_persistent(
     completed_count_by_type = {"deterring": 0, "patrolling": 0}
     completed_task_scores = []
     value_weighted_exposure = 0.0
+    exposure_event_log = []  # (t, value weight) per accepted truth event, for windowed exposure
     # Robot duty-cycle diagnostics
     robot_time_total = {rid: 0.0 for rid in pose}
     robot_time_with_task = {rid: 0.0 for rid in pose}
@@ -3429,6 +3440,7 @@ def run_simulation_frames_persistent(
             truth_accepted_event_times_load.append(float(t_now))
             _prune_reactive_load_window(float(t_now))
             value_weighted_exposure += float(value_weight(x, y))
+            exposure_event_log.append((float(t_now), float(value_weight(x, y))))
         owner = None
         for rr in robots_def:
             zid = rr['id']
@@ -4057,6 +4069,7 @@ def run_simulation_frames_persistent(
         T_rec=float(truth_habituation_T_rec_s),
         kappa=float(truth_habituation_kappa),
         gamma=float(truth_habituation_gamma),
+        eta0=float(habituation_initial_eta),
     )
     planner_hab = HabituationField(
         n_cells=len(cells),
@@ -4064,6 +4077,7 @@ def run_simulation_frames_persistent(
         T_rec=float(planner_habituation_T_rec_s),
         kappa=float(planner_habituation_kappa),
         gamma=float(planner_habituation_gamma),
+        eta0=float(habituation_initial_eta),
     )
     hab = truth_hab
     # Drop the φ_hab clause when habituation is disabled: with η≡1 frozen, the
@@ -4104,6 +4118,8 @@ def run_simulation_frames_persistent(
         greedy_dt_s=float(stl_greedy_dt_s),
         benefit_gate=float(stl_benefit_gate),
         service_protection=bool(stl_service_protection),
+        strict_admission=bool(stl_strict_admission),
+        shadow_overrides=tuple(sorted(dict(stl_shadow_overrides or {}).items())),
     )
     last_service_t_by_cell = {cell_id: 0.0 for cell_id in range(len(cells))}
     eta_at_apply_samples = []
@@ -4642,7 +4658,7 @@ def run_simulation_frames_persistent(
             H=H,
             w_cdf=w_cdf,
             w_shape=w_shape,
-            mu_true=mu_true,
+            mu_true=_mu_true_at(now_t),
             sample_from_value_map_fn=_sample_from_value_map,
             suppression_eval_fn=_suppression_eval,
             process_truth_event_fn=_process_truth_event,
@@ -6356,6 +6372,100 @@ def run_simulation_frames_persistent(
             )
         )
 
+    def _mu_true_at(now_t):
+        """Truth background rate, with an optional step change during the scored run."""
+        if mu_step_time_s is not None and float(now_t) >= float(warmup_s) + float(mu_step_time_s):
+            return float(mu_true) * float(mu_step_factor)
+        return float(mu_true)
+
+    def _exposure_windows():
+        """Value-weighted exposure per exposure_window_s window of the scored run."""
+        width = max(float(exposure_window_s), 1e-9)
+        n_win = max(1, int(math.ceil(float(T_end) / width)))
+        out = [0.0] * n_win
+        for t_ev, w_ev in exposure_event_log:
+            k = int((float(t_ev) - float(warmup_s)) // width)
+            if 0 <= k < n_win:
+                out[k] += float(w_ev)
+        return out
+
+    def _service_and_mechanism_metrics():
+        """Plan §6 service outcomes (deadline-based) and mechanism/runtime diagnostics."""
+        deadline_s = float(reactive_service_deadline_s)
+        ages = np.asarray(reactive_completion_ages_s, dtype=float)
+        on_time = int(np.sum(ages <= deadline_s)) if ages.size else 0
+        late = int(ages.size - on_time)
+        generated = int(reactive_generated_total)
+        missed = max(0, generated - on_time)
+        runtimes = np.asarray(getattr(taskgen, "stl_eval_runtime_s", []) or [], dtype=float)
+        diag = dict(getattr(taskgen, "diag_counts", {}) or {})
+        return {
+            "reactive_service_deadline_s": deadline_s,
+            "reactive_on_time_total": on_time,
+            "reactive_late_total": late,
+            "reactive_missed_total": int(missed),
+            "reactive_miss_fraction": (float(missed) / float(generated)) if generated > 0 else float("nan"),
+            "reactive_unfinished_total": int(max(0, generated - int(ages.size))),
+            "reactive_overdue_time_completed_s": float(np.sum(np.maximum(ages - deadline_s, 0.0))) if ages.size else 0.0,
+            "reactive_age_at_completion_p50_s": float(np.percentile(ages, 50)) if ages.size else float("nan"),
+            "reactive_age_at_completion_p90_s": float(np.percentile(ages, 90)) if ages.size else float("nan"),
+            "predictive_rejected_benefit_gate_total": int(diag.get("model_deterring_rejected_benefit_gate", 0)),
+            "predictive_passed_benefit_gate_total": int(diag.get("model_deterring_pass_benefit_gate", 0)),
+            "stl_eval_count": int(runtimes.size),
+            "stl_eval_runtime_mean_ms": float(np.mean(runtimes) * 1e3) if runtimes.size else float("nan"),
+            "stl_eval_runtime_p95_ms": float(np.percentile(runtimes, 95) * 1e3) if runtimes.size else float("nan"),
+            "stl_eval_runtime_p99_ms": float(np.percentile(runtimes, 99) * 1e3) if runtimes.size else float("nan"),
+            **_stl_ranking_metrics(list(getattr(taskgen, "stl_eval_log", []) or [])),
+            "exposure_window_s": float(exposure_window_s),
+            "value_weighted_exposure_windows": _exposure_windows(),
+        }
+
+    def _stl_ranking_metrics(log_rows):
+        """Summarize per-decision candidate rankings, masking and travel-recovery gaps.
+
+        A decision group is one robot at one planning time. Masked = every candidate U is 0.
+        Shadow comparisons use the same snapshot, so they isolate the valuation change.
+        """
+        groups = {}
+        gaps, rel_gaps = [], []
+        for t_row, rid_row, _cell, _mode, u_row, u_sh, gap, eta_now in log_rows:
+            groups.setdefault((t_row, rid_row), []).append((u_row, u_sh))
+            if math.isfinite(gap):
+                gaps.append(gap)
+                if math.isfinite(eta_now) and eta_now > 0.0:
+                    rel_gaps.append(gap / eta_now)
+        multi = [g for g in groups.values() if len(g) >= 2]
+        masked = sum(1 for g in groups.values() if all(abs(u) <= 1e-12 for u, _ in g))
+        top1, taus = [], []
+        for g in multi:
+            if not all(math.isfinite(u_sh) for _, u_sh in g):
+                continue
+            us = [u for u, _ in g]
+            ss = [u_sh for _, u_sh in g]
+            if max(us) <= 1e-12 and max(ss) <= 1e-12:
+                continue  # both masked: no ranking to compare
+            top1.append(int(int(np.argmax(us)) == int(np.argmax(ss))))
+            conc = disc = 0
+            for i in range(len(g)):
+                for j in range(i + 1, len(g)):
+                    a = (us[i] - us[j]) * (ss[i] - ss[j])
+                    conc += int(a > 0)
+                    disc += int(a < 0)
+            if conc + disc > 0:
+                taus.append((conc - disc) / (conc + disc))
+        gap_arr = np.asarray(gaps, dtype=float)
+        return {
+            "stl_decision_groups": int(len(groups)),
+            "stl_masked_group_fraction": (float(masked) / len(groups)) if groups else float("nan"),
+            "stl_shadow_compared_groups": int(len(top1)),
+            "stl_shadow_top1_agree_fraction": float(np.mean(top1)) if top1 else float("nan"),
+            "stl_shadow_kendall_tau_mean": float(np.mean(taus)) if taus else float("nan"),
+            "stl_travel_recovery_gap_mean": float(np.mean(gap_arr)) if gap_arr.size else float("nan"),
+            "stl_travel_recovery_gap_p90": float(np.percentile(gap_arr, 90)) if gap_arr.size else float("nan"),
+            "stl_travel_recovery_gap_max": float(np.max(gap_arr)) if gap_arr.size else float("nan"),
+            "stl_travel_recovery_gap_rel_mean": float(np.mean(rel_gaps)) if rel_gaps else float("nan"),
+        }
+
     def _complete_deterring_task(rid, task_row, now_t):
         """Complete a deterring task, update habituation, and append its truth-suppression event."""
         nonlocal direct_detection_task_response_matches, reactive_completed_total, predictive_completed_total
@@ -6373,6 +6483,9 @@ def run_simulation_frames_persistent(
         if stream_key == "reactive":
             reactive_service_history_by_robot[rid].append((float(now_t), service_duration_s))
             reactive_completed_total += 1
+            reactive_completion_ages_s.append(
+                max(0.0, float(now_t) - _finite_task_metric(task_row, "time", float(now_t)))
+            )
         else:
             predictive_completed_total += 1
             confidence = _finite_task_metric(task_row, "predictive_confidence", float("nan"))
@@ -6658,6 +6771,7 @@ def run_simulation_frames_persistent(
         pending_event_onsets.clear()
         response_times.clear()
         value_weighted_exposure = 0.0
+        exposure_event_log.clear()
         truth_candidate_events = 0
         truth_accepted_events = 0
         truth_suppressed_events = 0
@@ -7465,6 +7579,7 @@ def run_simulation_frames_persistent(
         )
         last_risk_diag = dict(getattr(last_dispatch_structured, "risk_adjusted_diagnostics", {}) or {})
         stl_hab_metrics = _stl_and_habituation_metrics(t)
+        stl_hab_metrics.update(_service_and_mechanism_metrics())
 
         metrics = {
             "dispatch_policy": str(dispatch_policy),

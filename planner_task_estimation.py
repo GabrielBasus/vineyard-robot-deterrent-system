@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import List
 
 import numpy as np
@@ -371,9 +372,17 @@ def estimate_stl_counterfactual_value(
         }
 
     stl_travel_recovery_delta = 0.0
+    # Plan §2: size of the travel-recovery term that variant A ignores,
+    # [1 - eta(t)] (1 - exp(-delta_a / T_rec)), measured whatever the variant.
+    stl_travel_recovery_gap = float("nan")
+    stl_eta_now = float("nan")
     try:
         if "hab" in set(str(clause) for clause in spec_params.active_clauses):
             eta_now = float(hab.effectiveness(int(target_cell_id), int(mode_id)))
+            stl_eta_now = eta_now
+            stl_travel_recovery_gap = (1.0 - eta_now) * (
+                1.0 - math.exp(-float(completion_lead_s) / max(float(hab.T_rec), 1e-9))
+            )
             use_correction = bool(getattr(dynamics, "forecast_correction", False))
             if use_correction:
                 # Compute q̂_a exactly: process pending events chronologically through
@@ -438,8 +447,27 @@ def estimate_stl_counterfactual_value(
         fleet_pending_events=fleet_pending_events,
         reactive_tasks=reactive_tasks,
     )
+    # Same-state shadow valuation (Plan §2 ranking check): score this candidate
+    # again under overridden dynamics, e.g. variant A, on the identical snapshot.
+    u_shadow = float("nan")
+    shadow_overrides = dict(getattr(dynamics, "shadow_overrides", ()) or ())
+    if shadow_overrides:
+        u_shadow = float(counterfactual_value(
+            (int(target_cell_id), int(mode_id), float(completion_lead_s)),
+            cells,
+            states,
+            hab,
+            spec_params,
+            replace(dynamics, shadow_overrides=(), **shadow_overrides),
+            pending_events=pending_events,
+            fleet_pending_events=fleet_pending_events,
+            reactive_tasks=reactive_tasks,
+        ))
     return {
         "predictive_stl_U": float(u_value),
+        "predictive_stl_U_shadow": float(u_shadow),
+        "stl_travel_recovery_gap": float(stl_travel_recovery_gap),
+        "stl_eta_now": float(stl_eta_now),
         "stl_available": True,
         "stl_reason": None,
         "stl_target_cell": int(target_cell_id),
