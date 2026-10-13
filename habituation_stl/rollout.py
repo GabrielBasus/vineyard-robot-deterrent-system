@@ -24,10 +24,14 @@ that time.
 
 Approximations (documented in docs/section4_assumptions.md):
   A4.1 -- Travel time is a constant avg_travel_s for all cells.
-  A4.2 -- Greedy-step suppressions always use mode 0 effectiveness from the
-           snapshot hab object.  Mode selection is not simulated per step.
-  A4.3 -- Subsequent greedy interventions do not update hab between steps;
-           effectiveness is estimated from the snapshot at planning time.
+  A4.2 -- Default: greedy-step suppressions always use mode 0 effectiveness
+           from the snapshot hab object.  With dyn.rollout_cue_dynamics, each
+           greedy intervention picks argmax_m eta(c, m) * beta[m] at its
+           application time.
+  A4.3 -- Default: subsequent greedy interventions do not update hab between
+           steps.  With dyn.rollout_cue_dynamics, pending events, the candidate
+           and greedy interventions deplete a copy of hab chronologically, with
+           exponential recovery between events.
   A4.4 -- Cell exposure at each greedy step is evaluated from the analytic
            trajectory, updated by previous suppressions in this rollout.
 """
@@ -88,7 +92,22 @@ def greedy_rollout(
     candidate : (cell_id, mode_id, lead_s) or None for the baseline.
     When candidate is given, one robot is committed to it for lead_s seconds
     before joining the greedy pool.  All other robots follow the greedy policy.
+
+    When dyn.rollout_cue_dynamics is True, habituation is carried through the
+    rollout on a copy of hab (see _greedy_rollout_cue_dynamics); the live hab
+    object is never mutated.  When False, behavior is unchanged (A4.2, A4.3).
     """
+    if getattr(dyn, "rollout_cue_dynamics", False):
+        return _greedy_rollout_cue_dynamics(
+            cells, cell_states, hab, params, dyn,
+            candidate=candidate,
+            pending_events=pending_events,
+            n_robots=n_robots,
+            avg_travel_s=avg_travel_s,
+            service_hold_s=service_hold_s,
+            greedy_dt_s=greedy_dt_s,
+        )
+
     times = _times(params)
     H = float(params.horizon)
     dt = float(params.monitor_dt)
@@ -169,6 +188,162 @@ def greedy_rollout(
             q = float(hab.effectiveness(c, 0)) if hab is not None else 1.0
             e_sig[c] = _apply_suppression_to_signal(
                 e_sig[c], times, apply_t, q, beta_c, dyn.kernel_self, dyn.omega_u)
+
+    return j_cost
+
+
+def _beta_for_mode(dyn: Dynamics, mode: int) -> float:
+    if not dyn.beta:
+        return 1.0
+    return float(dyn.beta[mode]) if mode < len(dyn.beta) else float(dyn.beta[-1])
+
+
+def _greedy_rollout_cue_dynamics(
+    cells: list,
+    cell_states: dict,
+    hab,
+    params: SpecParams,
+    dyn: Dynamics,
+    candidate=None,
+    pending_events=None,
+    n_robots: int = 4,
+    avg_travel_s: float = 30.0,
+    service_hold_s: float = 20.0,
+    greedy_dt_s: float = 45.0,
+) -> float:
+    """greedy_rollout with habituation carried through the forecast (Plan Section 3).
+
+    Same greedy scheduler, robot model and J_H accumulation as the frozen
+    rollout, but cue effectiveness evolves on a private copy of hab:
+
+      * Known pending events (rel_t, cell, mode) deplete their cue at rel_t.
+      * The candidate (if any) suppresses with q_hat from _compute_q_hat and
+        depletes (cell, mode) at its lead.
+      * Each greedy intervention is assigned at a step time t but lands at
+        apply_t = t + avg_travel_s.  Its mode and q are chosen at apply_t (after
+        recovering to apply_t and after every earlier application) as
+        argmax_m eta(c, m) * beta[m]; it then depletes (c, m).
+      * Between events the copy recovers exponentially (hab.recover).
+
+    Events are kept in a time-ordered queue so recovery and depletion happen
+    chronologically even though assignment precedes application.  Ties are
+    broken by insertion order (pending events, then candidate, then greedy
+    interventions in assignment order).
+    """
+    times = _times(params)
+    H = float(params.horizon)
+    dt = float(params.monitor_dt)
+
+    nom = _nominal_signals(cells, cell_states, times, dyn)
+    e_sig = {c: nom[f"e_{c}"].copy() for c in cells}
+
+    hab_sim = hab.copy() if hab is not None else None
+    hab_t = 0.0  # time to which hab_sim has been advanced
+    n_modes = int(hab_sim.n_modes) if hab_sim is not None else 1
+
+    # Event queue entries: (time, seq, kind, payload).
+    events: list = []
+    seq = 0
+
+    def _push(t_ev, kind, payload):
+        nonlocal seq
+        heapq.heappush(events, (float(t_ev), seq, kind, payload))
+        seq += 1
+
+    for ev in sorted(pending_events or [], key=lambda e: float(e[0])):
+        t_ev = float(ev[0])
+        if t_ev < 0.0:
+            t_ev = 0.0
+        _push(t_ev, "pending", (int(ev[1]), int(ev[2])))
+
+    robot_free = _robot_free_times(pending_events, n_robots)
+
+    if candidate is not None:
+        a_cell, a_mode, lead = int(candidate[0]), int(candidate[1]), float(candidate[2])
+        q_hat, _ = _compute_q_hat(a_cell, a_mode, lead, hab, dyn, params, pending_events)
+        e_sig[a_cell] = _apply_suppression_to_signal(
+            e_sig[a_cell], times, lead, q_hat, _beta_for_mode(dyn, a_mode),
+            dyn.kernel_self, dyn.omega_u)
+        _push(lead, "candidate", (a_cell, a_mode))
+        if robot_free:
+            robot_free[0] = max(robot_free[0], lead)
+        else:
+            robot_free = [lead]
+    heapq.heapify(robot_free)
+
+    def _advance_hab(t_target):
+        nonlocal hab_t
+        if hab_sim is not None and t_target > hab_t:
+            hab_sim.recover(t_target - hab_t)
+            hab_t = t_target
+
+    def _process_events_through(t_limit):
+        """Pop and apply all events with time <= t_limit, in time order."""
+        while events and events[0][0] <= t_limit:
+            t_ev, _, kind, payload = heapq.heappop(events)
+            _advance_hab(t_ev)
+            if kind in ("pending", "candidate"):
+                c_ev, m_ev = payload
+                if hab_sim is not None and 0 <= c_ev < hab_sim.n_cells:
+                    hab_sim.apply(c_ev, min(m_ev, n_modes - 1))
+            elif kind == "greedy":
+                c = payload
+                if hab_sim is not None:
+                    scores = [hab_sim.effectiveness(c, m) * _beta_for_mode(dyn, m)
+                              for m in range(n_modes)]
+                    m_best = int(np.argmax(scores))
+                    q = hab_sim.effectiveness(c, m_best)
+                else:
+                    m_best, q = 0, 1.0
+                e_sig[c] = _apply_suppression_to_signal(
+                    e_sig[c], times, t_ev, q, _beta_for_mode(dyn, m_best),
+                    dyn.kernel_self, dyn.omega_u)
+                if hab_sim is not None:
+                    hab_sim.apply(c, m_best)
+
+    cell_busy_until: dict[int, float] = {}
+    j_cost = 0.0
+    t_prev = 0.0
+
+    for step_idx in range(int(H / greedy_dt_s) + 1):
+        t = min(step_idx * greedy_dt_s, H)
+
+        if t > t_prev:
+            ti = min(int(round(t_prev / dt)), len(times) - 1)
+            for c in cells:
+                j_cost += float(e_sig[c][ti]) * (t - t_prev)
+            t_prev = t
+
+        if t >= H:
+            break
+
+        for c in list(cell_busy_until):
+            if cell_busy_until[c] <= t:
+                del cell_busy_until[c]
+
+        # Finalize every application that can affect the exposure sample read at
+        # this step (suppression applies on grid times >= its apply time).
+        ti = min(int(round(t / dt)), len(times) - 1)
+        _process_events_through(max(t, float(times[ti])))
+
+        unserviced = sorted(
+            [c for c in cells if c not in cell_busy_until],
+            key=lambda c: -float(e_sig[c][ti]),
+        )
+
+        for c in unserviced:
+            if not robot_free:
+                break
+            free_t = heapq.heappop(robot_free)
+            if free_t > t:
+                heapq.heappush(robot_free, free_t)
+                break
+            apply_t = t + avg_travel_s
+            release_t = apply_t + service_hold_s
+            cell_busy_until[c] = release_t
+            heapq.heappush(robot_free, release_t)
+            # Mode, q and depletion are resolved when the event is processed.
+            _push(apply_t, "greedy", c)
 
     return j_cost
 

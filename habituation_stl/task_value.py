@@ -67,6 +67,13 @@ class Dynamics:
     benefit_gate: float = 0.0
     # Plan §4E: if True, reject candidate when it delays a feasible reactive task.
     service_protection: bool = False
+    # Plan Section 3 ("value future cue use"): when True, greedy_rollout carries
+    # habituation depletion and recovery through the forecast on a copy of hab
+    # (pending events, the candidate, and every greedy intervention deplete their
+    # cue; recovery runs between events), and each greedy intervention picks the
+    # mode maximizing effectiveness * beta at its own application time.  When
+    # False (default), the rollout freezes hab and uses mode 0 (A4.2, A4.3).
+    rollout_cue_dynamics: bool = False
 
 
 @dataclass
