@@ -606,6 +606,38 @@ def _reactive_task_priority_key(task_row: dict, *, eta_s: float) -> tuple:
     )
 
 
+REACTIVE_PRIORITY_KEY_MODES = ("support_first", "eta_first")
+REACTIVE_OVERRIDE_TARGET_MODES = ("most_overdue", "nearest_overdue")
+
+
+def _reactive_task_priority_key_eta_first(task_row: dict, *, eta_s: float) -> tuple:
+    """Diagnostic reactive ranking: lowest ETA first, then detection support, then age.
+
+    Used with ``max()`` like :func:`_reactive_task_priority_key`, so ETA is negated.
+    """
+    merged_detection_count = max(1, int(task_row.get("merged_detection_count", 1)))
+    refresh_count = max(0, int(task_row.get("cluster_refresh_count", 0)))
+    return (
+        -max(float(eta_s), 0.0),
+        merged_detection_count,
+        refresh_count,
+        -_finite_task_metric(task_row, "time", 0.0),
+    )
+
+
+def _reactive_priority_key_fn(reactive_priority_key: str = "support_first"):
+    """Return the reactive ranking key function for the configured mode."""
+    mode = str(reactive_priority_key or "support_first").strip().lower()
+    if mode == "support_first":
+        return _reactive_task_priority_key
+    if mode == "eta_first":
+        return _reactive_task_priority_key_eta_first
+    raise ValueError(
+        f"reactive_priority_key must be one of {list(REACTIVE_PRIORITY_KEY_MODES)}, "
+        f"got: {reactive_priority_key!r}"
+    )
+
+
 def _select_predictive_task_for_policy(
     predictive_tasks: list[dict],
     *,
@@ -1159,8 +1191,25 @@ def _select_dispatch_policy_task(
     predictive_max_eta_s: float | None = None,
     fleet_size: int = 0,
     global_reactive_count: int = 0,
+    reactive_override_target: str = "most_overdue",
+    reactive_priority_key: str = "support_first",
 ) -> tuple[dict | None, bool]:
-    """Select one task from the candidate pool under the configured dispatch policy."""
+    """Select one task from the candidate pool under the configured dispatch policy.
+
+    Diagnostic knobs (defaults reproduce the original behavior exactly):
+      reactive_override_target: "most_overdue" picks the urgent reactive task with
+        the lowest slack; "nearest_overdue" picks the urgent task with the smallest
+        ETA (tie-break: more merged detections, then older).
+      reactive_priority_key: "support_first" ranks non-urgent reactive tasks by
+        merged detection count with ETA as tie-break; "eta_first" ranks by ETA first.
+    """
+    reactive_key_fn = _reactive_priority_key_fn(reactive_priority_key)
+    override_target = str(reactive_override_target or "most_overdue").strip().lower()
+    if override_target not in REACTIVE_OVERRIDE_TARGET_MODES:
+        raise ValueError(
+            f"reactive_override_target must be one of {list(REACTIVE_OVERRIDE_TARGET_MODES)}, "
+            f"got: {reactive_override_target!r}"
+        )
     reactive_tasks = [task for task in active_tasks if _task_stream(task) == "reactive"]
     predictive_tasks = [task for task in active_tasks if _task_stream(task) == "predictive"]
     # Travel cap: skip predictive tasks whose estimated travel time exceeds the cap.
@@ -1187,15 +1236,25 @@ def _select_dispatch_policy_task(
         if slack_s <= 0.0:
             urgent_reactive.append((float(slack_s), task))
     if urgent_reactive:
-        _slack, urgent_task = min(
-            urgent_reactive,
-            key=lambda item: (
-                item[0],
-                -int(item[1].get("merged_detection_count", 1)),
-                float(eta_seconds_fn(item[1])),
-                _finite_task_metric(item[1], "time", 0.0),
-            ),
-        )
+        if override_target == "nearest_overdue":
+            _slack, urgent_task = min(
+                urgent_reactive,
+                key=lambda item: (
+                    float(eta_seconds_fn(item[1])),
+                    -int(item[1].get("merged_detection_count", 1)),
+                    _finite_task_metric(item[1], "time", 0.0),
+                ),
+            )
+        else:
+            _slack, urgent_task = min(
+                urgent_reactive,
+                key=lambda item: (
+                    item[0],
+                    -int(item[1].get("merged_detection_count", 1)),
+                    float(eta_seconds_fn(item[1])),
+                    _finite_task_metric(item[1], "time", 0.0),
+                ),
+            )
         return urgent_task, True
 
     if dispatch_policy == "react":
@@ -1203,7 +1262,7 @@ def _select_dispatch_policy_task(
             return None, False
         return max(
             reactive_tasks,
-            key=lambda task: _reactive_task_priority_key(task, eta_s=float(eta_seconds_fn(task))),
+            key=lambda task: reactive_key_fn(task, eta_s=float(eta_seconds_fn(task))),
         ), False
 
     if dispatch_policy == "unc":
@@ -1218,7 +1277,7 @@ def _select_dispatch_policy_task(
         if reactive_tasks:
             return max(
                 reactive_tasks,
-                key=lambda task: _reactive_task_priority_key(
+                key=lambda task: reactive_key_fn(
                     task,
                     eta_s=float(eta_seconds_fn(task)),
                 ),
@@ -1310,7 +1369,7 @@ def _select_dispatch_policy_task(
         if reactive_tasks:
             return max(
                 reactive_tasks,
-                key=lambda task: _reactive_task_priority_key(task, eta_s=float(eta_seconds_fn(task))),
+                key=lambda task: reactive_key_fn(task, eta_s=float(eta_seconds_fn(task))),
             ), False
         return None, False
 
@@ -1389,7 +1448,7 @@ def _select_dispatch_policy_task(
     if reactive_tasks:
         return max(
             reactive_tasks,
-            key=lambda task: _reactive_task_priority_key(task, eta_s=float(eta_seconds_fn(task))),
+            key=lambda task: reactive_key_fn(task, eta_s=float(eta_seconds_fn(task))),
         ), False
 
     fallback_predictive_tasks = list(predictive_tasks)
@@ -2039,6 +2098,13 @@ def run_simulation_frames_persistent(
     max_active_model_deterring_per_robot=1,
     preempt_deterring_goals=True,
     preempt_predictive_with_reactive=False,
+    # Overload diagnostics (defaults reproduce the original dispatch exactly).
+    #   reactive_override_target: "most_overdue" | "nearest_overdue"
+    #   goal_switch_margin_s: >0 adds hysteresis to urgent reactive goal switches
+    #   reactive_priority_key: "support_first" | "eta_first"
+    reactive_override_target="most_overdue",
+    goal_switch_margin_s=0.0,
+    reactive_priority_key="support_first",
     preempt_direct_detection_goals=True,
     preempt_model_scored_goals=False,
     use_live_robot_pose_for_task_planning=True,
@@ -2606,6 +2672,21 @@ def run_simulation_frames_persistent(
     reservation_softening_alpha = float(dispatch_policy_settings["reservation_softening_alpha"])
     reservation_age_softening_beta = float(dispatch_policy_settings["reservation_age_softening_beta"])
     reservation_age_gate = float(dispatch_policy_settings["reservation_age_gate"])
+    reactive_override_target = str(reactive_override_target or "most_overdue").strip().lower()
+    if reactive_override_target not in REACTIVE_OVERRIDE_TARGET_MODES:
+        raise ValueError(
+            f"reactive_override_target must be one of {list(REACTIVE_OVERRIDE_TARGET_MODES)}, "
+            f"got: {reactive_override_target!r}"
+        )
+    reactive_priority_key = str(reactive_priority_key or "support_first").strip().lower()
+    if reactive_priority_key not in REACTIVE_PRIORITY_KEY_MODES:
+        raise ValueError(
+            f"reactive_priority_key must be one of {list(REACTIVE_PRIORITY_KEY_MODES)}, "
+            f"got: {reactive_priority_key!r}"
+        )
+    goal_switch_margin_s = float(goal_switch_margin_s or 0.0)
+    if not math.isfinite(goal_switch_margin_s) or goal_switch_margin_s < 0.0:
+        raise ValueError(f"goal_switch_margin_s must be finite and >= 0, got: {goal_switch_margin_s!r}")
     if reactive_load_factor_window_s in (None, ""):
         effective_reactive_load_factor_window_s = float(reservation_window_s)
     else:
@@ -3981,6 +4062,15 @@ def run_simulation_frames_persistent(
     predictive_dispatched_task_ids = set()
     urgent_reactive_override_total = 0
     preempt_predictive_override_total = 0
+    # Goal-switch diagnostics: a switch is any change of a robot's goal from one
+    # still-active task to a different task (any cause). Abandoned distance is the
+    # distance travelled since the abandoned goal was set.
+    goal_switch_total = 0
+    goal_switch_abandoned_distance_m = 0.0
+    goal_switch_hysteresis_blocked_total = 0
+    goal_track_xy = {}          # rid -> goal tuple last observed
+    goal_track_task_id = {}     # rid -> task id that goal corresponded to (or None)
+    goal_track_dist_mark = {}   # rid -> travel_distance_by_robot[rid] when goal was set
     predictive_deadline_feasible_total = 0
     predictive_deadline_checked_total = 0
     predictive_confidence_sum = 0.0
@@ -6363,7 +6453,42 @@ def run_simulation_frames_persistent(
             predictive_max_eta_s=predictive_max_eta_s,
             fleet_size=len(robots),
             global_reactive_count=n_global_reactive,
+            reactive_override_target=str(reactive_override_target),
+            reactive_priority_key=str(reactive_priority_key),
         )
+
+    def _observe_goal_change(rid):
+        """Track goal changes for goal-switch diagnostics (read-only w.r.t. dispatch).
+
+        A switch is counted when a robot's goal changes from a task that is still
+        active to a different task. The abandoned distance is the distance the robot
+        travelled since the abandoned goal was set.
+        """
+        nonlocal goal_switch_total, goal_switch_abandoned_distance_m
+        cur_goal = goal.get(rid)
+        cur_xy = None if cur_goal is None else (float(cur_goal[0]), float(cur_goal[1]))
+        prev_xy = goal_track_xy.get(rid)
+        if cur_xy == prev_xy:
+            return
+        dist_now = float(travel_distance_by_robot.get(rid, 0.0))
+        prev_task_id = goal_track_task_id.get(rid)
+        new_task = _match_active_task_for_robot_goal(rid, cur_goal) if cur_goal is not None else None
+        new_task_id = None if new_task is None else new_task.get("id")
+        if prev_task_id is not None and new_task_id is not None and new_task_id != prev_task_id:
+            prev_live = any(
+                tr.get("id") == prev_task_id
+                and str(tr.get("state", "")).strip().lower() == "active"
+                for tr in active_tasks
+            )
+            if prev_live:
+                goal_switch_total += 1
+                goal_switch_abandoned_distance_m += max(
+                    0.0, dist_now - float(goal_track_dist_mark.get(rid, dist_now))
+                )
+        goal_track_xy[rid] = cur_xy
+        if new_task_id is None or new_task_id != prev_task_id:
+            goal_track_dist_mark[rid] = dist_now
+        goal_track_task_id[rid] = new_task_id
 
     def _start_deterring_hold(rid, task_row, now_t):
         """Start the service hold interval for a deterring task."""
@@ -7100,7 +7225,37 @@ def run_simulation_frames_persistent(
                             command_type = "move"
                     if preempt_deterring_goals or goal[rid] is None:
                         policy_task, urgent_override = _select_policy_task_for_robot(rid, t)
-                    if urgent_override and policy_task is not None:
+                    hysteresis_hold = False
+                    if (
+                        urgent_override
+                        and policy_task is not None
+                        and goal_switch_margin_s > 0.0
+                        and goal[rid] is not None
+                        and current_goal_task is not None
+                        and _task_stream(current_goal_task) == "reactive"
+                        and current_goal_task.get("id") != policy_task.get("id")
+                    ):
+                        # Hysteresis: only abandon the current reactive goal if the new
+                        # urgent task is more overdue by more than the margin.
+                        cur_slack_s = _reactive_override_slack_seconds(
+                            current_goal_task,
+                            now_t=float(t),
+                            reactive_override_slack_s=float(reactive_override_slack_s),
+                            eta_s=float(_task_eta_seconds_for_robot(rid, current_goal_task)),
+                        )
+                        new_slack_s = _reactive_override_slack_seconds(
+                            policy_task,
+                            now_t=float(t),
+                            reactive_override_slack_s=float(reactive_override_slack_s),
+                            eta_s=float(_task_eta_seconds_for_robot(rid, policy_task)),
+                        )
+                        if not (float(new_slack_s) < float(cur_slack_s) - float(goal_switch_margin_s)):
+                            hysteresis_hold = True
+                            goal_switch_hysteresis_blocked_total += 1
+                    if hysteresis_hold:
+                        command_source = "existing_goal"
+                        command_type = "move"
+                    elif urgent_override and policy_task is not None:
                         current_task_id = None if current_goal_task is None else current_goal_task.get("id")
                         if current_task_id != policy_task.get("id"):
                             goal[rid] = _task_goal_xy(policy_task)
@@ -7158,6 +7313,7 @@ def run_simulation_frames_persistent(
                         next_idle_retarget[rid] = t + float(idle_roam_interval_s)
                         command_source = "idle_roam"
                         command_type = "move"
+                _observe_goal_change(rid)
                 # step
                 command_pose = tuple(pose[rid])
                 graph_plan_for_command = None
@@ -7522,6 +7678,20 @@ def run_simulation_frames_persistent(
             if reactive_generated_total > 0 else float("nan")
         )
         reactive_expired_total = max(0, int(reactive_generated_total) - int(reactive_completed_total))
+        _fleet_robot_hours = float(len(robots)) * float(sim_elapsed_s) / 3600.0
+        overload_diag_metrics = {
+            "goal_switch_total": int(goal_switch_total),
+            "goal_switch_abandoned_distance_m": float(goal_switch_abandoned_distance_m),
+            "goal_switch_hysteresis_blocked_total": int(goal_switch_hysteresis_blocked_total),
+            "reactive_completed_per_robot_hour": (
+                float(reactive_completed_total) / _fleet_robot_hours
+                if _fleet_robot_hours > 1e-9 else float("nan")
+            ),
+            "reactive_override_target": str(reactive_override_target),
+            "goal_switch_margin_s": float(goal_switch_margin_s),
+            "reactive_priority_key": str(reactive_priority_key),
+            "preempt_deterring_goals": int(bool(preempt_deterring_goals)),
+        }
         predictive_completed_fraction = (
             float(predictive_completed_total) / float(predictive_generated_total)
             if predictive_generated_total > 0 else float("nan")
@@ -7684,6 +7854,7 @@ def run_simulation_frames_persistent(
             "stale_goal_clears": int(stale_goal_clears),
             "urgent_reactive_override_total": int(urgent_reactive_override_total),
             "preempt_predictive_override_total": int(preempt_predictive_override_total),
+            **overload_diag_metrics,
             "predictive_deadline_feasible_total": int(predictive_deadline_feasible_total),
             "predictive_deadline_checked_total": int(predictive_deadline_checked_total),
             "predictive_deadline_feasible_fraction": (
@@ -7954,6 +8125,7 @@ def run_simulation_frames_persistent(
             **_current_reactive_load_factor_metrics(t),
             "urgent_reactive_override_total": int(urgent_reactive_override_total),
             "preempt_predictive_override_total": int(preempt_predictive_override_total),
+            **overload_diag_metrics,
             "predictive_deadline_feasible_total": int(predictive_deadline_feasible_total),
             "predictive_deadline_checked_total": int(predictive_deadline_checked_total),
             "predictive_deadline_feasible_fraction": (

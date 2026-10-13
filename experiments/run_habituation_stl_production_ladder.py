@@ -87,6 +87,10 @@ METRIC_FIELDS = [
     "urgent_reactive_override_total",
     "preempt_predictive_override_total",
     "reactive_generated_total",
+    "goal_switch_total",
+    "goal_switch_abandoned_distance_m",
+    "goal_switch_hysteresis_blocked_total",
+    "reactive_completed_per_robot_hour",
 ]
 
 
