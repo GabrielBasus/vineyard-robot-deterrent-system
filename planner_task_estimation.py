@@ -311,6 +311,7 @@ def estimate_stl_counterfactual_value(
     weight_fn=None,
     target_cell_id: int | None = None,
     pending_events=None,
+    fleet_pending_events=None,
     reactive_tasks=None,
 ) -> dict:
     """Compute proposal U(a,r) for one candidate deterrence action.
@@ -434,6 +435,7 @@ def estimate_stl_counterfactual_value(
         spec_params,
         dynamics,
         pending_events=pending_events,
+        fleet_pending_events=fleet_pending_events,
         reactive_tasks=reactive_tasks,
     )
     return {

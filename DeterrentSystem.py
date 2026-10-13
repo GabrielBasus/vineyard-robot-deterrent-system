@@ -4228,19 +4228,26 @@ def run_simulation_frames_persistent(
         return {str(r): list(all_events) for r in ids}
 
     def _stl_reactive_tasks(now_t):
-        """Collect pending reactive tasks with relative deadlines for Plan §4E service protection."""
+        """Collect pending reactive tasks with relative deadlines for Plan §4E service protection.
+
+        Reads from taskgen.rows() (pre-dispatch buffer) not active_tasks, because this function
+        is called during estimation, before _run_dispatch_stage. Tasks in active_tasks are
+        already assigned to a robot and complete within service_hold_s, so active_tasks is
+        nearly always empty of reactive tasks at planning time.
+        """
+        _handled_keys = (
+            {_task_buffer_key(t) for t in active_tasks}
+            | {_task_buffer_key(t) for t in completed_tasks}
+            | consumed_task_keys
+        )
         tasks = []
-        for task in list(active_tasks):
-            stream = str(task.get("type", "")).strip().lower()
-            if stream not in {"reactive", "urgent_reactive", "reactive_override"}:
+        for task in list(taskgen.rows()):
+            if not _is_direct_detection_task_row(task):
                 continue
-            deadline_abs = task.get("deadline")
-            if deadline_abs is None:
+            if _task_buffer_key(task) in _handled_keys:
                 continue
-            try:
-                deadline_rel = float(deadline_abs) - float(now_t)
-            except Exception:
-                continue
+            task_time = float(task.get("time", float(now_t)))
+            deadline_rel = (task_time + float(reactive_override_slack_s)) - float(now_t)
             if deadline_rel <= 0.0:
                 continue
             tasks.append({"deadline_s": float(deadline_rel)})

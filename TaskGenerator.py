@@ -1056,6 +1056,9 @@ class TaskGenerator:
                         weight_fn=weight_fn,
                         target_cell_id=target_cell_id,
                         pending_events=(stl_pending_events_by_robot or {}).get(str(rid)),
+                        fleet_pending_events=next(
+                            iter((stl_pending_events_by_robot or {}).values()), []
+                        ),
                         reactive_tasks=stl_reactive_tasks,
                     )
                     stl_u = float(stl_summary.get("predictive_stl_U", 0.0))

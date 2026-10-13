@@ -308,6 +308,10 @@ def run(args: argparse.Namespace) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
     raw_dir.mkdir(parents=True, exist_ok=True)
 
+    mu_override = getattr(args, "mu", None)
+    if mu_override is not None:
+        _COMMON["mu_true"] = float(mu_override)
+
     jobs = _build_jobs(int(args.seed_start), int(args.num_runs))
     print(f"[ab] jobs={len(jobs)} outdir={outdir}", flush=True)
     started = time.time()
@@ -344,7 +348,7 @@ def run(args: argparse.Namespace) -> None:
     _write_comparison_md(rows, outdir)
     (outdir / "manifest.json").write_text(
         json.dumps({"elapsed_s": time.time() - started, "seed_start": args.seed_start,
-                    "num_runs": args.num_runs}, indent=2),
+                    "num_runs": args.num_runs, "mu_true": _COMMON["mu_true"]}, indent=2),
         encoding="utf-8",
     )
     print(f"[ab] wrote {outdir}", flush=True)
@@ -352,13 +356,15 @@ def run(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Paired A vs B comparison on seeds 155-184."
+        description="Paired A/B/C/D/E comparison on seeds 155-184."
     )
-    parser.add_argument("--outdir", default="results/testbench/variant_ab")
+    parser.add_argument("--outdir", default="results/testbench/variant_abc")
     parser.add_argument("--num-runs", type=int, default=SEED_COUNT,
                         help="Number of seeds (default 30, starting at --seed-start).")
     parser.add_argument("--seed-start", type=int, default=SEED_START)
     parser.add_argument("--max-workers", type=int, default=1)
+    parser.add_argument("--mu", type=float, default=None,
+                        help="Override mu_true (default 2e-5). Use 1e-4 or 4e-4 for higher loads.")
     return parser.parse_args()
 
 

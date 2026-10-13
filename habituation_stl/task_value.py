@@ -168,7 +168,7 @@ def _build_wa_signals(nom, a_cell, a_mode, lead, times, after, q_hat, eta_post,
 
 def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
                          dyn: Dynamics, reactive_ids=None, pending_events=None,
-                         reactive_tasks=None):
+                         fleet_pending_events=None, reactive_tasks=None):
     """U(a, r) for a candidate predictive action.
 
     action         : (cell, mode, completion_lead_s)
@@ -217,7 +217,7 @@ def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
             feasible = service_feasibility(
                 action, list(cells), cell_states, hab, params, dyn,
                 reactive_tasks=reactive_tasks,
-                pending_events=pending_events,
+                pending_events=fleet_pending_events if fleet_pending_events is not None else pending_events,
                 n_robots=dyn.n_robots,
                 avg_travel_s=dyn.avg_travel_s,
                 service_hold_s=dyn.service_hold_s,
