@@ -2129,6 +2129,9 @@ def run_simulation_frames_persistent(
     stl_service_hold_s=20.0,
     stl_greedy_dt_s=45.0,
     stl_benefit_gate=0.0,           # admit candidate only if U(a) > gate
+    # Plan Section 3 ("value future cue use"): carry cue depletion and recovery
+    # through the continuation rollout (Dynamics.rollout_cue_dynamics).
+    stl_rollout_cue_dynamics=False,
     stl_service_protection=False,   # Plan §4E: reject if a feasible reactive task is delayed
     stl_strict_admission=False,     # Plan §4: drop predictive candidates with U(a) <= gate
     reactive_service_deadline_s=90.0,  # Plan §6 service metrics: reactive deadline after detection (s)
@@ -4120,6 +4123,7 @@ def run_simulation_frames_persistent(
         service_protection=bool(stl_service_protection),
         strict_admission=bool(stl_strict_admission),
         shadow_overrides=tuple(sorted(dict(stl_shadow_overrides or {}).items())),
+        rollout_cue_dynamics=bool(stl_rollout_cue_dynamics),
     )
     last_service_t_by_cell = {cell_id: 0.0 for cell_id in range(len(cells))}
     eta_at_apply_samples = []

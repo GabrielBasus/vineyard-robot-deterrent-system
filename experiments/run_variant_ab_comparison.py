@@ -11,6 +11,8 @@ Plan-variant mapping (code variants vs. improvement-plan variants):
   variant_C_ie : Plan C + ftc -- fc=True + ftc, valuation=integrated_exposure
   variant_D    : Plan D -- fc=True, valuation=continuation_rollout, benefit_gate=0
   variant_E    : Plan E -- Plan D + service_protection=True
+  variant_D_cue: Plan D + stl_rollout_cue_dynamics=True
+  variant_E_cue: Plan E + stl_rollout_cue_dynamics=True
 
 Note: "code variant C" (ftc) is a sub-variant of Plan B; "Plan variant C"
 (integrated exposure) is what the code calls "B_ie" and "C_ie".
@@ -26,6 +28,8 @@ Paired comparisons in the output:
   C_ie vs C : integrated exposure + ftc
   D vs B    : effect of continuation rollout + benefit gate (Plan §4)
   E vs D    : effect of service protection (Plan §4E)
+  D_cue vs D, E_cue vs E : effect of carrying cue depletion and recovery
+              through the continuation rollout (Plan Section 3)
 
 Output: results/testbench/variant_abc/
   per_run_metrics.csv, summary_by_system.csv, variant_abc_comparison.md
@@ -137,13 +141,35 @@ _VARIANTS = [
      {"stl_benefit_gate": 0.0, "stl_service_protection": False}),  # Plan D: rollout + benefit gate
     ("variant_E",    True,  False, "continuation_rollout",
      {"stl_benefit_gate": 0.0, "stl_service_protection": True}),   # Plan E: Plan D + service protection
+    # Plan Section 3 ("value future cue use"): D/E with cue depletion and recovery
+    # carried through the greedy continuation rollout.
+    ("variant_D_cue", True, False, "continuation_rollout",
+     {"stl_benefit_gate": 0.0, "stl_service_protection": False,
+      "stl_rollout_cue_dynamics": True}),
+    ("variant_E_cue", True, False, "continuation_rollout",
+     {"stl_benefit_gate": 0.0, "stl_service_protection": True,
+      "stl_rollout_cue_dynamics": True}),
 ]
 
 
-def _build_jobs(seed_start: int, seed_count: int) -> list[dict]:
+def _select_variants(names: str | None) -> list[tuple]:
+    """Return the _VARIANTS entries named in a comma-separated list (None = all)."""
+    if not names:
+        return list(_VARIANTS)
+    wanted = [n.strip() for n in str(names).split(",") if n.strip()]
+    known = {v[0]: v for v in _VARIANTS}
+    unknown = [n for n in wanted if n not in known]
+    if unknown:
+        raise SystemExit(f"Unknown variant(s): {', '.join(unknown)}. "
+                         f"Known: {', '.join(known)}")
+    return [known[n] for n in wanted]
+
+
+def _build_jobs(seed_start: int, seed_count: int,
+                variants: list[tuple] | None = None) -> list[dict]:
     jobs = []
     for seed in range(seed_start, seed_start + seed_count):
-        for variant, fc, ftc, val_mode, extra in _VARIANTS:
+        for variant, fc, ftc, val_mode, extra in (_VARIANTS if variants is None else variants):
             for hab_enabled in (True, False):
                 hab = _hab_params(hab_enabled)
                 params = dict(_COMMON)
@@ -244,6 +270,8 @@ def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
         ("variant_B_ie", "variant_C_ie", "C_ie vs B_ie (ftc under integrated-exposure)"),
         ("variant_B",    "variant_D",    "D vs B (Plan D: continuation rollout + benefit gate)"),
         ("variant_D",    "variant_E",    "E vs D (Plan E: Plan D + service protection)"),
+        ("variant_D",    "variant_D_cue", "D_cue vs D (Plan Section 3: cue dynamics in rollout)"),
+        ("variant_E",    "variant_E_cue", "E_cue vs E (Plan Section 3: cue dynamics in rollout)"),
     ]
 
     lines = [
@@ -257,6 +285,8 @@ def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
         "- variant_C_ie : Plan C+ftc -- variant_C + integrated-exposure valuation",
         "- variant_D    : Plan D -- fc=True, valuation=continuation_rollout, benefit_gate=0",
         "- variant_E    : Plan E -- Plan D + service_protection=True",
+        "- variant_D_cue: Plan D + rollout cue dynamics (depletion/recovery carried through rollout)",
+        "- variant_E_cue: Plan E + rollout cue dynamics",
         f"- Seeds: {SEED_START}-{SEED_START + SEED_COUNT - 1}",
         "",
         "## Primary Metric: value_weighted_exposure (hab_on)",
@@ -293,6 +323,8 @@ def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
         ("C_ie - C", "variant_C",    "variant_C_ie"),
         ("D - B",    "variant_B",    "variant_D"),
         ("E - D",    "variant_D",    "variant_E"),
+        ("D_cue - D", "variant_D",   "variant_D_cue"),
+        ("E_cue - E", "variant_E",   "variant_E_cue"),
     ]
     for label, sys_a, sys_b in raw_sections:
         lines += ["", f"## Raw Deltas ({label})", ""]
@@ -312,7 +344,8 @@ def run(args: argparse.Namespace) -> None:
     if mu_override is not None:
         _COMMON["mu_true"] = float(mu_override)
 
-    jobs = _build_jobs(int(args.seed_start), int(args.num_runs))
+    jobs = _build_jobs(int(args.seed_start), int(args.num_runs),
+                       _select_variants(getattr(args, "variants", None)))
     print(f"[ab] jobs={len(jobs)} outdir={outdir}", flush=True)
     started = time.time()
 
@@ -365,6 +398,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-workers", type=int, default=1)
     parser.add_argument("--mu", type=float, default=None,
                         help="Override mu_true (default 2e-5). Use 1e-4 or 4e-4 for higher loads.")
+    parser.add_argument("--variants", default=None,
+                        help="Comma-separated variant names to run (default: all), "
+                             "e.g. variant_D,variant_D_cue.")
     return parser.parse_args()
 
 
