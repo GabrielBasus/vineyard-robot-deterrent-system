@@ -82,6 +82,39 @@ _PROPOSED = {
     "enable_model_scored_deterring": True,
 }
 
+# The confirmatory and ACC runs scale deterrence, including each cue's own beta and
+# sigma (deterring_modes), and use no warmup (docs/HABITUATION_STL_CONFIRMATORY_RESULTS.md).
+# run_variant_ab_comparison.py (_COMMON) does neither; in that weak-deterrence setting
+# every system, B1 included, lands within 0.4% exposure of every other, so it cannot
+# test a valuation change. "paper" therefore builds jobs from the ladder's own param
+# builders with the confirmatory command-line settings.
+CONFIGS = ("paper", "variant_abc")
+PAPER_LADDER_ARGV = [
+    "--duration-s", "1800", "--warmup-s", "0", "--nx", "60", "--ny", "48", "--nrobots", "4",
+    "--reservation-fraction", "0.25", "--deterrence-beta-scale", "4.0",
+    "--deterrence-sigma-scale", "4.0", "--deterrence-omega-scale", "3.0",
+    "--habituation-kappa", "0.5",
+]
+# Plan variant -> ladder system it is built on.
+LADDER_BASE = {"B4": "B4_res_stl_full_multicue", "B1": "B1_greedy_fixedcue",
+               "B5": "B5_greedy_habcue"}
+
+
+def _ladder_params(system: str, hab_on: bool, mu: float) -> dict:
+    import experiments.run_habituation_stl_production_ladder as ladder
+
+    saved = sys.argv
+    try:
+        sys.argv = ["ladder", *PAPER_LADDER_ARGV, "--mu-true", repr(float(mu))]
+        args = ladder.parse_args()
+    finally:
+        sys.argv = saved
+    params = ladder._common_params(args)
+    params.update(ladder._system_params(args)[system])
+    params.update(ladder._habituation_params(hab_on, args))
+    params.pop("habituation_condition", None)
+    return params
+
 _ROLLOUT = {"stl_valuation_mode": "continuation_rollout", "stl_benefit_gate": 0.0}
 
 # name -> (base, overrides). base "B4" = _COMMON + _B4_SYS; base "greedy" = _COMMON + _PROPOSED.
@@ -137,18 +170,21 @@ REPORT_METRICS = [
 
 
 def build_params(variant: str, hab_on: bool, mu: float, t_end: float | None,
-                 extra: dict | None = None) -> dict:
+                 extra: dict | None = None, config: str = "paper") -> dict:
     base, overrides = VARIANTS[variant]
-    params = dict(_COMMON)
-    if base == "B4":
-        params.update(_B4_SYS)
+    if config == "paper":
+        ladder_system = LADDER_BASE["B4"] if base == "B4" else LADDER_BASE[variant]
+        params = _ladder_params(ladder_system, hab_on, mu)
+        if base != "B4":
+            overrides = {}  # B1 and B5 are taken exactly as the ladder defines them
     else:
-        params.update(_PROPOSED)
+        params = dict(_COMMON)
+        params.update(_B4_SYS if base == "B4" else _PROPOSED)
+        params["enable_habituation"] = bool(hab_on)
     params.update(overrides)
     params["mu_true"] = float(mu)
     if t_end is not None:
         params["T_end"] = float(t_end)
-    params["enable_habituation"] = bool(hab_on)
     params.update(extra or {})
     return params
 
@@ -285,6 +321,7 @@ def main() -> None:
     p.add_argument("--t-end", type=float, default=None)
     p.add_argument("--max-workers", type=int, default=1)
     p.add_argument("--extra", default="{}", help="JSON dict of params applied to every job")
+    p.add_argument("--config", default="paper", choices=CONFIGS)
     p.add_argument("--analyze-only", action="store_true")
     args = p.parse_args()
 
@@ -305,7 +342,7 @@ def main() -> None:
                     continue
                 jobs.append({"system": system, "variant": v, "habituation_condition": cond,
                              "seed": seed,
-                             "params": build_params(v, hab_on, args.mu, args.t_end, extra)})
+                             "params": build_params(v, hab_on, args.mu, args.t_end, extra, args.config)})
     print(f"[completion] pending jobs={len(jobs)} outdir={outdir}", flush=True)
     started = time.time()
     if jobs and not args.analyze_only:
@@ -328,7 +365,7 @@ def main() -> None:
     rows = [json.loads(f.read_text(encoding="utf-8")) for f in sorted(raw.glob("*.json"))]
     rows.sort(key=lambda r: (r["variant"], r["habituation_condition"], int(r["seed"])))
     _write_csv(rows, outdir / "per_run_metrics.csv")
-    meta = {"mu": args.mu, "seed_start": args.seed_start, "num_runs": args.num_runs,
+    meta = {"config": args.config, "ladder_argv": PAPER_LADDER_ARGV if args.config == "paper" else None, "mu": args.mu, "seed_start": args.seed_start, "num_runs": args.num_runs,
             "t_end": args.t_end or _COMMON["T_end"], "extra": extra,
             "elapsed_s": time.time() - started,
             "noninferiority_margin_pp": NONINFERIORITY_MARGIN_PP}
