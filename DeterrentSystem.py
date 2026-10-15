@@ -36,6 +36,7 @@ from ZonePartitioner import (
     power_cells,
 )
 from SESTPP import OnlineSESTPP
+from random_streams import RANDOM_STREAM_MODES, CoupledRandomStreams
 from Robot import Robot, RobotProfile
 from TaskGenerator import TaskGenerator, TaskAssigner
 from graph_motion import (
@@ -68,6 +69,7 @@ from system_stage_helpers import (
     run_forecast_evaluation_stage,
     run_telemetry_stage,
     run_truth_generation_stage,
+    TruthGenerationCounters,
 )
 from planner_profiles import canonicalize_planner_profile_name, get_planner_profile_values
 from planner_dispatch import (
@@ -2212,6 +2214,22 @@ def run_simulation_frames_persistent(
     mu_step_time_s=None,            # scored-run time at which truth demand changes (None = never)
     mu_step_factor=1.0,             # multiplier applied to mu_true from mu_step_time_s onward
     exposure_window_s=300.0,        # window width for value_weighted_exposure_windows
+    # Plan Sections 4 and 6: couple exogenous randomness across compared policies.
+    # "legacy" keeps the single shared rng (bit-for-bit historical behavior);
+    # "coupled" draws truth arrivals, thinning, offspring and detection noise from
+    # seed-derived streams keyed by event id, and policy randomness from policy_rng.
+    random_stream_mode="legacy",
+    # "window200": truth suppression sees the last 200 deterrences (historical);
+    # "complete": keep every deterrence until eta*beta*exp(-(t-tau)/omega) < 1e-9.
+    truth_deterrence_memory="window200",
+    # "step_start": background events stamped at the step start (historical);
+    # "continuous": uniform offset within the step.
+    truth_background_timing="step_start",
+    # Excitation (offspring) kernel; None = use sigma_true / omega_true (historical).
+    truth_excitation_sigma=None,
+    truth_excitation_omega=None,
+    # Diagnostic: a list that receives coupled-mode candidate/offspring records.
+    truth_stream_trace=None,
     # Forecast quality metrics
     forecast_horizon_s=300.0,
     forecast_match_radius_m=20.0,
@@ -2280,6 +2298,35 @@ def run_simulation_frames_persistent(
     # Runtime configuration resolution and validation
     # ------------------------------------------------------------------------
     rng = np.random.default_rng(seed)
+    random_stream_mode = str(random_stream_mode).strip().lower()
+    if random_stream_mode not in RANDOM_STREAM_MODES:
+        raise ValueError(
+            f"random_stream_mode must be one of {list(RANDOM_STREAM_MODES)}, got: {random_stream_mode!r}"
+        )
+    truth_deterrence_memory = str(truth_deterrence_memory).strip().lower()
+    if truth_deterrence_memory not in {"window200", "complete"}:
+        raise ValueError(
+            "truth_deterrence_memory must be one of ['window200', 'complete'], "
+            f"got: {truth_deterrence_memory!r}"
+        )
+    truth_background_timing = str(truth_background_timing).strip().lower()
+    if truth_background_timing not in {"step_start", "continuous"}:
+        raise ValueError(
+            "truth_background_timing must be one of ['step_start', 'continuous'], "
+            f"got: {truth_background_timing!r}"
+        )
+    truth_excitation_sigma_eff = float(sigma_true if truth_excitation_sigma is None else truth_excitation_sigma)
+    truth_excitation_omega_eff = float(omega_true if truth_excitation_omega is None else truth_excitation_omega)
+    if random_stream_mode == "coupled":
+        # `rng` remains the setup generator (fleet layout, identical to legacy);
+        # every later draw goes to a truth stream or to policy_rng.
+        truth_streams = CoupledRandomStreams(seed)
+        policy_rng = truth_streams.policy_rng
+        truth_no_ground_truth_rng = truth_streams.no_ground_truth_rng
+    else:
+        truth_streams = None
+        policy_rng = rng
+        truth_no_ground_truth_rng = rng
     boundary = [(0,0),(W,0),(W,H),(0,H)]
     motion_orchestration_mode = str(motion_orchestration_mode).strip().lower()
     if motion_orchestration_mode not in {"local", "command_only"}:
@@ -3279,12 +3326,12 @@ def run_simulation_frames_persistent(
           suppress_by_mode: mode-attributed share of p_suppress (sums to p_suppress).
           suppress_by_source: source-attributed share of p_suppress.
         """
-        if not recent_deterrences:
+        if not truth_deterrence_store:
             return 1.0, 0.0, {}, {}
         s = 0.0
         contrib_by_mode = {}
         contrib_by_source = {}
-        for ev in recent_deterrences:
+        for ev in truth_deterrence_store:
             zx = float(ev.get("x", 0.0))
             zy = float(ev.get("y", 0.0))
             tz = float(ev.get("t", 0.0))
@@ -3517,7 +3564,7 @@ def run_simulation_frames_persistent(
             "stl_robustness_by_robot": robustness_by_robot,
         }
 
-    def _process_truth_event(x, y, t_now, enqueue_tasks=True, record_metrics=True):
+    def _process_truth_event(x, y, t_now, enqueue_tasks=True, record_metrics=True, event_id=None):
         """Accept a truth event into exposure metrics, detection ingestion, and reactive task generation."""
         nonlocal value_weighted_exposure
         nonlocal truth_detection_opportunities, truth_detections_observed
@@ -3549,7 +3596,12 @@ def run_simulation_frames_persistent(
             if record_metrics:
                 truth_detection_in_range_times_load.append(float(t_now))
                 _prune_reactive_load_window(float(t_now))
-            if rng.random() > truth_event_detection_prob:
+            if truth_streams is not None and event_id is not None:
+                # Coupled: detection noise keyed by (event id, robot id).
+                u_detect = truth_streams.detection_uniform(event_id, owner)
+            else:
+                u_detect = rng.random()
+            if u_detect > truth_event_detection_prob:
                 truth_detections_missed_false_negative += 1
                 return
             truth_detections_observed += 1
@@ -3735,13 +3787,29 @@ def run_simulation_frames_persistent(
             out.extend(clustered_rows)
         return out
 
-    def _spawn_offspring(x, y, t_now):
+    def _spawn_offspring(x, y, t_now, event_id=None):
         """Schedule Hawkes offspring events from an accepted ground-truth event."""
+        if truth_streams is not None and event_id is not None:
+            # Coupled: offspring of parent P are a function of (seed, P) only.
+            parent_id = tuple(int(v) for v in event_id)
+            g = truth_streams.offspring_rng(parent_id)
+            n = int(g.poisson(alpha_true))
+            children = []
+            for c in range(n):
+                dt_off = float(g.exponential(truth_excitation_omega_eff))
+                xo = float(np.clip(x + g.normal(0.0, truth_excitation_sigma_eff), 0.0, W))
+                yo = float(np.clip(y + g.normal(0.0, truth_excitation_sigma_eff), 0.0, H))
+                child_id = parent_id + (c,)
+                truth_queue.append((xo, yo, t_now + dt_off, child_id))
+                children.append((child_id, xo, yo, float(t_now + dt_off)))
+            if truth_stream_trace is not None:
+                truth_stream_trace.append({"kind": "offspring", "parent": parent_id, "children": children})
+            return
         n = rng.poisson(alpha_true)
         for _ in range(int(n)):
-            dt_off = rng.exponential(omega_true)
-            xo = float(np.clip(x + rng.normal(0.0, sigma_true), 0.0, W))
-            yo = float(np.clip(y + rng.normal(0.0, sigma_true), 0.0, H))
+            dt_off = rng.exponential(truth_excitation_omega_eff)
+            xo = float(np.clip(x + rng.normal(0.0, truth_excitation_sigma_eff), 0.0, W))
+            yo = float(np.clip(y + rng.normal(0.0, truth_excitation_sigma_eff), 0.0, H))
             truth_queue.append((xo, yo, t_now + dt_off))
 
     def _future_truth_events(t0, horizon_s):
@@ -4039,6 +4107,22 @@ def run_simulation_frames_persistent(
     health_return_total = 0
     consumed_task_keys = set()
     recent_deterrences = deque(maxlen=200)  # {"x","y","t","mode","beta","sigma","omega"}
+    # Truth suppression memory. "window200" shares the planner-facing deque (historical);
+    # "complete" keeps a separate list pruned only once an entry's contribution is negligible.
+    truth_deterrence_store = recent_deterrences if truth_deterrence_memory == "window200" else []
+
+    def _prune_truth_deterrence_store(t_prune):
+        """Drop deterrences whose suppression contribution is < 1e-9 at t_prune ("complete" mode)."""
+        if truth_deterrence_memory != "complete" or not truth_deterrence_store:
+            return
+        kept = []
+        for ev in truth_deterrence_store:
+            age = float(t_prune) - float(ev.get("t", 0.0))
+            amp = float(ev.get("eta", 1.0)) * float(ev.get("beta", beta_true))
+            omega_u = max(float(ev.get("omega", omega_true)), 1e-9)
+            if age <= 0.0 or amp * math.exp(-age / omega_u) >= 1e-9:
+                kept.append(ev)
+        truth_deterrence_store[:] = kept
     model_deterring_accepted = 0
     model_deterring_accepted_by_source = {}
     model_deterring_rejected_budget = 0
@@ -4739,6 +4823,71 @@ def run_simulation_frames_persistent(
                 stl_monitors_by_robot[rid_key] = RobotMonitor(local_cells, stl_spec_params)
         return True
 
+    def _coupled_truth_step(now_t, mu_now, *, warmup):
+        """One truth step under random_stream_mode="coupled" (shared by warmup and main loop).
+
+        Background count/locations/offsets come from the dedicated background stream,
+        consumed every step regardless of policy. Each candidate carries a stable id
+        and is kept iff its keyed thinning uniform is <= exp(-S(x, t)). Offspring are
+        due when their time is <= now_t, in warmup and main loop alike.
+        """
+        nonlocal truth_candidate_events, truth_accepted_events, truth_suppressed_events
+        nonlocal suppression_effect_sum
+        step_idx = truth_streams.next_step_index()
+        bg = truth_streams.background_rng
+        candidates = []
+        if w_shape is not None:
+            area = float(W * H)
+            w_mean = float(np.mean(w_shape[4]))
+            lam_base = float(mu_now) * w_mean * area
+            n_base = int(bg.poisson(max(lam_base * dt, 0.0)))
+            for k in range(n_base):
+                x, y = _sample_from_value_map(bg)
+                # Always drawn so the background stream does not depend on the timing flag.
+                offset = float(bg.random()) * float(dt)
+                event_t = float(now_t) + (offset if truth_background_timing == "continuous" else 0.0)
+                candidates.append((x, y, event_t, (int(step_idx), int(k)), "background"))
+        if truth_queue:
+            due = [ev for ev in truth_queue if float(ev[2]) <= float(now_t)]
+            if due:
+                truth_queue[:] = [ev for ev in truth_queue if float(ev[2]) > float(now_t)]
+                due.sort(key=lambda ev: (float(ev[2]), tuple(ev[3])))
+                candidates.extend((ev[0], ev[1], float(ev[2]), tuple(ev[3]), "offspring") for ev in due)
+        for x, y, event_t, event_id, origin in candidates:
+            p_keep, p_suppress, p_by_mode, p_by_source = _suppression_eval(x, y, event_t)
+            truth_candidate_events += 1
+            suppression_effect_sum += float(p_suppress)
+            for mk, mv in p_by_mode.items():
+                suppression_effect_by_mode[mk] = float(suppression_effect_by_mode.get(mk, 0.0) + mv)
+            for sk, sv in p_by_source.items():
+                suppression_effect_by_source[sk] = float(suppression_effect_by_source.get(sk, 0.0) + sv)
+            u_thin = truth_streams.thinning_uniform(event_id)
+            accepted = bool(u_thin <= p_keep)
+            if truth_stream_trace is not None:
+                truth_stream_trace.append({
+                    "kind": "candidate",
+                    "origin": origin,
+                    "id": tuple(event_id),
+                    "x": float(x),
+                    "y": float(y),
+                    "t": float(event_t),
+                    "u": float(u_thin),
+                    "p_keep": float(p_keep),
+                    "accepted": accepted,
+                    "warmup": bool(warmup),
+                })
+            if accepted:
+                truth_accepted_events += 1
+                _record_truth_window_event(float(event_t), False)
+                if warmup:
+                    _process_truth_event(x, y, event_t, enqueue_tasks=False, record_metrics=False, event_id=event_id)
+                else:
+                    _process_truth_event(x, y, event_t, event_id=event_id)
+                _spawn_offspring(x, y, event_t, event_id=event_id)
+            else:
+                truth_suppressed_events += 1
+                _record_truth_window_event(float(event_t), True)
+
     def _run_truth_generation_algorithm(now_t):
         """Ground-truth event generation and local/boundary detection ingestion."""
         nonlocal truth_candidate_events, truth_accepted_events, truth_suppressed_events
@@ -4748,11 +4897,23 @@ def run_simulation_frames_persistent(
             truth_hab.recover(dt)
             planner_hab.recover(dt)
 
+        if use_ground_truth:
+            _prune_truth_deterrence_store(float(now_t) - float(dt))
+        if truth_streams is not None and use_ground_truth:
+            _coupled_truth_step(now_t, _mu_true_at(now_t), warmup=False)
+            return TruthGenerationCounters(
+                truth_candidate_events=int(truth_candidate_events),
+                truth_accepted_events=int(truth_accepted_events),
+                truth_suppressed_events=int(truth_suppressed_events),
+                suppression_effect_sum=float(suppression_effect_sum),
+            )
+
         truth_step = run_truth_generation_stage(
             use_ground_truth=use_ground_truth,
             now_t=now_t,
             dt=dt,
-            rng=rng,
+            rng=truth_no_ground_truth_rng if not use_ground_truth else rng,
+            background_timing=truth_background_timing,
             W=W,
             H=H,
             w_cdf=w_cdf,
@@ -4930,7 +5091,7 @@ def run_simulation_frames_persistent(
             profiles=profiles,
             use_live_robot_pose_for_task_planning=bool(use_live_robot_pose_for_task_planning),
             pose=pose,
-            rng=rng,
+            rng=policy_rng,
             patrol_hotspot_filter_mode=patrol_hotspot_filter_mode,
             patrol_hotspot_score_percentile=float(patrol_hotspot_score_percentile),
             patrol_hotspot_keep_top_k=patrol_hotspot_keep_top_k,
@@ -5064,7 +5225,7 @@ def run_simulation_frames_persistent(
                 "profiles": profiles,
                 "use_live_robot_pose_for_task_planning": bool(use_live_robot_pose_for_task_planning),
                 "pose": pose,
-                "rng": rng,
+                "rng": policy_rng,
                 "patrol_hotspot_filter_mode": patrol_hotspot_filter_mode,
                 "patrol_hotspot_score_percentile": float(patrol_hotspot_score_percentile),
                 "patrol_hotspot_keep_top_k": patrol_hotspot_keep_top_k,
@@ -5484,7 +5645,7 @@ def run_simulation_frames_persistent(
             selected = _select_predictive_task_for_policy(
                 resolved_variants,
                 predictive_selection_policy=predictive_selection_policy,
-                rng=rng,
+                rng=policy_rng,
                 now_t=float(now_t),
                 reactive_pressure=float(reactive_pressure_local),
                 predictive_confidence_source=predictive_confidence_source,
@@ -6435,7 +6596,7 @@ def run_simulation_frames_persistent(
             predictive_selection_policy=str(predictive_selection_policy),
             now_t=float(now_t),
             eta_seconds_fn=lambda task_row: _task_eta_seconds_for_robot(rid, task_row),
-            rng=rng,
+            rng=policy_rng,
             predictive_slack_min_s=float(predictive_slack_min_s),
             reactive_pressure_max_for_predictive=float(reactive_pressure_max_for_predictive),
             predictive_confidence_min=float(predictive_confidence_min),
@@ -6668,7 +6829,7 @@ def run_simulation_frames_persistent(
                 mode_counts[int(mode_idx)] = int(mode_counts.get(int(mode_idx), 0)) + 1
 
         action_id = int(task_row.get("id", -1))
-        recent_deterrences.append({
+        deterrence_entry = {
             "x": float(task_row["x"]),
             "y": float(task_row["y"]),
             "t": float(now_t),
@@ -6680,7 +6841,10 @@ def run_simulation_frames_persistent(
             "omega": omega_u,
             "eta": eta_at_apply,
             "habituation_mode": habituation_mode_label
-        })
+        }
+        recent_deterrences.append(deterrence_entry)
+        if truth_deterrence_store is not recent_deterrences:
+            truth_deterrence_store.append(deterrence_entry)
         feedback_beta = float(params.get("beta", 1.0))
         feedback_omega = float(params.get("omega", robots[rid].m.omega_inhib)) * float(model_feedback_omega_scale)
         feedback_sigma = float(params.get("sigma", robots[rid].m.sigma)) * float(model_feedback_sigma_scale)
@@ -6852,6 +7016,13 @@ def run_simulation_frames_persistent(
         # Burn in the ground-truth process to seed robot models before active tasking.
         t_w = 0.0
         while t_w < warmup_s:
+            _prune_truth_deterrence_store(float(t_w) - float(dt))
+            if truth_streams is not None:
+                # Coupled mode: same generator layout and offspring due-time rule
+                # (t_event <= now) as the main loop.
+                _coupled_truth_step(t_w, mu_true, warmup=True)
+                t_w += dt
+                continue
             if w_shape is not None:
                 area = float(W * H)
                 w_mean = float(np.mean(w_shape[4]))
@@ -6859,7 +7030,12 @@ def run_simulation_frames_persistent(
                 n0 = rng.poisson(max(lam_base * dt, 0.0))
                 for _ in range(int(n0)):
                     x, y = _sample_from_value_map(rng)
-                    p_keep, p_suppress, p_by_mode, p_by_source = _suppression_eval(x, y, t_w)
+                    t_bg = (
+                        float(t_w) + float(rng.random()) * float(dt)
+                        if truth_background_timing == "continuous"
+                        else t_w
+                    )
+                    p_keep, p_suppress, p_by_mode, p_by_source = _suppression_eval(x, y, t_bg)
                     truth_candidate_events += 1
                     suppression_effect_sum += float(p_suppress)
                     for mk, mv in p_by_mode.items():
@@ -6868,12 +7044,12 @@ def run_simulation_frames_persistent(
                         suppression_effect_by_source[sk] = float(suppression_effect_by_source.get(sk, 0.0) + sv)
                     if rng.random() <= p_keep:
                         truth_accepted_events += 1
-                        _record_truth_window_event(t_w, False)
-                        _process_truth_event(x, y, t_w, enqueue_tasks=False, record_metrics=False)
-                        _spawn_offspring(x, y, t_w)
+                        _record_truth_window_event(t_bg, False)
+                        _process_truth_event(x, y, t_bg, enqueue_tasks=False, record_metrics=False)
+                        _spawn_offspring(x, y, t_bg)
                     else:
                         truth_suppressed_events += 1
-                        _record_truth_window_event(t_w, True)
+                        _record_truth_window_event(t_bg, True)
 
                 truth_queue.sort(key=lambda z: z[2])
                 due = []
@@ -7287,14 +7463,14 @@ def run_simulation_frames_persistent(
                                     key=lambda node_id: math.hypot(
                                         float(graph_motion_graph.nodes[node_id].x) - float(px),
                                         float(graph_motion_graph.nodes[node_id].y) - float(py),
-                                    ) + 0.05 * float(rng.random()),
+                                    ) + 0.05 * float(policy_rng.random()),
                                 )
                                 gx, gy = graph_motion_graph.node_point(target_node_id)
                             else:
                                 gx, gy = px, py
                         else:
-                            gx = float(np.clip(px + rng.normal(0.0, idle_roam_jitter_m), 0.0, W))
-                            gy = float(np.clip(py + rng.normal(0.0, idle_roam_jitter_m), 0.0, H))
+                            gx = float(np.clip(px + policy_rng.normal(0.0, idle_roam_jitter_m), 0.0, W))
+                            gy = float(np.clip(py + policy_rng.normal(0.0, idle_roam_jitter_m), 0.0, H))
                             zpoly = robots[rid].zone_polygon
                             if zpoly:
                                 if not point_in_polygon(gx, gy, zpoly):
@@ -7305,8 +7481,8 @@ def run_simulation_frames_persistent(
                                     ymin, ymax = min(ys), max(ys)
                                     found = False
                                     for _ in range(30):
-                                        tx = float(rng.uniform(xmin, xmax))
-                                        ty = float(rng.uniform(ymin, ymax))
+                                        tx = float(policy_rng.uniform(xmin, xmax))
+                                        ty = float(policy_rng.uniform(ymin, ymax))
                                         if point_in_polygon(tx, ty, zpoly):
                                             gx, gy = tx, ty
                                             found = True
