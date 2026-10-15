@@ -244,6 +244,7 @@ def run_truth_generation_stage(
     mon: Any,
     record_truth_window_event_fn: Callable[[float, bool], None] | None = None,
     robot_active_fn: Callable[[str], bool] | None = None,
+    background_timing: str = "step_start",
 ) -> TruthGenerationCounters:
     """Advance the ground-truth event process, apply suppression, and ingest detections."""
     if use_ground_truth:
@@ -254,7 +255,10 @@ def run_truth_generation_stage(
             n_base = rng.poisson(lam_base * dt)
             for _ in range(int(n_base)):
                 x, y = sample_from_value_map_fn(rng)
-                p_keep, p_suppress, p_by_mode, p_by_source = suppression_eval_fn(x, y, now_t)
+                # "step_start" (historical) stamps every background event at the step start;
+                # "continuous" draws a uniform offset within the step.
+                bg_t = float(now_t) + float(rng.random()) * float(dt) if background_timing == "continuous" else now_t
+                p_keep, p_suppress, p_by_mode, p_by_source = suppression_eval_fn(x, y, bg_t)
                 truth_candidate_events += 1
                 suppression_effect_sum += float(p_suppress)
                 for mode_key, mode_value in p_by_mode.items():
@@ -266,13 +270,13 @@ def run_truth_generation_stage(
                 if rng.random() <= p_keep:
                     truth_accepted_events += 1
                     if record_truth_window_event_fn is not None:
-                        record_truth_window_event_fn(float(now_t), False)
-                    process_truth_event_fn(x, y, now_t)
-                    spawn_offspring_fn(x, y, now_t)
+                        record_truth_window_event_fn(float(bg_t), False)
+                    process_truth_event_fn(x, y, bg_t)
+                    spawn_offspring_fn(x, y, bg_t)
                 else:
                     truth_suppressed_events += 1
                     if record_truth_window_event_fn is not None:
-                        record_truth_window_event_fn(float(now_t), True)
+                        record_truth_window_event_fn(float(bg_t), True)
 
         if truth_queue:
             due: list[tuple[float, float, float]] = []
