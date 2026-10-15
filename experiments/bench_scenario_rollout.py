@@ -72,14 +72,14 @@ def main():
         t = time.perf_counter()
         sr.run_policy(snap, sr.NOOP, n_scenarios=2, seed=0, trees=trees[:2])
         t_run = (time.perf_counter() - t) / 2
-        cold = sr.evaluate(snap, cands, n_scenarios=a.n_scenarios, seed=0, n_workers=a.workers)
+        cold = sr.evaluate(snap, cands, n_scenarios=a.n_scenarios, seed=0, pool=pool)
         walls = []
         for rep in range(3):
             res = sr.evaluate(snap, cands, n_scenarios=a.n_scenarios, seed=0, pool=pool)
             walls.append(res.wall_time_s)
         assert np.array_equal(res.J, cold.J)
         r = {
-            "pool_startup_s": pool_start_s, "cold_pool_evaluate_wall_s": cold.wall_time_s,
+            "pool_startup_s": pool_start_s, "first_call_evaluate_wall_s": cold.wall_time_s,
             "warm_pool_evaluate_wall_s": walls,
             "n_candidates": len(cands), "n_scenarios": a.n_scenarios,
             "events_per_scenario": int(trees[0].order.size),
