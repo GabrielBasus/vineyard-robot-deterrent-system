@@ -1,5 +1,6 @@
 import bisect
 import math
+import os
 import random
 from collections import deque
 from typing import Any, Dict, List
@@ -18,7 +19,11 @@ from habituation_stl.task_value import Dynamics
 
 try:
     from telemetry_sim import TelemetrySim
-    mon: 'TelemetrySim|None' = TelemetrySim(enabled=True)
+    # DETERRENT_TELEMETRY=0 turns off the live CSV telemetry; batch experiments set it,
+    # because every run appends to telemetry_live/ (80 GB after one overnight sweep).
+    mon: 'TelemetrySim|None' = TelemetrySim(
+        enabled=os.environ.get("DETERRENT_TELEMETRY", "1") != "0"
+    )
 except Exception:
     mon = None  # telemetry disabled if import fails
 

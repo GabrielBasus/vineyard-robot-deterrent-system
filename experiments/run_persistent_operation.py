@@ -22,6 +22,11 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+import os
+
+# Batch runs must not append to telemetry_live/ (set before DeterrentSystem is imported).
+os.environ.setdefault("DETERRENT_TELEMETRY", "0")
+
 _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))

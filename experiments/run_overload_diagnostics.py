@@ -51,6 +51,11 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+
+import os
+
+# Batch runs must not append to telemetry_live/ (set before DeterrentSystem is imported).
+os.environ.setdefault("DETERRENT_TELEMETRY", "0")
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
