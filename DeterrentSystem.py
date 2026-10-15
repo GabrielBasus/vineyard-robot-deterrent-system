@@ -3,6 +3,7 @@ import math
 import os
 import random
 from collections import deque
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import matplotlib.pyplot as plt
@@ -35,7 +36,7 @@ from ZonePartitioner import (
     point_to_poly_distance,
     power_cells,
 )
-from SESTPP import OnlineSESTPP
+from SESTPP import ConsistentOnlineSESTPP, OnlineSESTPP, canonical_estimator_mode
 from Robot import Robot, RobotProfile
 from TaskGenerator import TaskGenerator, TaskAssigner
 from graph_motion import (
@@ -155,7 +156,90 @@ class EventBus:
         self.intervention_msg_dropped_debounce = 0
         self.intervention_msg_dropped_low_weight = 0
         self._last_intervention_key_t = {}
-    
+        # Consistent-estimator relay (configured by configure_consistent_relay).
+        self.estimator_mode = "legacy"
+        self.region_polys_fn = None
+        self.footprint_sigmas = 3.0
+        self.consistent_detection_msg_count = 0
+        self.consistent_intervention_msg_count = 0
+        self.consistent_intervention_log = []
+
+    def configure_consistent_relay(self, region_polys_fn, *, footprint_sigmas: float = 3.0):
+        """Switch to footprint-based relay for the consistent estimator.
+
+        ``region_polys_fn(rid)`` returns the polygons a robot models (its STL
+        local cells: own zone plus partition neighbours). An event with
+        footprint sigma is delivered to every robot with any of those cells
+        within ``footprint_sigmas * sigma`` of the event position (inside a
+        cell counts as distance 0). No debounce, quantisation or weight
+        thresholds are applied.
+        """
+        self.estimator_mode = "consistent"
+        self.region_polys_fn = region_polys_fn
+        self.footprint_sigmas = float(footprint_sigmas)
+
+    def robot_region_affected(self, rid, x: float, y: float, sigma: float) -> bool:
+        """Return whether an event footprint at (x, y) reaches robot ``rid``'s modeled region."""
+        if self.region_polys_fn is None:
+            return True
+        radius = self.footprint_sigmas * max(float(sigma), 0.0)
+        for poly in self.region_polys_fn(rid) or []:
+            if not poly:
+                continue
+            if point_in_polygon(float(x), float(y), poly):
+                return True
+            if point_to_poly_distance((float(x), float(y)), poly) <= radius:
+                return True
+        return False
+
+    def publish_detection(self, events: List[Dict], x: float, y: float, t: float, source_id: str):
+        """Relay a detection: legacy boundary events, or footprint relay in consistent mode."""
+        if self.estimator_mode != "consistent":
+            self.send_boundary_events(events, source_id=source_id)
+            return
+        for rid, robot in self.robots.items():
+            if rid == source_id:
+                continue
+            sigma = float(getattr(robot.m, "sigma", 0.0))
+            if not self.robot_region_affected(rid, x, y, sigma):
+                continue
+            self.consistent_detection_msg_count += 1
+            self.boundary_msg_count += 1
+            self.boundary_bytes += self.bytes_per_boundary_msg
+            robot.ingest_boundary_event(x=float(x), y=float(y), t=float(t), weight=1.0)
+
+    def broadcast_intervention(self, *, x: float, y: float, t: float, amplitude: float,
+                               sigma: float, omega: float, mode, action_id, source_id: str):
+        """Deliver a completed intervention to the executing robot and every affected robot."""
+        recipients = []
+        for rid, robot in self.robots.items():
+            if rid != source_id and not self.robot_region_affected(rid, x, y, sigma):
+                continue
+            robot.ingest_intervention_event(
+                x, y, t,
+                weight=float(amplitude),
+                sigma=float(sigma),
+                omega_inhib=float(omega),
+                mode=mode,
+                beta=float(amplitude),
+                action_id=action_id,
+            )
+            recipients.append(str(rid))
+            if rid != source_id:
+                self.consistent_intervention_msg_count += 1
+                self.intervention_msg_count += 1
+                self.intervention_bytes += self.bytes_per_intervention_msg
+        self.consistent_intervention_log.append({
+            "x": float(x), "y": float(y), "t": float(t), "amplitude": float(amplitude),
+            "sigma": float(sigma), "omega": float(omega), "mode": mode, "action_id": action_id,
+            "source_id": str(source_id), "recipients": recipients,
+            "regions": (
+                {str(rid): [list(p) for p in (self.region_polys_fn(rid) or [])] for rid in self.robots}
+                if self.region_polys_fn is not None else None
+            ),
+        })
+        return recipients
+
     def send_boundary_events(self, events: List[Dict], source_id: str):
         """Publish boundary-sharing events to neighboring robot models."""
         for ev in events:
@@ -335,6 +419,70 @@ def _resolve_truth_deterrence_event_params(
             float(params.get("omega", omega_true)),
         )
     return mode_label, float(beta_true), float(sigma_true), float(omega_true)
+
+
+def _truth_suppression_contributions(x, y, t_now, deterrences, *, beta_true, sigma_true, omega_true):
+    """Truth suppression exponent S(x, t) and its per-mode / per-source split.
+
+    S = sum_k eta_k * beta_k * exp(-|x - x_k|^2 / (2 sigma_k^2)) * exp(-(t - t_k) / omega_k)
+    over deterrence events with t_k <= t (peak-1, unnormalised Gaussian).
+    """
+    s = 0.0
+    contrib_by_mode = {}
+    contrib_by_source = {}
+    for ev in deterrences:
+        zx = float(ev.get("x", 0.0))
+        zy = float(ev.get("y", 0.0))
+        tz = float(ev.get("t", 0.0))
+        dt = t_now - tz
+        if dt < 0:
+            continue
+        beta_u = float(ev.get("beta", beta_true))
+        sigma_u = float(ev.get("sigma", sigma_true))
+        omega_u = float(ev.get("omega", omega_true))
+        mode_u = str(ev.get("mode", "unknown"))
+        source_u = str(ev.get("source", "direct_detection"))
+        k = math.exp(-0.5 * ((x - zx)**2 + (y - zy)**2) / max(sigma_u**2, 1e-9))
+        eta_u = float(ev.get("eta", 1.0))
+        c = eta_u * beta_u * k * math.exp(-dt / max(omega_u, 1e-9))
+        if c <= 0.0:
+            continue
+        s += c
+        contrib_by_mode[mode_u] = float(contrib_by_mode.get(mode_u, 0.0) + c)
+        contrib_by_source[source_u] = float(contrib_by_source.get(source_u, 0.0) + c)
+    return s, contrib_by_mode, contrib_by_source
+
+
+def _resolve_planner_deterrence_event_params(
+    mode_label: str,
+    action_params: dict,
+    *,
+    planner_deterring_modes,
+    use_mode_dependent_truth_suppression: bool,
+    planner_beta: float,
+    planner_sigma: float,
+    planner_omega: float,
+) -> tuple[str, float, float, float]:
+    """Planner mirror of ``_resolve_truth_deterrence_event_params``.
+
+    Same mapping as the truth, with planner values: a model-scored mode with
+    mode-dependent suppression uses the planner's per-mode (beta, sigma,
+    omega); direct_detection (and every mode when mode-dependent suppression
+    is off) uses the planner's default triple (planner_beta, planner_sigma,
+    planner_omega), the planner analog of (beta_true, sigma_true, omega_true).
+    """
+    label = str(mode_label or "direct_detection")
+    if planner_deterring_modes is not None and label != "direct_detection":
+        params = dict(planner_deterring_modes.get(label, {}) or {})
+    else:
+        params = dict(action_params or {})
+    return _resolve_truth_deterrence_event_params(
+        SimpleNamespace(name=label, params=params),
+        use_mode_dependent_truth_suppression=bool(use_mode_dependent_truth_suppression),
+        beta_true=float(planner_beta),
+        sigma_true=float(planner_sigma),
+        omega_true=float(planner_omega),
+    )
 
 
 def _dispatch_task_value(task_row: dict) -> float:
@@ -2232,6 +2380,22 @@ def run_simulation_frames_persistent(
     intervention_boundary_min_interval_s=60.0,
     intervention_boundary_spatial_quant_m=20.0,
     intervention_boundary_min_weight=0.35,
+    # Planner intensity estimator. "legacy" = additive OnlineSESTPP (bit-for-bit
+    # historical behaviour). "consistent" = ConsistentOnlineSESTPP whose form
+    # matches the truth: [mu_hat w(x) m(t) + excitation] * exp(-S_hat), with
+    # footprint-based relay of every detection / intervention (no debounce).
+    estimator_mode="legacy",
+    # Planner parameters for the consistent estimator (kept separate from the
+    # truth's). None = nominal match with the corresponding truth value, the
+    # same convention as planner_habituation_* (mismatch studies override).
+    planner_alpha=None,             # branching ratio (truth: alpha_true)
+    planner_sigma=None,             # excitation + default suppression sigma (truth: sigma_true)
+    planner_omega=None,             # excitation + default suppression omega (truth: omega_true)
+    planner_beta=None,              # default / direct-detection suppression beta (truth: beta_true)
+    planner_deterring_modes=None,   # per-mode {beta, sigma, omega}; None = deterring_modes
+    planner_mu_init=None,           # prior background rate per m^2 per s per unit w (truth: mu_true)
+    planner_mu_prior_count=5.0,     # Gamma prior pseudo-count for the background estimate
+    planner_background_time_multiplier=None,  # callable m(t); None = constant 1 (truth has none)
     report_metrics_end=True,
     emit_rejected_model_det_debug=False,
     emit_planning_diagnostics=False,
@@ -2712,6 +2876,19 @@ def run_simulation_frames_persistent(
         predictive_confidence_power = confidence_power
     predictive_utility_mode = canonical_predictive_utility_mode(predictive_utility_mode)
     direct_detection_habituation_mode = str(direct_detection_habituation_mode or "direct_detection").strip()
+    estimator_mode = canonical_estimator_mode(estimator_mode)
+    consistent_estimator = estimator_mode == "consistent"
+    planner_alpha = float(alpha_true if planner_alpha is None else planner_alpha)
+    planner_sigma = float(sigma_true if planner_sigma is None else planner_sigma)
+    planner_omega = float(omega_true if planner_omega is None else planner_omega)
+    planner_beta = float(beta_true if planner_beta is None else planner_beta)
+    planner_mu_init = float(mu_true if planner_mu_init is None else planner_mu_init)
+    planner_mu_prior_count = float(planner_mu_prior_count)
+    if consistent_estimator:
+        if planner_alpha < 0.0 or planner_sigma <= 0.0 or planner_omega <= 0.0 or planner_beta < 0.0:
+            raise ValueError("planner_alpha/beta must be >= 0 and planner_sigma/omega > 0")
+        if planner_mu_init <= 0.0 or planner_mu_prior_count <= 0.0:
+            raise ValueError("planner_mu_init and planner_mu_prior_count must be > 0")
     predictive_confidence_source = canonical_predictive_confidence_source(predictive_confidence_source)
     predictive_confidence_power = float(predictive_confidence_power)
     predictive_time_score_deadline_scale_s = float(predictive_time_score_deadline_scale_s)
@@ -3085,12 +3262,27 @@ def run_simulation_frames_persistent(
     X_MIN, X_MAX = 0.0, W; Y_MIN, Y_MAX = 0.0, H
     robots = {}
 
+    def _make_consistent_planner_model():
+        """Build a truth-form planner model with the planner's own parameters."""
+        return ConsistentOnlineSESTPP(
+            X_MIN, X_MAX, Y_MIN, Y_MAX, NX, NY,
+            alpha=planner_alpha, sigma=planner_sigma, omega=planner_omega,
+            mu_init=planner_mu_init, mu_prior_count=planner_mu_prior_count,
+            detection_prob=min(max(float(bird_detection_prob), 0.0), 1.0),
+            time_multiplier_fn=planner_background_time_multiplier,
+            omega_inhib=omega_inhib, alpha_in=alpha_in, alpha_cross=alpha_cross,
+            alpha_inhib=alpha_inhib, bg_ema=bg_ema,
+        )
+
     for r in robots_def:
         rid = r['id']
-        m = OnlineSESTPP(X_MIN, X_MAX, Y_MIN, Y_MAX, NX, NY,
-            sigma=sigma, omega=omega, omega_inhib=omega_inhib,
-            alpha_in=alpha_in, alpha_cross=alpha_cross, alpha_inhib=alpha_inhib,
-            mu_base=mu_base, bg_ema=bg_ema)
+        if consistent_estimator:
+            m = _make_consistent_planner_model()
+        else:
+            m = OnlineSESTPP(X_MIN, X_MAX, Y_MIN, Y_MAX, NX, NY,
+                sigma=sigma, omega=omega, omega_inhib=omega_inhib,
+                alpha_in=alpha_in, alpha_cross=alpha_cross, alpha_inhib=alpha_inhib,
+                mu_base=mu_base, bg_ema=bg_ema)
 
         neighbors = partitioner.neighbors_for_id(rid)  # returns [] for UAVs if you applied the ZonePartitioner fix
         zone = id_to_cell.get(rid, [])                 # UAVs get an empty zone
@@ -3112,7 +3304,9 @@ def run_simulation_frames_persistent(
     centralized_predictive_topology_enabled = (
         str(predictive_planning_topology).strip().lower() == "centralized_global"
     )
-    if centralized_predictive_topology_enabled:
+    if centralized_predictive_topology_enabled and consistent_estimator:
+        global_predictive_model = _make_consistent_planner_model()
+    elif centralized_predictive_topology_enabled:
         global_predictive_model = OnlineSESTPP(
             X_MIN,
             X_MAX,
@@ -3129,6 +3323,7 @@ def run_simulation_frames_persistent(
             mu_base=mu_base,
             bg_ema=bg_ema,
         )
+    if centralized_predictive_topology_enabled:
         centralized_planning_robots = {}
         for rid in robots:
             planning_robot = Robot(
@@ -3258,6 +3453,21 @@ def run_simulation_frames_persistent(
         w_cdf = np.cumsum(w_flat) / (w_sum if w_sum > 0 else 1.0)
         w_shape = (NY, NX, xs, ys, W_grid)
 
+    if consistent_estimator:
+        # The planner knows the static value map w(x); evaluate it on the
+        # planner grid nodes exactly as the truth sampler does.
+        if w_shape is not None:
+            planner_value_map = np.array(w_shape[4], dtype=float)
+        else:
+            planner_value_map = np.array([
+                [max(0.0, value_weight(float(xx), float(yy))) for xx in np.linspace(0.0, W, NX)]
+                for yy in np.linspace(0.0, H, NY)
+            ], dtype=float)
+        for _rob in robots.values():
+            _rob.m.set_value_map(planner_value_map)
+        if global_predictive_model is not None:
+            global_predictive_model.set_value_map(planner_value_map)
+
     def _sample_from_value_map(rng):
         """Sample a ground-truth event location from the value-weighted spatial distribution."""
         if w_cdf is None or w_shape is None:
@@ -3281,29 +3491,10 @@ def run_simulation_frames_persistent(
         """
         if not recent_deterrences:
             return 1.0, 0.0, {}, {}
-        s = 0.0
-        contrib_by_mode = {}
-        contrib_by_source = {}
-        for ev in recent_deterrences:
-            zx = float(ev.get("x", 0.0))
-            zy = float(ev.get("y", 0.0))
-            tz = float(ev.get("t", 0.0))
-            dt = t_now - tz
-            if dt < 0:
-                continue
-            beta_u = float(ev.get("beta", beta_true))
-            sigma_u = float(ev.get("sigma", sigma_true))
-            omega_u = float(ev.get("omega", omega_true))
-            mode_u = str(ev.get("mode", "unknown"))
-            source_u = str(ev.get("source", "direct_detection"))
-            k = math.exp(-0.5 * ((x - zx)**2 + (y - zy)**2) / max(sigma_u**2, 1e-9))
-            eta_u = float(ev.get("eta", 1.0))
-            c = eta_u * beta_u * k * math.exp(-dt / max(omega_u, 1e-9))
-            if c <= 0.0:
-                continue
-            s += c
-            contrib_by_mode[mode_u] = float(contrib_by_mode.get(mode_u, 0.0) + c)
-            contrib_by_source[source_u] = float(contrib_by_source.get(source_u, 0.0) + c)
+        s, contrib_by_mode, contrib_by_source = _truth_suppression_contributions(
+            x, y, t_now, recent_deterrences,
+            beta_true=beta_true, sigma_true=sigma_true, omega_true=omega_true,
+        )
         if s <= 0.0:
             return 1.0, 0.0, {}, {}
         p_keep = float(math.exp(-s))
@@ -3557,11 +3748,15 @@ def run_simulation_frames_persistent(
                 truth_detection_observed_times_load.append(float(t_now))
                 _prune_reactive_load_window(float(t_now))
             if centralized_predictive_topology_enabled and global_predictive_model is not None:
-                global_predictive_model.advance_time(float(t_now) - float(global_predictive_model.t_now))
-                global_predictive_model.add_local_event(float(x), float(y))
+                if consistent_estimator:
+                    global_predictive_model.advance_to(float(t_now))
+                    global_predictive_model.add_local_event(float(x), float(y), t=float(t_now))
+                else:
+                    global_predictive_model.advance_time(float(t_now) - float(global_predictive_model.t_now))
+                    global_predictive_model.add_local_event(float(x), float(y))
                 global_predictive_recent_events.append((float(x), float(y), float(t_now)))
             b = robots[owner].ingest_detection(x, y, t_now)
-            bus.send_boundary_events(b, source_id=owner)
+            bus.publish_detection(b, x, y, t_now, source_id=owner)
             if enqueue_tasks:
                 if bool(enable_direct_detection_tasks):
                     refresh_task = _find_refreshable_direct_detection_task(x, y, t_now)
@@ -4169,6 +4364,18 @@ def run_simulation_frames_persistent(
         gamma=float(truth_habituation_gamma),
         eta0=float(habituation_initial_eta),
     )
+    # A single planner effectiveness field is shared by all robots. Under
+    # estimator_mode="consistent" this is exactly what each robot can
+    # reconstruct itself: eta_hat for a cell depends only on the deterministic
+    # recovery law and the interventions applied in that cell, and the
+    # footprint relay (EventBus.broadcast_intervention) delivers every
+    # intervention located in a cell to every robot whose STL local cells
+    # contain that cell (distance 0 < 3 sigma). A robot reads eta_hat for
+    # candidate targets in its zone and for its STL local cells, i.e. only
+    # for cells whose interventions it receives; the exception is right after
+    # a zone repartition, where the shared field models the hand-over of the
+    # newly acquired cells' history. Under "legacy" relays are lossy, so this sharing is
+    # an idealisation of that mode.
     planner_hab = HabituationField(
         n_cells=len(cells),
         n_modes=len(mode_labels),
@@ -4292,6 +4499,59 @@ def run_simulation_frames_persistent(
         """Return the local STL cell ids monitored by each robot."""
         ids = list(robots.keys()) if robot_ids is None else list(robot_ids)
         return {str(rid): _local_cell_ids_for_robot(str(rid)) for rid in ids}
+
+    def _consistent_region_polys(rid):
+        """Polygons a robot models in the consistent estimator: its STL local cells."""
+        return [cells[int(cid)] for cid in _local_cell_ids_for_robot(str(rid)) if cells[int(cid)]]
+
+    if consistent_estimator:
+        bus.configure_consistent_relay(_consistent_region_polys, footprint_sigmas=3.0)
+
+    _planner_node_xx, _planner_node_yy = np.meshgrid(
+        np.linspace(X_MIN, X_MAX, NX), np.linspace(Y_MIN, Y_MAX, NY), indexing="xy"
+    )
+    _zone_mask_cache = {}
+
+    def _zone_node_mask(poly):
+        """Boolean node mask of a zone polygon on the planner grid (cached per polygon)."""
+        if not poly:
+            return None
+        key = tuple((float(px), float(py)) for (px, py) in poly)
+        mask = _zone_mask_cache.get(key)
+        if mask is None:
+            mask = np.zeros((NY, NX), dtype=bool)
+            for iy in range(NY):
+                for ix in range(NX):
+                    mask[iy, ix] = bool(point_in_polygon(
+                        float(_planner_node_xx[iy, ix]), float(_planner_node_yy[iy, ix]), poly
+                    ))
+            if len(_zone_mask_cache) > 256:
+                _zone_mask_cache.clear()
+            _zone_mask_cache[key] = mask
+        return mask
+
+    def _detection_coverage_mask(rid):
+        """Nodes where robot ``rid`` can detect an event now: own zone within sensor range."""
+        if str(rid) in retired_robot_ids:
+            return None
+        zone_mask = _zone_node_mask(id_to_cell.get(rid, []))
+        if zone_mask is None:
+            return None
+        px, py = pose[rid]
+        in_range = ((_planner_node_xx - float(px)) ** 2 + (_planner_node_yy - float(py)) ** 2) <= float(detect_range_m) ** 2
+        return zone_mask & in_range
+
+    def _consistent_accumulate_exposure(step_dt):
+        """Accumulate background-detection exposure for each consistent planner model."""
+        union = None
+        for rid, rob in robots.items():
+            mask = _detection_coverage_mask(rid)
+            if mask is None:
+                continue
+            rob.m.accumulate_detection_exposure(mask, step_dt)
+            union = mask.copy() if union is None else (union | mask)
+        if global_predictive_model is not None and union is not None:
+            global_predictive_model.accumulate_detection_exposure(union, step_dt)
 
     def _stl_pending_events_by_robot(now_t, robot_ids=None):
         """Collect pending committed deterrence completions visible to all planners.
@@ -6656,7 +6916,9 @@ def run_simulation_frames_persistent(
         planner_eta_at_apply = 1.0
         if bool(enable_habituation) and cell_id is not None and mode_idx is not None:
             eta_at_apply = truth_hab.effectiveness(cell_id, mode_idx)
-            if bool(stl_forecast_correction):
+            if bool(stl_forecast_correction) or consistent_estimator:
+                # Consistent estimator: q_hat is always the planner effectiveness
+                # just before depletion, mirroring the truth's eta_at_apply.
                 planner_eta_at_apply = planner_hab.effectiveness(cell_id, mode_idx)
             _apply_habituation_update(truth_hab, cell_id, mode_idx, truth_habituation_update_model)
             _apply_habituation_update(planner_hab, cell_id, mode_idx, planner_habituation_update_model)
@@ -6692,8 +6954,34 @@ def run_simulation_frames_persistent(
             if bool(stl_forecast_correction)
             else feedback_beta
         )
-        if enable_intervention_feedback:
-            nonlocal step_intervention_feedback_applied
+        nonlocal step_intervention_feedback_applied
+        if enable_intervention_feedback and consistent_estimator:
+            step_intervention_feedback_applied += 1
+            # Same mapping as the truth (incl. direct_detection -> default
+            # triple), with the planner's parameters; amplitude q_hat * beta.
+            _, p_beta_u, p_sigma_u, p_omega_u = _resolve_planner_deterrence_event_params(
+                mode_label,
+                params,
+                planner_deterring_modes=planner_deterring_modes,
+                use_mode_dependent_truth_suppression=bool(use_mode_dependent_truth_suppression),
+                planner_beta=planner_beta,
+                planner_sigma=planner_sigma,
+                planner_omega=planner_omega,
+            )
+            planner_amplitude = float(planner_eta_at_apply) * float(p_beta_u)
+            if centralized_predictive_topology_enabled and global_predictive_model is not None:
+                global_predictive_model.advance_to(float(now_t))
+                global_predictive_model.add_intervention_event(
+                    task_row["x"], task_row["y"], weight=planner_amplitude,
+                    sigma=p_sigma_u, omega_inhib=p_omega_u, mode=mode_label,
+                    action_id=action_id, t=float(now_t),
+                )
+            bus.broadcast_intervention(
+                x=float(task_row["x"]), y=float(task_row["y"]), t=float(now_t),
+                amplitude=planner_amplitude, sigma=p_sigma_u, omega=p_omega_u,
+                mode=mode_label, action_id=action_id, source_id=rid,
+            )
+        elif enable_intervention_feedback:
             step_intervention_feedback_applied += 1
             if centralized_predictive_topology_enabled and global_predictive_model is not None:
                 global_predictive_model.advance_time(float(now_t) - float(global_predictive_model.t_now))
@@ -6895,6 +7183,8 @@ def run_simulation_frames_persistent(
                     else:
                         truth_suppressed_events += 1
                         _record_truth_window_event(te, True)
+            if consistent_estimator:
+                _consistent_accumulate_exposure(dt)
             t_w += dt
 
         # Reset public-facing/metrics buffers so the scored run starts clean at t=0.
@@ -7478,8 +7768,17 @@ def run_simulation_frames_persistent(
         )
 
         # 5) Advance SESTPP time
-        for rob in robots.values():
-            rob.advance_time(dt)
+        if consistent_estimator:
+            # Background exposure over [t, t + dt] with the current coverage,
+            # then advance every planner model to the next step time.
+            _consistent_accumulate_exposure(dt)
+            for rob in robots.values():
+                rob.m.advance_to(float(t) + float(dt))
+            if global_predictive_model is not None:
+                global_predictive_model.advance_to(float(t) + float(dt))
+        else:
+            for rob in robots.values():
+                rob.advance_time(dt)
 
         # 5b) Forecast quality metrics (per scenario/per baseline run)
         forecast_last_eval_t, step_forecast = run_forecast_evaluation_stage(

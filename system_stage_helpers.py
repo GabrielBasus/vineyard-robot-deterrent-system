@@ -331,7 +331,11 @@ def run_truth_generation_stage(
 
                         if owner is not None:
                             boundary_events = robots[owner].ingest_detection(x, y, now_t)
-                            bus.send_boundary_events(boundary_events, source_id=owner)
+                            publish = getattr(bus, "publish_detection", None)
+                            if publish is not None:
+                                publish(boundary_events, x, y, now_t, source_id=owner)
+                            else:
+                                bus.send_boundary_events(boundary_events, source_id=owner)
                             taskgen.on_detection(owner, x, y, now_t)
                             pending_event_onsets.append(
                                 {"x": float(x), "y": float(y), "t": float(now_t), "responded": False}

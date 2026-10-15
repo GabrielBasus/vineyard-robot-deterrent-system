@@ -149,8 +149,24 @@ class Robot:
             return 0.0
         return float(self.dispatch_time_tracker.predictive_share(now_t))
 
+    @property
+    def estimator_mode(self) -> str:
+        """'legacy' or 'consistent', read from the attached intensity model."""
+        return str(getattr(self.m, "estimator_mode", "legacy"))
+
     def ingest_detection(self, x: float, y: float, t: float):
-        """Update SESTPP & history; return boundary events only."""
+        """Update SESTPP & history; return boundary events only.
+
+        In the consistent estimator mode the detection is stamped at its own
+        time and no legacy boundary events are returned: the EventBus relays
+        detections by footprint (``EventBus.publish_detection``).
+        """
+        if self.estimator_mode == "consistent":
+            self.m.advance_to(t)
+            if point_in_polygon(x, y, self.zone_polygon):
+                self.m.add_local_event(x, y, t=t)
+                self.recent_events.append((x, y, t))
+            return []
         self.m.advance_time(t - self.m.t_now)
 
         # if inside my zone, learn & retain
@@ -170,6 +186,10 @@ class Robot:
         return boundary_events
 
     def ingest_boundary_event(self, x, y, t, weight, sigma=None, omega=None):
+        if self.estimator_mode == "consistent":
+            self.m.advance_to(t)
+            self.m.add_cross_event(x, y, weight=weight, t=t)
+            return
         self.m.advance_time(t - self.m.t_now)
         self.m.add_cross_event(x, y, weight=weight, sigma=sigma, omega=omega)
 
@@ -186,6 +206,14 @@ class Robot:
         beta=None,
         action_id=None,
     ):
+        if self.estimator_mode == "consistent":
+            # weight is the full suppression amplitude q_hat * beta.
+            self.m.advance_to(t)
+            self.m.add_intervention_event(
+                x, y, weight=weight, sigma=sigma, omega_inhib=omega_inhib,
+                mode=mode, action_id=action_id, t=t,
+            )
+            return
         self.m.advance_time(t - self.m.t_now)
         self.m.add_intervention_event(x, y, weight=weight, sigma=sigma, omega_inhib=omega_inhib, mode=mode)
 
