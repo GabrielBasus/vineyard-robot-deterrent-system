@@ -2414,6 +2414,25 @@ def run_simulation_frames_persistent(
     planner_mu_init=None,           # prior background rate per m^2 per s per unit w (truth: mu_true)
     planner_mu_prior_count=5.0,     # Gamma prior pseudo-count for the background estimate
     planner_background_time_multiplier=None,  # callable m(t); None = constant 1 (truth has none)
+    # Decision procedure. "legacy" leaves every code path unchanged. "plan" runs the
+    # improvement plan's procedure (habituation_stl/plan_procedure.py): the executed
+    # system is B5 plus predictive deviations admitted by Monte Carlo continuation
+    # rollouts (pi_0 = B5), service feasibility and U(a) > plan_eps_gate.
+    planner_procedure="legacy",
+    plan_n_scenarios=16,            # Monte Carlo scenarios per evaluation (common random numbers)
+    plan_horizon_s=None,            # rollout horizon H; None = forecast_horizon_s
+    plan_service_protection=True,   # pending-service feasibility (plan variant E; False = variant D)
+    plan_protect_late_tasks=True,   # optional condition C_j(pi_a) <= C_j(pi_0) for baseline-late tasks
+    plan_eps_gate=0.0,              # admission margin eps_gate
+    plan_E_high=None,               # timed recovery (Plan Eq. 4): all three given = on
+    plan_E_low=None,
+    plan_T_response_s=None,
+    plan_compute_budget_s=None,     # wall-clock budget per decision; None = task_replan_period_s
+    plan_pool_workers=None,         # rollout worker processes; None = os.cpu_count() - 1
+    plan_oracle_fraction=0.25,      # fraction of decisions also evaluated on a truth snapshot
+    plan_log_path=None,             # per-decision JSONL records
+    plan_seed=None,                 # decision-seed root; None = seed
+    plan_engine=None,               # test hook: object with evaluate(...) replacing the rollout engine
     report_metrics_end=True,
     emit_rejected_model_det_debug=False,
     emit_planning_diagnostics=False,
@@ -6663,6 +6682,10 @@ def run_simulation_frames_persistent(
 
     def _is_model_deterring_persist_locked(task_row, now_t):
         """Return whether a model-scored deterrence task is still protected by persistence rules."""
+        if task_row.get("_forced_first") and str(task_row.get("state", "")).strip().lower() == "active":
+            # Admitted plan deviation (planner_procedure="plan"): executed first by its robot,
+            # exactly as the rollout engine models it (scenario_rollout R12).
+            return True
         if not bool(protect_active_model_deterring_persistence):
             return False
         if not _is_active_model_deterring(task_row):
@@ -6794,6 +6817,8 @@ def run_simulation_frames_persistent(
             if _task_stream(task_row) != "predictive":
                 continue
             if task_row.get("started_hold") is not None:
+                continue
+            if task_row.get("_forced_first"):
                 continue
             rid = str(task_row.get("assigned_primary", "")).strip()
             eta_s = None
@@ -7397,6 +7422,54 @@ def run_simulation_frames_persistent(
     t_end = t_start + float(T_end)
     last_replan = -1e9
 
+    # ------------------------------------------------------------------------
+    # Plan decision procedure (planner_procedure="plan")
+    # ------------------------------------------------------------------------
+    planner_procedure = str(planner_procedure or "legacy").strip().lower()
+    if planner_procedure not in ("legacy", "plan"):
+        raise ValueError(f"planner_procedure must be 'legacy' or 'plan', got: {planner_procedure!r}")
+    plan_proc = None
+    if planner_procedure == "plan":
+        # The executed fallback must be exactly the B5 decision rule the rollout engine
+        # mirrors (habituation_stl/scenario_rollout.py), so only that pipeline is accepted.
+        _plan_requirements = {
+            "dispatch_policy == 'unc'": dispatch_policy == "unc",
+            "motion_planning_mode == 'lane_projection'": motion_planning_mode == "lane_projection",
+            "motion_orchestration_mode == 'local'": motion_orchestration_mode == "local",
+            "predictive_planning_topology == 'mixed'": predictive_planning_topology == "mixed",
+            "not defer_predictive_action_selection": not bool(defer_predictive_action_selection),
+            "preassignment_selection_policy == 'pass_through'": (
+                (not bool(use_split_task_extraction_selection_pipeline))
+                or preassignment_selection_policy == "pass_through"),
+            "use_ground_truth": bool(use_ground_truth),
+            "not idle_roam_enabled": not bool(idle_roam_enabled),
+            "truth_background_timing == 'step_start'": truth_background_timing == "step_start",
+        }
+        _plan_bad = [k for k, ok in _plan_requirements.items() if not ok]
+        if _plan_bad:
+            raise ValueError("planner_procedure='plan' requires " + ", ".join(_plan_bad))
+        from habituation_stl.plan_procedure import PlanConfig, PlanProcedure
+        plan_proc = PlanProcedure(
+            PlanConfig(
+                n_scenarios=int(plan_n_scenarios),
+                horizon_s=float(forecast_horizon_s if plan_horizon_s is None else plan_horizon_s),
+                reactive_deadline_s=float(reactive_override_slack_s),
+                service_protection=bool(plan_service_protection),
+                protect_late_tasks=bool(plan_protect_late_tasks),
+                eps_gate=float(plan_eps_gate),
+                reservation_fraction=float(reservation_fraction),
+                E_high=(None if plan_E_high is None else float(plan_E_high)),
+                E_low=(None if plan_E_low is None else float(plan_E_low)),
+                T_response_s=(None if plan_T_response_s is None else float(plan_T_response_s)),
+                compute_budget_s=float(task_replan_period_s if plan_compute_budget_s is None else plan_compute_budget_s),
+                pool_workers=(None if plan_pool_workers is None else int(plan_pool_workers)),
+                oracle_fraction=float(plan_oracle_fraction),
+                log_path=plan_log_path,
+                seed=int(seed if plan_seed is None else plan_seed) if (seed is not None or plan_seed is not None) else 0,
+            ),
+            engine=plan_engine,
+        )
+
     def _task_intensity_score(tr):
         """Estimate local forecast intensity at a task location."""
         x = tr.get("x", float("nan"))
@@ -7552,11 +7625,17 @@ def run_simulation_frames_persistent(
         # --------------------------------------------------------------------
         truth_step = _run_truth_generation_algorithm(t)
         _expire_infeasible_predictive_tasks(t)
+        if plan_proc is not None and plan_proc.cfg.timed_recovery:
+            plan_proc.monitor(locals())
 
         # --------------------------------------------------------------------
         # Stage 3: Periodic planning, task generation, and dispatch
         # --------------------------------------------------------------------
         if (t - last_replan) >= task_replan_period_s:
+            if plan_proc is not None:
+                # Plan Sec. 5: decide on the frozen state the B5 dispatcher is about to see,
+                # then let B5 replan with the admitted deviations already committed.
+                active_tasks.extend(plan_proc.decide(locals()))
             _process_near_goal_model_deterring_before_replan(t)
             # Drop patrolling tasks that are close to recent deterrences.
             # Keep active deterring tasks so dispatched actions can complete.
@@ -7615,7 +7694,19 @@ def run_simulation_frames_persistent(
                 command_type = "move" if goal[rid] is not None else "idle"
                 assigned_candidates = []
                 if dispatch_policy == "unc":
-                    if preempt_deterring_goals:
+                    forced_task = None
+                    if plan_proc is not None:
+                        # An admitted deviation is executed first (scenario_rollout._Sim._motion).
+                        for tr in active_tasks:
+                            if (tr.get("_forced_first") and tr.get("assigned_primary") == rid
+                                    and tr.get("state") == "active"):
+                                forced_task = tr
+                                break
+                        if forced_task is not None and loiter_until[rid] < t:
+                            goal[rid] = (float(forced_task["x"]), float(forced_task["y"]))
+                            command_source = "plan_deviation"
+                            command_type = "move"
+                    if preempt_deterring_goals and forced_task is None:
                         # If an active deterring task exists for this robot, prioritize it over patrol goals.
                         det_candidates = [
                             tr for tr in active_tasks
@@ -8768,6 +8859,13 @@ def run_simulation_frames_persistent(
             "forecast_precision_at_k": float(np.mean(forecast_precision_vals)) if forecast_precision_vals else float("nan"),
             "forecast_lead_time_s": float(np.mean(forecast_lead_times)) if forecast_lead_times else float("nan"),
         }
+        if plan_proc is not None:
+            if final_step and plan_proc.summary is None:
+                plan_proc.finalize(exposure_event_log=list(exposure_event_log), t_end=float(t_end))
+            _plan_metrics = dict(plan_proc.summary) if plan_proc.summary is not None else {}
+            _plan_metrics["planner_procedure"] = "plan"
+            metrics.update(_plan_metrics)
+            final_metrics.update(_plan_metrics)
         completed_this_step = completed_tasks[step_completed_before:]
         completed_patrolling_this_step = int(
             sum(

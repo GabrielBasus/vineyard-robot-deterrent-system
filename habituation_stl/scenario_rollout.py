@@ -79,7 +79,7 @@ import sys
 import time
 import uuid
 from collections import deque
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, wait
 from dataclasses import dataclass, field, fields
 from typing import Any, Callable, Optional, Sequence
 
@@ -174,7 +174,16 @@ B5_RESIDUAL_DIFFERENCES = (
     "from age pruning, predictive expiry and goal preemption until it completes "
     "(engine rule, not a B5 rule).  If the robot is holding at t, the hold finishes first.",
     "R13 Planner-model mu EMA (SESTPP.add_local_event bg_ema) is applied only through the "
-    "robots' own estimator objects; the 'legacy' world form ignores it.",
+    "robots' own estimator objects; the 'legacy' world form ignores it.  With "
+    "estimator_mode='consistent' the robots' estimators are advanced exactly as in the "
+    "simulator (footprint relay of detections and interventions, q_hat*beta planner "
+    "amplitudes, per-step background exposure accumulation then advance_to).",
+    "R14 Decision snapshots (start_stage='replan', decision_snapshot_from_sim_locals) are the "
+    "planner's belief: the world's background, excitation parents, suppression terms and cue "
+    "parameters come from the robots' estimators, so the forecast differs from the truth by "
+    "the planner's model error (detection-thinned parents, the estimated mu_hat in the "
+    "estimator's dA density convention, nominal planner parameters).  This difference is "
+    "measured by the oracle evaluations, not assumed small.",
 )
 
 
@@ -311,6 +320,18 @@ class B5Config:
     planner_habituation_update_model: str = "multiplicative"
     direct_detection_habituation_mode: str = "laser"
     dispatch_policy: str = "unc"
+    # planner intensity estimator of the robots (DeterrentSystem estimator_mode).
+    # "consistent" mirrors the footprint relay of detections and interventions
+    # (EventBus.publish_detection / broadcast_intervention, DeterrentSystem.py:197-243),
+    # the planner-parameter feedback amplitude q_hat * beta (DeterrentSystem.py:7122-7147)
+    # and the per-step background-exposure accumulation (DeterrentSystem.py:7947-7954).
+    estimator_mode: str = "legacy"
+    consistent_footprint_sigmas: float = 3.0
+    planner_beta: float = 0.25
+    planner_sigma: float = 12.0
+    planner_omega: float = 600.0
+    planner_deterring_modes: Optional[dict] = None
+    use_mode_dependent_truth_suppression: bool = True
 
     @classmethod
     def from_sim_locals(cls, L: dict) -> "B5Config":
@@ -329,6 +350,7 @@ class B5Config:
             if src in L:
                 kw[f.name] = L[src]
         cfg = cls(**kw)
+        cfg.estimator_mode = str(cfg.estimator_mode or "legacy").strip().lower()
         if cfg.dispatch_policy != "unc":
             raise ValueError("B5 continuation requires dispatch_policy='unc'")
         return cfg
@@ -432,7 +454,32 @@ class RolloutSnapshot:
     cfg: B5Config
     pending_reactive: list = field(default_factory=list)
     planner_weight_grid: Optional[np.ndarray] = None   # value_weight at planner-model nodes
-    start_stage: str = "truth"          # first stage executed: "truth" of step t0+dt
+    # "truth": state at the end of step t0, the rollout starts with the truth stage of t0+dt.
+    # "replan": state inside step t0 after its truth and expiry stages, exactly where the
+    # simulator's Stage 3 replans (DeterrentSystem.py main loop); the rollout starts with
+    # the replan stage of t0, then motion and model advance of t0, then step t0+dt.
+    start_stage: str = "truth"
+    # Optional extensions (defaults reproduce the original engine exactly):
+    # robot id -> polygons the robot models (consistent-estimator footprint relay)
+    robot_region_polys: Optional[dict] = None
+    # complete world suppression store (dicts with x, y, t, eta, beta, sigma, omega);
+    # None means the world reads recent_deterrences (the original behaviour)
+    world_suppression: Optional[list] = None
+    # world cue effectiveness, when it differs from the policy's (oracle snapshots);
+    # None means the world uses ``habituation`` (the planner copy)
+    world_habituation: Optional[HabituationField] = None
+    world_habituation_update_model: Optional[str] = None
+    # timed-recovery obligations tracked along every rollout:
+    # dicts {"id", "cell", "deadline_t", "e_low"}
+    obligations: list = field(default_factory=list)
+
+    def __getstate__(self):
+        state = dict(self.__dict__)
+        state.pop("_sim_template", None)    # per-process copy template (see _sim_state_copy)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
     @property
     def xs(self):
@@ -459,6 +506,42 @@ class Candidate:
 
 
 NOOP = Candidate(robot_id=None, label="noop")
+
+
+def _is_forced(tr) -> bool:
+    """A forced-first task: the evaluated candidate or an admitted (committed) deviation.
+
+    Its robot drives to it first (engine rule R12): exempt from age pruning,
+    predictive expiry and goal preemption until it completes.
+    """
+    return bool(tr.get("_rollout_candidate") or tr.get("_forced_first"))
+
+
+def forced_task_row(cand: Candidate, *, t0: float, task_id: int, deterring_modes: dict, tau_service_s: float,
+                    origin: str = "plan_deviation") -> dict:
+    """The task row of an admitted predictive deviation (identical in the simulator and the engine)."""
+    row = {
+        "id": int(task_id),
+        "robot_id": str(cand.robot_id),
+        "type": "deterring",
+        "x": float(cand.x),
+        "y": float(cand.y),
+        "time": float(t0),
+        "origin": str(origin),
+        "mode": str(cand.mode),
+        "score": 0.0,
+        "utility": 0.0,
+        "support": 0,
+        "assigned_primary": str(cand.robot_id),
+        "assigned_secondary": None,
+        "state": "active",
+        "started_hold": None,
+        "t_assigned": float(t0),
+        "_forced_first": True,
+        "_plan_deviation": True,
+    }
+    row["action"] = task_action(row, deterring_modes=deterring_modes, default_service_time_s=float(tau_service_s))
+    return row
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +690,13 @@ def _sample_scenario_tree(snap: RolloutSnapshot, seed: int, scenario: int) -> _S
     if legacy:
         rate = rate * node_area
     m_max = float(fc.bg_time_profile_max) if fc.bg_time_profile is not None else 1.0
+    legacy_tm = None
+    if legacy:
+        # the legacy world's background is mu * sestpp_time_multiplier(t) * m(t)
+        # (_World.begin_step), so the dominating rate and the time thinning use it too
+        legacy_tm = np.array([sestpp_time_multiplier(t0 + k * dt) * _profile_value(fc.bg_time_profile, t0 + k * dt)
+                              for k in range(1, n_steps + 1)]) if n_steps > 0 else np.zeros(0)
+        m_max = float(legacy_tm.max()) if legacy_tm.size else 1.0
     lam_dom = float(rate.sum()) * m_max
     if lam_dom > 0.0 and n_steps > 0:
         counts = rng.poisson(lam_dom * dt, n_steps)
@@ -620,7 +710,10 @@ def _sample_scenario_tree(snap: RolloutSnapshot, seed: int, scenario: int) -> _S
         steps = np.repeat(np.arange(1, n_steps + 1), counts)
         tt = t0 + steps * dt
         keep = np.ones(n_tot, bool)
-        if fc.bg_time_profile is not None:
+        if legacy:
+            u_tp = rng.random(n_tot)
+            keep = u_tp <= legacy_tm[steps - 1] / m_max
+        elif fc.bg_time_profile is not None:
             u_tp = rng.random(n_tot)
             m_vals = np.array([_profile_value(fc.bg_time_profile, ti) for ti in tt]) if n_tot else np.zeros(0)
             keep = u_tp <= m_vals / m_max
@@ -940,6 +1033,28 @@ class _World:
         lam = np.clip(self.mu * sestpp_time_multiplier(t) * _profile_value(self.profile, t) + self.T - Itot, 0.0, None)
         return float(np.sum(np.where(self.mask, self.w_bg * lam, 0.0))) * self.node_area
 
+    def node_exposure_rate(self, t):
+        """Expected value-weighted event rate attributed to every node at time t.
+
+        Consistent form: [w_bg * r_n * m(t) + w_n * E_n(t)] * exp(-S_n(t)) with the
+        excitation rate E = alpha/omega * Ky^T A Kx (the clipped-normal cell masses
+        of the accepted sources in A, decayed to the current state).  Legacy form:
+        w_bg * lam_n * node_area.  Summing over a cell's nodes gives the cell's
+        forecast exposure e_z (Plan Eq. 4); summing over the region gives
+        residual_rate.
+        """
+        if self.form == "consistent":
+            eS = np.exp(-self.S_grid(t))
+            m = _profile_value(self.profile, t)
+            out = self.w_bg * self.rate_bg * m
+            if self.alpha > 0:
+                E = (self.alpha / max(self.omega, 1e-9)) * (self.Ky.T @ self.A @ self.Kx)
+                out = out + self.w_node * E
+            return out * eS
+        Itot = sum((g for g, _ in self.I.values()), np.zeros((self.ny, self.nx)))
+        lam = np.clip(self.mu * sestpp_time_multiplier(t) * _profile_value(self.profile, t) + self.T - Itot, 0.0, None)
+        return self.w_bg * lam * self.node_area
+
     @property
     def J(self):
         return self.J_bg + self.J_exc + self.J_sched
@@ -953,6 +1068,34 @@ def _prune_taskgen(tg, t0):
     tg._rows = list(tg._rows[-200:])
     tg._keys = {k for k in tg._keys if float(k[4]) >= float(t0) - 1.0}
     return tg
+
+
+def _sim_template_signature(snap):
+    return (id(snap.robots), id(snap.active_tasks), len(snap.active_tasks), id(snap.completed_tasks),
+            len(snap.completed_tasks), id(snap.taskgen), len(snap.taskgen._rows), len(snap.taskgen._keys),
+            id(snap.recent_deterrences), len(snap.recent_deterrences), id(snap.world_suppression),
+            -1 if snap.world_suppression is None else len(snap.world_suppression))
+
+
+def _sim_state_copy(snap):
+    """Fresh copies of the snapshot's mutable state for one (policy, scenario) simulation.
+
+    Equivalent to deep-copying each part (robots' planners, profiles, active and
+    completed tasks, the pruned TaskGenerator, recent deterrences, the world
+    suppression store); the parts are pickled once per snapshot object and each
+    simulation unpickles its own copy.  The template is rebuilt if a part is
+    replaced or resized, and it is never pickled with the snapshot.
+    """
+    sig = _sim_template_signature(snap)
+    ent = snap.__dict__.get("_sim_template")
+    if ent is None or ent[0] != sig:
+        parts = ({rs.rid: rs.planner for rs in snap.robots}, {rs.rid: rs.profile for rs in snap.robots},
+                 snap.active_tasks, snap.completed_tasks, _prune_taskgen(snap.taskgen, snap.t0),
+                 list(snap.recent_deterrences),
+                 None if snap.world_suppression is None else list(snap.world_suppression))
+        ent = (sig, pickle.dumps(parts, protocol=pickle.HIGHEST_PROTOCOL))
+        snap.__dict__["_sim_template"] = ent
+    return pickle.loads(ent[1])
 
 
 class _Sim:
@@ -970,23 +1113,35 @@ class _Sim:
         self.deterring_modes = snap.deterring_modes
         self.tau = float(cfg.tau_service_s)
         self.rids = [rs.rid for rs in snap.robots]
-        self.robots = {rs.rid: copy.deepcopy(rs.planner) for rs in snap.robots}
-        self.profiles = {rs.rid: copy.deepcopy(rs.profile) for rs in snap.robots}
+        # Independent copies of every mutable part of the snapshot.  They are taken
+        # from one pickled template per snapshot (pickle.loads is several times
+        # faster than copy.deepcopy and yields the same independent objects).
+        (robots_c, profiles_c, active_c, completed_c, taskgen_c, recent_c, store_c) = _sim_state_copy(snap)
+        self.robots = robots_c
+        self.profiles = profiles_c
         self.pose = {rs.rid: (float(rs.pose[0]), float(rs.pose[1])) for rs in snap.robots}
         self.goal = {rs.rid: (None if rs.goal is None else (float(rs.goal[0]), float(rs.goal[1]))) for rs in snap.robots}
         self.loiter_until = {rs.rid: float(rs.loiter_until) for rs in snap.robots}
         self.zone = {rs.rid: rs.zone_polygon for rs in snap.robots}
-        self.active_tasks = copy.deepcopy(snap.active_tasks)
-        self.completed_tasks = copy.deepcopy(snap.completed_tasks)
+        self.active_tasks = active_c
+        self.completed_tasks = completed_c
         self.consumed_task_keys = set(snap.consumed_task_keys)
-        self.taskgen = _prune_taskgen(snap.taskgen, snap.t0)
-        self.recent_deterrences = deque(copy.deepcopy(snap.recent_deterrences), maxlen=200)
+        self.taskgen = taskgen_c
+        self.recent_deterrences = deque(recent_c, maxlen=200)
+        # World suppression store: the B5-facing deque (original behaviour) or a
+        # separate complete store (planner / oracle snapshots).
+        if snap.world_suppression is None:
+            self.world_store = self.recent_deterrences
+        else:
+            self.world_store = store_c
         self.model_det_budget = {rid: deque(snap.model_deterring_by_robot.get(rid, [])) for rid in self.rids}
         self.next_tid = int(snap.next_tid)
         self.last_replan = float(snap.last_replan)
         self.bus_last = dict(snap.bus_last_intervention_key_t)
         self.hab = snap.habituation.copy()
-        self.world = _World(snap, self.recent_deterrences)
+        self.world_hab = None if snap.world_habituation is None else snap.world_habituation.copy()
+        self.consistent = str(getattr(cfg, "estimator_mode", "legacy")) == "consistent"
+        self.world = _World(snap, self.world_store)
         from TaskGenerator import TaskAssigner
         self.assigner = TaskAssigner(
             robots_state=self.robots,
@@ -1016,7 +1171,25 @@ class _Sim:
         self.predictive_completed = 0
         self.patrol_completed = 0
         self.candidate_completed_t = math.inf
+        self.forced_completed = {}    # id of a forced-first task -> completion time
         self.gen_log = None           # optional list: (t, rid, preventive candidates) per replan
+        self.seed_log = None          # optional list: (t, rid, registered preventive seeds) per replan
+        # timed-recovery obligations: cell node masks and first satisfaction times
+        self.obligations = list(getattr(snap, "obligations", None) or [])
+        self.obl_sat = {}
+        self.obl_min_e = {}
+        if self.obligations:
+            XX, YY = np.meshgrid(snap.xs, snap.ys, indexing="xy")
+            owner = np.full(XX.shape, -1, np.int64)
+            for cid, poly in enumerate(snap.hab_cell_polys):
+                if not poly:
+                    continue
+                ins = points_in_polygon(XX, YY, poly) & (owner < 0)
+                owner[ins] = cid
+            self._cell_owner = owner
+            for ob in self.obligations:
+                self.obl_sat[ob["id"]] = math.inf
+                self.obl_min_e[ob["id"]] = math.inf
         if not candidate.is_noop:
             self._inject_candidate(candidate)
 
@@ -1179,7 +1352,7 @@ class _Sim:
 
     def _persist_locked(self, tr, t):
         """DeterrentSystem.py:6243 _is_model_deterring_persist_locked (+ candidate exemption)."""
-        if tr.get("_rollout_candidate") and str(tr.get("state", "")).strip().lower() == "active":
+        if _is_forced(tr) and str(tr.get("state", "")).strip().lower() == "active":
             return True
         c = self.cfg
         if not bool(c.protect_active_model_deterring_persistence):
@@ -1255,6 +1428,10 @@ class _Sim:
             raise KeyError(f"candidate robot {rid!r} not in snapshot")
         if cand.mode not in self.deterring_modes:
             raise KeyError(f"candidate mode {cand.mode!r} not in deterring_modes")
+        for tr in self.active_tasks:
+            if (_is_forced(tr) and str(tr.get("assigned_primary")) == rid
+                    and str(tr.get("state", "")).strip().lower() == "active"):
+                raise ValueError(f"robot {rid!r} already executes a forced-first task (id {tr.get('id')})")
         row = {
             "id": -1,
             "robot_id": rid,
@@ -1315,12 +1492,22 @@ class _Sim:
         """DeterrentSystem.py:3520-3576 (_process_truth_event, detected branch)."""
         self.detections += 1
         b = self.robots[owner].ingest_detection(x, y, t)
-        for ev in b:
-            rid = ev["target_robot"]
-            if rid in self.robots and rid != owner:
-                self.robots[rid].ingest_boundary_event(
-                    x=ev["x"], y=ev["y"], t=ev["t"], weight=ev.get("weight", 0.35),
-                    sigma=ev.get("sigma"), omega=ev.get("omega"))
+        if self.consistent:
+            # EventBus.publish_detection, consistent mode (DeterrentSystem.py:197-211)
+            for rid in self.rids:
+                if rid == owner:
+                    continue
+                rob = self.robots[rid]
+                if not self._region_affected(rid, x, y, float(getattr(rob.m, "sigma", 0.0))):
+                    continue
+                rob.ingest_boundary_event(x=float(x), y=float(y), t=float(t), weight=1.0)
+        else:
+            for ev in b:
+                rid = ev["target_robot"]
+                if rid in self.robots and rid != owner:
+                    self.robots[rid].ingest_boundary_event(
+                        x=ev["x"], y=ev["y"], t=ev["t"], weight=ev.get("weight", 0.35),
+                        sigma=ev.get("sigma"), omega=ev.get("omega"))
         if bool(self.cfg.enable_direct_detection_tasks):
             refresh = self._find_refreshable(x, y, t)
             if refresh is None:
@@ -1384,7 +1571,7 @@ class _Sim:
         for tr in list(self.active_tasks):
             if str(tr.get("state", "")).strip().lower() != "active":
                 continue
-            if tr.get("_rollout_candidate"):
+            if _is_forced(tr):
                 continue
             if ds._task_stream(tr) != "predictive" or tr.get("started_hold") is not None:
                 continue
@@ -1685,11 +1872,11 @@ class _Sim:
                 pass
             else:
                 cand_tr = None
-                if self.candidate_task_id is not None and str(self.candidate.robot_id) == rid:
-                    for tr in self.active_tasks:
-                        if tr.get("id") == self.candidate_task_id and tr.get("state") == "active":
-                            cand_tr = tr
-                            break
+                for tr in self.active_tasks:
+                    if (_is_forced(tr) and tr.get("assigned_primary") == rid
+                            and tr.get("state") == "active"):
+                        cand_tr = tr
+                        break
                 if cand_tr is not None and self.loiter_until[rid] < t:
                     self.goal[rid] = (float(cand_tr["x"]), float(cand_tr["y"]))
                 if bool(c.preempt_deterring_goals) and cand_tr is None:
@@ -1766,6 +1953,8 @@ class _Sim:
         stream = ds._task_stream(tr)
         if tr.get("_rollout_candidate"):
             self.candidate_completed_t = float(t)
+        if _is_forced(tr):
+            self.forced_completed[tr.get("id")] = float(t)
         if stream == "reactive":
             self.reactive_completed += 1
             for k in (tr.get("_member_task_keys") or [self._buffer_key(tr)]):
@@ -1787,21 +1976,31 @@ class _Sim:
                 cell_id = cid
                 break
         eta_apply = 1.0
+        eta_world = 1.0
         if bool(c.enable_habituation) and cell_id is not None and mode_idx is not None:
             eta_apply = self.hab.effectiveness(cell_id, mode_idx)
+            eta_world = eta_apply
+            if self.world_hab is not None:
+                eta_world = self.world_hab.effectiveness(cell_id, mode_idx)
+                _ds()._apply_habituation_update(
+                    self.world_hab, cell_id, mode_idx,
+                    self.snap.world_habituation_update_model or c.planner_habituation_update_model)
             _ds()._apply_habituation_update(self.hab, cell_id, mode_idx, c.planner_habituation_update_model)
         action_id = int(tr.get("id", -1))
-        self.recent_deterrences.append({
+        entry = {
             "x": float(tr["x"]), "y": float(tr["y"]), "t": float(t), "mode": mode_label,
             "source": self._deterring_source(tr), "action_id": action_id,
             "beta": float(wc.beta), "sigma": float(wc.sigma), "omega": float(wc.omega),
-            "eta": float(eta_apply), "habituation_mode": hab_label,
-        })
+            "eta": float(eta_world), "habituation_mode": hab_label,
+        }
+        self.recent_deterrences.append(entry)
+        if self.world_store is not self.recent_deterrences:
+            self.world_store.append(dict(entry))
         self.world.on_deterrence_added()
         self.interventions.append({
             "t": float(t), "robot": rid, "x": float(tr["x"]), "y": float(tr["y"]), "mode": mode_label,
-            "source": self._deterring_source(tr), "eta": float(eta_apply),
-            "candidate": bool(tr.get("_rollout_candidate", False)),
+            "source": self._deterring_source(tr), "eta": float(eta_world), "eta_planner": float(eta_apply),
+            "candidate": bool(tr.get("_rollout_candidate", False)), "forced": bool(_is_forced(tr)),
         })
         m = self.robots[rid].m
         fb_beta = float(params.get("beta", 1.0))
@@ -1809,7 +2008,19 @@ class _Sim:
         fb_sigma = float(params.get("sigma", m.sigma)) * float(c.model_feedback_sigma_scale)
         eff_beta = float(eta_apply) * fb_beta if bool(c.stl_forecast_correction) else fb_beta
         self.world.add_legacy_inhibition(float(tr["x"]), float(tr["y"]), mode_label, eff_beta, fb_sigma, fb_omega)
-        if bool(c.enable_intervention_feedback):
+        if bool(c.enable_intervention_feedback) and self.consistent:
+            # DeterrentSystem.py:7122-7147: planner parameters, amplitude q_hat * beta,
+            # footprint broadcast to the executing robot and every affected robot.
+            _, p_beta, p_sigma, p_omega = _ds()._resolve_planner_deterrence_event_params(
+                mode_label, params,
+                planner_deterring_modes=c.planner_deterring_modes,
+                use_mode_dependent_truth_suppression=bool(c.use_mode_dependent_truth_suppression),
+                planner_beta=float(c.planner_beta), planner_sigma=float(c.planner_sigma),
+                planner_omega=float(c.planner_omega))
+            self._broadcast_intervention(
+                x=float(tr["x"]), y=float(tr["y"]), t=float(t), amplitude=float(eta_apply) * float(p_beta),
+                sigma=float(p_sigma), omega=float(p_omega), mode=mode_label, action_id=action_id, source_id=rid)
+        elif bool(c.enable_intervention_feedback):
             self.robots[rid].ingest_intervention_event(
                 tr["x"], tr["y"], t, weight=eff_beta, sigma=fb_sigma, omega_inhib=fb_omega,
                 mode=mode_label, beta=eff_beta, action_id=action_id)
@@ -1820,6 +2031,75 @@ class _Sim:
         self.active_tasks[:] = [x for x in self.active_tasks if x["id"] != tr["id"]]
         self.goal[rid] = None
         self.loiter_until[rid] = -1.0
+
+    # ------------------------------------------- consistent-estimator relay
+    def _region_affected(self, rid, x, y, sigma):
+        """EventBus.robot_region_affected (DeterrentSystem.py:183-195)."""
+        regions = self.snap.robot_region_polys
+        if regions is None:
+            return True
+        radius = float(self.cfg.consistent_footprint_sigmas) * max(float(sigma), 0.0)
+        for poly in regions.get(rid, []) or []:
+            if not poly:
+                continue
+            if point_in_polygon(float(x), float(y), poly):
+                return True
+            if point_to_poly_distance((float(x), float(y)), poly) <= radius:
+                return True
+        return False
+
+    def _broadcast_intervention(self, *, x, y, t, amplitude, sigma, omega, mode, action_id, source_id):
+        """EventBus.broadcast_intervention (DeterrentSystem.py:213-243)."""
+        for rid in self.rids:
+            if rid != source_id and not self._region_affected(rid, x, y, sigma):
+                continue
+            self.robots[rid].ingest_intervention_event(
+                x, y, t, weight=float(amplitude), sigma=float(sigma), omega_inhib=float(omega),
+                mode=mode, beta=float(amplitude), action_id=action_id)
+
+    def _coverage_mask(self, rid, m):
+        """DeterrentSystem._detection_coverage_mask: own zone nodes within sensor range."""
+        zone = self.robots[rid].zone_polygon
+        if not zone:
+            return None
+        key = ("cov", rid, m.nx, m.ny)
+        if key not in self._zone_mask:
+            XX, YY = np.meshgrid(np.asarray(m.xs, float), np.asarray(m.ys, float), indexing="xy")
+            self._zone_mask[key] = (points_in_polygon(XX, YY, zone), XX, YY)
+        zmask, XX, YY = self._zone_mask[key]
+        px, py = self.pose[rid]
+        in_range = ((XX - float(px)) ** 2 + (YY - float(py)) ** 2) <= float(self.cfg.detect_range_m) ** 2
+        return zmask & in_range
+
+    def _advance_models(self, t):
+        """Stage 5 model advance after the motion stage of step t."""
+        dt = self.dt
+        if self.consistent:
+            # _consistent_accumulate_exposure(dt) then advance_to(t + dt) (DeterrentSystem.py:7947-7952)
+            for rid in self.rids:
+                rob = self.robots[rid]
+                mask = self._coverage_mask(rid, rob.m)
+                if mask is not None:
+                    rob.m.accumulate_detection_exposure(mask, dt)
+            for rid in self.rids:
+                self.robots[rid].m.advance_to(float(t) + float(dt))
+        else:
+            for rob in self.robots.values():
+                rob.advance_time(dt)
+
+    def _track_obligations(self, t):
+        if not self.obligations:
+            return
+        rate = self.world.node_exposure_rate(t)
+        for ob in self.obligations:
+            if t > float(ob["deadline_t"]) + 1e-9:
+                continue
+            e = float(np.sum(rate[self._cell_owner == int(ob["cell"])]))
+            oid = ob["id"]
+            if e < self.obl_min_e[oid]:
+                self.obl_min_e[oid] = e
+            if e <= float(ob["e_low"]) and not math.isfinite(self.obl_sat[oid]):
+                self.obl_sat[oid] = float(t)
 
     def _send_intervention_events(self, events, source_id):
         """DeterrentSystem.py:171 EventBus.send_intervention_events."""
@@ -1854,13 +2134,26 @@ class _Sim:
     def run(self):
         c = self.cfg
         dt = self.dt
+        if self.snap.start_stage == "replan":
+            # The truth and expiry stages of step t0 already ran in the simulator
+            # (the snapshot is taken at its Stage 3); finish step t0 here.
+            t = self.t0
+            if (t - self.last_replan) >= c.task_replan_period_s:
+                self._replan(t)
+            self._motion(t)
+            if self.model_advance == "per_step":
+                self._advance_models(t)
+            self.world.end_step()
         for k in range(1, self.n_steps + 1):
             t = self.t0 + k * dt
             # Stage 2: habituation recovery then truth events (DeterrentSystem.py:4742)
             if bool(c.enable_habituation):
                 self.hab.recover(dt)
+                if self.world_hab is not None:
+                    self.world_hab.recover(dt)
             self.world.begin_step(t)
             self._process_events(k, t)
+            self._track_obligations(t)
             self._expire_predictive(t)
             # Stage 3: replanning
             if (t - self.last_replan) >= c.task_replan_period_s:
@@ -1869,8 +2162,7 @@ class _Sim:
             self._motion(t)
             # Stage 5: advance robot estimators
             if self.model_advance == "per_step":
-                for rob in self.robots.values():
-                    rob.advance_time(dt)
+                self._advance_models(t)
             self.world.end_step()
         return self._result()
 
@@ -1914,6 +2206,9 @@ class _Sim:
             "predictive_completed": int(self.predictive_completed),
             "patrol_completed": int(self.patrol_completed),
             "candidate_completed_t": float(self.candidate_completed_t),
+            "forced_completed": dict(self.forced_completed),
+            "obligations": {oid: {"satisfied_t": float(self.obl_sat[oid]), "min_e": float(self.obl_min_e[oid])}
+                            for oid in self.obl_sat},
             "terminal": terminal,
         }
 
@@ -2204,6 +2499,9 @@ def _b5_periodic_patrolling(sim: _Sim, now_t: float):
                 for (bx, by, bs) in bpicks:
                     _register(bx, by, "model_border_hotspot", bs)
 
+        if sim.seed_log is not None:
+            sim.seed_log.append((float(now_t), rid, [dict(sd) for sd in seeds], list(modes)))
+
         patrol_cands = []
         if c.enable_predictive_patrol_tasks:
             for (hx, hy, hs) in picks:
@@ -2468,6 +2766,9 @@ def _run_task(args):
     ent = _POOL_CACHE.get(key)
     if ent is None:
         _POOL_CACHE.clear()
+        if isinstance(blob, str):          # path of a pickled snapshot (sent once per worker)
+            with open(blob, "rb") as fh:
+                blob = fh.read()
         ent = (pickle.loads(blob), {})
         _POOL_CACHE[key] = ent
     snap, trees = ent
@@ -2487,10 +2788,26 @@ class RolloutPool:
     each evaluate() call pay only for the rollouts themselves.
     """
 
+    _BLAS_ENV = ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS", "NUMEXPR_NUM_THREADS")
+
     def __init__(self, n_workers: Optional[int] = None):
         self.n_workers = int(n_workers or max(1, (os.cpu_count() or 2) - 1))
-        self.ex = ProcessPoolExecutor(max_workers=self.n_workers, initializer=_pool_worker_init)
-        list(self.ex.map(_pool_ping, range(self.n_workers * 2)))   # spawn and import now
+        # One BLAS thread per worker: the workers already use every core, and a
+        # multi-threaded BLAS on the small per-step products only oversubscribes
+        # (measured: S_grid 1.8 ms -> 0.05 ms per call).  Spawned workers inherit
+        # the environment at start-up, so it is set around the spawn only.
+        saved = {k: os.environ.get(k) for k in self._BLAS_ENV}
+        for k in self._BLAS_ENV:
+            os.environ[k] = "1"
+        try:
+            self.ex = ProcessPoolExecutor(max_workers=self.n_workers, initializer=_pool_worker_init)
+            list(self.ex.map(_pool_ping, range(self.n_workers * 2)))   # spawn and import now
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
     def close(self):
         self.ex.shutdown(wait=True)
@@ -2529,21 +2846,31 @@ class EvaluationResult:
     n_scenarios: int
 
 
+class EvaluationTimeout(RuntimeError):
+    """Raised by evaluate() when the wall-clock deadline passes before every rollout finished."""
+
+    def __init__(self, elapsed_s: float):
+        super().__init__(f"rollout evaluation exceeded its deadline after {elapsed_s:.3f} s")
+        self.elapsed_s = float(elapsed_s)
+
+
 def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scenarios: int = 16, seed: int = 0,
              *, n_workers: Optional[int] = None, reactive_deadline_s: float = 90.0,
              planner_model_advance: str = "per_step", pool: Optional["RolloutPool"] = None,
-             scenario_chunk: int = 8) -> EvaluationResult:
+             scenario_chunk: int = 8, deadline: Optional[float] = None) -> EvaluationResult:
     """Evaluate pi_0 (B5) and every candidate continuation with common random numbers.
 
     Returns per-scenario J_H, pending-task completion times (inf if not
     completed within H), new reactive tasks and their completions,
     interventions executed and terminal state, plus means and standard errors.
-    U standard errors are paired across scenarios.
+    U standard errors are paired across scenarios.  ``deadline`` is an absolute
+    ``time.perf_counter()`` value; if it passes first, unfinished rollouts are
+    cancelled and :class:`EvaluationTimeout` is raised.
     """
     t_start = time.perf_counter()
     snap = snapshot
-    if snap.start_stage != "truth":
-        raise NotImplementedError("only start_stage='truth' (snapshot at the end of step t0) is supported")
+    if snap.start_stage not in ("truth", "replan"):
+        raise ValueError(f"unknown start_stage {snap.start_stage!r}")
     for p in snap.pending_reactive:
         if not math.isfinite(p.deadline_t):
             p.deadline_t = p.created_t + float(reactive_deadline_s)
@@ -2553,21 +2880,51 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
         n_workers = min(len(policies) * 2, max(1, (os.cpu_count() or 2) - 1))
     if pool is None and n_workers <= 1:
         trees = [_sample_scenario_tree(snap, seed, s) for s in range(n_scenarios)]
-        results = [run_policy(snap, pol, n_scenarios=n_scenarios, seed=seed, trees=trees, **kw) for pol in policies]
+        results = []
+        for pol in policies:
+            if deadline is not None and time.perf_counter() > float(deadline):
+                raise EvaluationTimeout(time.perf_counter() - t_start)
+            results.append(run_policy(snap, pol, n_scenarios=n_scenarios, seed=seed, trees=trees, **kw))
     else:
         own = pool is None
         if own:
             pool = RolloutPool(n_workers)
+        blob_path = None
         try:
             blob = pickle.dumps(snap, protocol=pickle.HIGHEST_PROTOCOL)
             key = (uuid.uuid4().hex, int(seed))
-            chunk = max(1, int(scenario_chunk))
+            if scenario_chunk is None or int(scenario_chunk) <= 0:
+                # adaptive: about four tasks per worker; the snapshot travels by file,
+                # once per worker, so small chunks cost no extra transfer
+                chunk = max(1, min(n_scenarios, math.ceil(len(policies) * n_scenarios / (4 * pool.n_workers))))
+                import tempfile
+                fd, blob_path = tempfile.mkstemp(prefix="rollout_snap_", suffix=".pkl")
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(blob)
+                blob = blob_path
+            else:
+                chunk = max(1, int(scenario_chunk))
             chunks = [list(range(a, min(a + chunk, n_scenarios))) for a in range(0, n_scenarios, chunk)]
             tasks = [(key, blob, int(seed), ch, pol, kw) for pol in policies for ch in chunks]
-            flat = list(pool.ex.map(_run_task, tasks))
+            if deadline is None:
+                flat = list(pool.ex.map(_run_task, tasks))
+            else:
+                futs = [pool.ex.submit(_run_task, tk) for tk in tasks]
+                remaining = float(deadline) - time.perf_counter()
+                done, not_done = wait(futs, timeout=max(remaining, 0.0))
+                if not_done:
+                    for f in not_done:
+                        f.cancel()
+                    raise EvaluationTimeout(time.perf_counter() - t_start)
+                flat = [f.result() for f in futs]
         finally:
             if own:
                 pool.close()
+            if blob_path is not None:
+                try:
+                    os.remove(blob_path)
+                except OSError:
+                    pass
         results = []
         i = 0
         for _pol in policies:
@@ -2715,3 +3072,301 @@ def snapshot_from_sim_locals(L: dict, *, horizon_s: float = 300.0, full_observab
         pending_reactive=pending, planner_weight_grid=w_node_exact,
     )
     return snap
+
+
+# ---------------------------------------------------------------------------
+# Decision-time snapshots for the plan procedure (start_stage="replan")
+# ---------------------------------------------------------------------------
+class StepProfile:
+    """Picklable background time profile m(t) = factor for t >= t_switch, else 1 (truth mu step)."""
+
+    def __init__(self, t_switch: float, factor: float):
+        self.t_switch = float(t_switch)
+        self.factor = float(factor)
+
+    def __call__(self, t: float) -> float:
+        return self.factor if float(t) >= self.t_switch else 1.0
+
+
+def _profile_max_over_steps(profile, t0: float, n_steps: int, dt: float) -> float:
+    """Exact maximum of m(t) over the step times the scenario tree samples (t0+dt .. t0+n dt)."""
+    if profile is None or n_steps <= 0:
+        return 1.0
+    return max(float(_profile_value(profile, t0 + k * dt)) for k in range(1, n_steps + 1))
+
+
+def _node_grid(W, H, NX, NY):
+    xs = np.linspace(0.0, W, NX)
+    ys = np.linspace(0.0, H, NY)
+    XX, YY = np.meshgrid(xs, ys, indexing="xy")
+    return xs, ys, XX, YY
+
+
+def _zone_owner_grid(L, XX, YY):
+    """Index (robots_def order) of the robot whose zone contains each node, first match, or -1.
+
+    Same first-match rule as the simulator's owner of a truth event
+    (DeterrentSystem._process_truth_event loops robots_def and takes the first zone).
+    """
+    owner = np.full(XX.shape, -1, np.int64)
+    for i, r in enumerate(L["robots_def"]):
+        zone = L["id_to_cell"].get(r["id"], [])
+        if not zone:
+            continue
+        ins = points_in_polygon(XX, YY, zone) & (owner < 0)
+        owner[ins] = i
+    return owner
+
+
+def _weight_grids(L, W, H, NX, NY, n_sub_weight):
+    vw = L["value_weight"]
+    xs = np.linspace(0.0, W, NX)
+    ys = np.linspace(0.0, H, NY)
+    ck2 = ("exact", id(vw), W, H, NX, NY)
+    if ck2 not in _WEIGHT_CACHE:
+        _WEIGHT_CACHE[ck2] = (np.array([[float(vw(float(x), float(y))) for x in xs] for y in ys]), vw)
+    ck = (id(vw), W, H, NX, NY, int(n_sub_weight))
+    if ck not in _WEIGHT_CACHE:
+        _WEIGHT_CACHE[ck] = (cell_average_weight(vw, W, H, NX, NY, n_sub=n_sub_weight), vw)
+    return _WEIGHT_CACHE[ck2][0], _WEIGHT_CACHE[ck][0]
+
+
+def planner_world_cues(L) -> dict:
+    """Planner cue suppression parameters: the planner mirror of the truth mapping.
+
+    Same mapping as DeterrentSystem._resolve_planner_deterrence_event_params
+    (DeterrentSystem.py:458-487), used for the consistent estimator's own
+    suppression stamps (DeterrentSystem.py:7126-7134).
+    """
+    ds = _ds()
+    kw = dict(planner_deterring_modes=L.get("planner_deterring_modes"),
+              use_mode_dependent_truth_suppression=bool(L.get("use_mode_dependent_truth_suppression", True)),
+              planner_beta=float(L["planner_beta"]), planner_sigma=float(L["planner_sigma"]),
+              planner_omega=float(L["planner_omega"]))
+    out = {}
+    _, b, s, o = ds._resolve_planner_deterrence_event_params("direct_detection", {}, **kw)
+    out["direct_detection"] = CueParams(float(b), float(s), float(o))
+    for mode, p in L["deterring_modes"].items():
+        _, b, s, o = ds._resolve_planner_deterrence_event_params(str(mode), dict(p), **kw)
+        out[str(mode)] = CueParams(float(b), float(s), float(o))
+    return out
+
+
+def truth_world_cues(L) -> dict:
+    """Truth cue suppression parameters (DeterrentSystem._resolve_truth_deterrence_event_params)."""
+    out = {"direct_detection": CueParams(float(L["beta_true"]), float(L["sigma_true"]), float(L["omega_true"]))}
+    for mode, p in L["deterring_modes"].items():
+        if bool(L.get("use_mode_dependent_truth_suppression", True)) and p:
+            out[str(mode)] = CueParams(float(p.get("beta", L["beta_true"])), float(p.get("sigma", L["sigma_true"])),
+                                       float(p.get("omega", L["omega_true"])))
+        else:
+            out[str(mode)] = out["direct_detection"]
+    return out
+
+
+def planner_forecast_from_sim_locals(L, *, t0: float, horizon_s: float):
+    """The fleet's planner belief of the bird process (no truth state).
+
+    Built only from the robots' estimators:
+      consistent: background mu_hat of each node's zone owner times the
+        planner value map times the node area (the estimator's own density
+        convention, SESTPP.ConsistentOnlineSESTPP: densities integrate with
+        dA), the planner time multiplier, the planner (alpha, sigma, omega),
+        the union of every robot's detected excitation parents (each detection
+        is recorded by its zone owner, so the union is every detection the
+        fleet made) and the union of every robot's suppression terms
+        (amplitude q_hat * beta, planner sigma/omega), deduplicated by action id.
+      legacy: per node the zone owner's additive grids (mu, trigger mass and
+        per-mode inhibition channels) with its alpha_in/alpha_inhib/sigma/omega.
+    Returns (IntensityForecast, world_suppression list or None).
+    """
+    W, H, NX, NY = float(L["W"]), float(L["H"]), int(L["NX"]), int(L["NY"])
+    xs, ys, XX, YY = _node_grid(W, H, NX, NY)
+    owner = _zone_owner_grid(L, XX, YY)
+    rdef = L["robots_def"]
+    models = [L["robots"][r["id"]].m for r in rdef]
+    mode = str(L.get("estimator_mode", "legacy")).strip().lower()
+    dt = float(L["dt"])
+    n_steps = int(round(float(horizon_s) / dt))
+    if mode == "consistent":
+        m0 = models[0]
+        for m in models[1:]:
+            if (m.alpha, m.sigma, m.omega) != (m0.alpha, m0.sigma, m0.omega):
+                raise ValueError("planner models disagree on (alpha, sigma, omega)")
+        mu_rates = np.array([float(m.mu_rate) for m in models])
+        mu_node = np.where(owner >= 0, mu_rates[np.maximum(owner, 0)], float(np.mean(mu_rates)))
+        bg = mu_node * np.asarray(m0.value_map, float) * float(m0.dA)
+        prof = m0.time_multiplier_fn
+        parents = {}
+        for m in models:
+            for (ex, ey, et, ew) in m.excitation_events:
+                if abs(float(ew) - 1.0) > 1e-12:
+                    raise ValueError("consistent planner excitation events must have weight 1")
+                parents[(float(ex), float(ey), float(et))] = True
+        ex = np.array(sorted(parents), float).reshape(-1, 3)
+        terms = {}
+        for m in models:
+            for term in m.suppression_terms:
+                k = ("id", int(term.action_id)) if term.action_id is not None else \
+                    ("xyt", term.x, term.y, term.tau, term.mode)
+                terms[k] = term
+        store = [{"x": float(tm.x), "y": float(tm.y), "t": float(tm.tau), "eta": 1.0, "beta": float(tm.amplitude),
+                  "sigma": float(tm.sigma), "omega": float(tm.omega), "mode": str(tm.mode),
+                  "action_id": tm.action_id} for tm in sorted(terms.values(), key=lambda q: (q.tau, str(q.action_id)))]
+        fc = IntensityForecast(form="consistent", bg_node_rate=bg, alpha=float(m0.alpha), sigma=float(m0.sigma),
+                               omega=float(m0.omega), bg_time_profile=prof,
+                               bg_time_profile_max=_profile_max_over_steps(prof, t0, n_steps, dt),
+                               excitation_terms=ex)
+        return fc, store
+    # legacy additive estimator
+    m0 = models[0]
+
+    def _by_owner(grids):
+        st = np.stack([np.asarray(g, float) for g in grids])
+        picked = np.take_along_axis(st, np.maximum(owner, 0)[None], axis=0)[0]
+        return np.where(owner >= 0, picked, st.mean(axis=0))   # unowned nodes: fleet mean
+
+    mu = _by_owner([m.mu for m in models])
+    trig = _by_owner([m.trigger_mass for m in models])
+    chans = {}
+    keys = sorted({k for m in models for k in m.inhib_channels})
+    for key in keys:
+        grids = [np.asarray(m.inhib_channels.get(key, np.zeros((NY, NX))), float) for m in models]
+        om = [float(m.inhib_channel_omegas.get(key, m.omega_inhib)) for m in models if key in m.inhib_channels]
+        chans[key] = (_by_owner(grids), float(om[0]))
+    fc = IntensityForecast(form="legacy", bg_node_rate=mu, sigma=float(m0.sigma), omega=float(m0.omega),
+                           legacy_trigger_mass=trig, legacy_inhib_channels=chans,
+                           legacy_alpha_in=float(m0.alpha_in), legacy_alpha_inhib=float(m0.alpha_inhib))
+    return fc, None
+
+
+def truth_forecast_from_sim_locals(L, *, t0: float, horizon_s: float):
+    """The simulator truth as a scenario world (oracle / full observability).
+
+    Truth background (DeterrentSystem._coupled_truth_step / run_truth_generation_stage:
+    Poisson(mu w_mean area dt) per step, node by value map), the truth mu step as a
+    time profile, the truth excitation kernel (truth_excitation_sigma/omega_eff), the
+    already scheduled truth offspring queue, and the truth suppression store with the
+    truth effectiveness at application.
+    """
+    W, H = float(L["W"]), float(L["H"])
+    vw = L["value_weight"]
+    W_grid = L["w_shape"][4]
+    area = W * H
+    mu_true = float(L["mu_true"])
+    bg_rate = mu_true * float(np.mean(W_grid)) * area * W_grid / float(W_grid.sum())
+    prof = None
+    if L.get("mu_step_time_s") is not None:
+        prof = StepProfile(float(L["warmup_s"]) + float(L["mu_step_time_s"]), float(L["mu_step_factor"]))
+    dt = float(L["dt"])
+    n_steps = int(round(float(horizon_s) / dt))
+    tq = list(L["truth_queue"])
+    sched = (np.array([[float(ev[0]), float(ev[1]), float(ev[2]), float(vw(float(ev[0]), float(ev[1])))]
+                       for ev in tq]) if tq else np.zeros((0, 4)))
+    fc = IntensityForecast(form="consistent", bg_node_rate=bg_rate, alpha=float(L["alpha_true"]),
+                           sigma=float(L["truth_excitation_sigma_eff"]), omega=float(L["truth_excitation_omega_eff"]),
+                           bg_time_profile=prof, bg_time_profile_max=_profile_max_over_steps(prof, t0, n_steps, dt),
+                           scheduled_candidates=sched)
+    store = [dict(e) for e in L["truth_deterrence_store"]]
+    return fc, store
+
+
+def decision_snapshot_from_sim_locals(L: dict, *, horizon_s: float = 300.0, reactive_deadline_s: float = 90.0,
+                                      oracle: bool = False, n_sub_weight: int = 8) -> RolloutSnapshot:
+    """Snapshot at the simulator's replan point (Stage 3 of step t), start_stage="replan".
+
+    ``L`` is the simulator's ``locals()`` inside Stage 3 (truth and expiry stages of
+    step t done, nothing of the replan done).  The policy side (robots and their
+    estimators, tasks, TaskGenerator state, planner habituation, commitments) is
+    always planner information.  With ``oracle=False`` the world is the planner's
+    belief (planner_forecast_from_sim_locals); with ``oracle=True`` it is the truth
+    (truth_forecast_from_sim_locals, truth habituation as world habituation).
+    """
+    cfg = B5Config.from_sim_locals(L)
+    W, H, NX, NY = float(L["W"]), float(L["H"]), int(L["NX"]), int(L["NY"])
+    t0 = float(L["t"])
+    w_node_exact, w_bar = _weight_grids(L, W, H, NX, NY, n_sub_weight)
+    deterring_modes = copy.deepcopy(L["deterring_modes"])
+    if oracle:
+        forecast, store = truth_forecast_from_sim_locals(L, t0=t0, horizon_s=horizon_s)
+        world_cues = truth_world_cues(L)
+        world_hab = L["truth_hab"].copy()
+        world_hab_model = str(L["truth_habituation_update_model"])
+    else:
+        forecast, store = planner_forecast_from_sim_locals(L, t0=t0, horizon_s=horizon_s)
+        world_cues = planner_world_cues(L)
+        world_hab = None
+        world_hab_model = None
+    robots_def = L["robots_def"]
+    id_to_cell = L["id_to_cell"]
+    robots = []
+    for r in robots_def:
+        rid = r["id"]
+        robots.append(RobotState(rid=rid, pose=tuple(L["pose"][rid]),
+                                 goal=(None if L["goal"][rid] is None else tuple(L["goal"][rid])),
+                                 loiter_until=float(L["loiter_until"][rid]), profile=copy.deepcopy(L["profiles"][rid]),
+                                 planner=copy.deepcopy(L["robots"][rid]), zone_polygon=list(id_to_cell.get(rid, []))))
+    taskgen = _prune_taskgen(L["taskgen"], t0)
+    tau = float(L["tau_service_s"])
+
+    def key_fn(task):
+        return (task_action_kind(task, deterring_modes, tau), task_action_name(task, deterring_modes, tau),
+                round(float(task.get("x", float("nan"))), 2), round(float(task.get("y", float("nan"))), 2),
+                round(float(task.get("time", float("nan"))), 0))
+
+    def is_direct(task):
+        return task_action_kind(task, deterring_modes, tau) == "deterring" and \
+            task_action_name(task, deterring_modes, tau) == "direct_detection"
+
+    active = copy.deepcopy(L["active_tasks"])
+    # Completed tasks feed only the dispatch buffer dedupe (every dispatched key is also in
+    # consumed_task_keys) and the direct-conflict window (120 s), so t_done >= t0 - 600 is exact.
+    completed = [copy.deepcopy(tr) for tr in L["completed_tasks"] if float(tr.get("t_done", -1e18)) >= t0 - 600.0]
+    seen = {key_fn(tr) for tr in active} | {key_fn(tr) for tr in completed} | set(L["consumed_task_keys"])
+    buffer_rows = [r for r in taskgen.rows()[-200:] if key_fn(r) not in seen]
+    pending = _pending_reactive_from(active, buffer_rows, key_fn, is_direct, reactive_deadline_s)
+    # B5-facing record of the fleet's own completed actions (pruning / repeat-block read x, y, t):
+    # keep the planner-known fields only (the simulator's entries also carry the truth eta).
+    keep = ("x", "y", "t", "mode", "source", "action_id", "habituation_mode")
+    recent = [{k: e[k] for k in keep if k in e} for e in L["recent_deterrences"]]
+    regions = None
+    if cfg.estimator_mode == "consistent":
+        regions = {r["id"]: [list(p) for p in (L["_consistent_region_polys"](r["id"]) or [])] for r in robots_def}
+    snap = RolloutSnapshot(
+        t0=t0, horizon_s=float(horizon_s), nx=NX, ny=NY, W=W, H=H, w_node=w_bar, w_bg_node=w_bar,
+        region_mask=np.ones((NY, NX), bool), forecast=forecast, world_cues=world_cues,
+        deterring_modes=deterring_modes, habituation=L["planner_hab"].copy(),
+        hab_cell_polys=[list(p) for p in L["cells"]], mode_to_id=dict(L["mode_to_id"]),
+        robots=robots, active_tasks=active, completed_tasks=completed,
+        consumed_task_keys=set(L["consumed_task_keys"]), taskgen=taskgen, recent_deterrences=recent,
+        model_deterring_by_robot={rid: list(q) for rid, q in L["model_deterring_by_robot"].items()},
+        next_tid=int(L["next_tid"]), last_replan=float(L["last_replan"]),
+        bus_last_intervention_key_t=dict(L["bus"]._last_intervention_key_t), cfg=cfg,
+        pending_reactive=pending, planner_weight_grid=w_node_exact, start_stage="replan",
+        robot_region_polys=regions, world_suppression=store, world_habituation=world_hab,
+        world_habituation_update_model=world_hab_model,
+    )
+    return snap
+
+
+def generation_seeds(snap: RolloutSnapshot) -> dict:
+    """Preventive seeds B5's generation registers at t0 for every robot.
+
+    Runs the verified TaskGenerator port (_b5_periodic_patrolling) on a
+    throwaway copy of the snapshot's planner state and records, per robot, the
+    deduplicated seed list (detection clusters, forecast hotspots after the
+    percentile/spacing filter, border hotspots) together with the cue modes
+    B5 scores for each seed (TaskGenerator.py:1240-1253 and 1376).  Nothing
+    of the snapshot is mutated.
+    """
+    tree = _ScenarioTree(t=np.zeros(0), x=np.zeros(0), y=np.zeros(0), node=np.zeros(0, np.int64),
+                         parent=np.zeros(0, np.int64), kind=np.zeros(0, np.int64), u_thin=np.zeros(0),
+                         u_det=np.zeros(0), owner=np.zeros(0, np.int64), w_sched=np.zeros(0),
+                         order=np.zeros(0, np.int64), step_start=np.zeros(1, np.int64), jitter_seed=0)
+    sim = _Sim(snap, tree, NOOP, scenario=0, reactive_deadline_s=90.0)
+    sim.seed_log = []
+    _b5_periodic_patrolling(sim, float(snap.t0))
+    out = {}
+    for (_t, rid, seeds, modes) in sim.seed_log:
+        out[rid] = (seeds, modes)
+    return out

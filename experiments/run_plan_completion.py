@@ -19,6 +19,17 @@ Predeclared service criterion (fixed 2026-10-13, before any evaluation run):
 Seeds: development 200-209 (smoke and tuning), final evaluation 300-329. Never tune
 on evaluation seeds.
 
+Plan decision procedure (habituation_stl/plan_procedure.py, planner_procedure="plan"):
+  B1_c, B5_c  B1 and B5 in the plan environment (consistent estimator, coupled
+              streams, complete truth deterrence memory),
+  D_plan      B5 plus deviations admitted by continuation rollouts, U(a) > eps_gate,
+              no service protection (plan variant D),
+  E_plan      D_plan with pending-service protection (plan variant E),
+  E_plan_tr   E_plan with the timed-recovery requirement (Plan Eq. 4); thresholds
+              only through --timed-recovery.
+Plan jobs run one at a time after the ordinary jobs (their rollout pool uses the
+whole machine); each writes its per-decision JSONL next to its raw JSON.
+
 The run is resumable: a job whose raw JSON already exists is not rerun.
 """
 from __future__ import annotations
@@ -146,8 +157,38 @@ VARIANTS: dict[str, tuple[str, dict]] = {
                          "stl_service_protection": True, "stl_rollout_cue_dynamics": True}),
 }
 
+# Plan decision procedure (planner_procedure="plan", habituation_stl/plan_procedure.py).
+# Every system in this group runs in the same environment: the consistent planner
+# estimator, coupled exogenous random streams and complete truth deterrence memory.
+PLAN_ENV = {"estimator_mode": "consistent", "random_stream_mode": "coupled",
+            "truth_deterrence_memory": "complete"}
+# rho = 0.25 over 600 s, the paper's reservation setting, used as a CEILING on a
+# robot's predictive-time share for admitting deviations (it never forces work).
+_PLAN = {"planner_procedure": "plan", "reservation_fraction": 0.25, "reservation_window_s": 600.0}
+# name -> (ladder variant the system is built on, overrides)
+PLAN_VARIANTS: dict[str, tuple[str, dict]] = {
+    "B1_c": ("B1", dict(PLAN_ENV)),
+    "B5_c": ("B5", dict(PLAN_ENV)),
+    "D_plan": ("B5", {**PLAN_ENV, **_PLAN, "plan_service_protection": False}),
+    "E_plan": ("B5", {**PLAN_ENV, **_PLAN, "plan_service_protection": True}),
+    # E_plan + timed recovery (Plan Eq. 4): plan_E_high, plan_E_low and plan_T_response_s
+    # must be supplied through --extra (no defaults are assumed).
+    "E_plan_tr": ("B5", {**PLAN_ENV, **_PLAN, "plan_service_protection": True}),
+}
+PLAN_TR_KEYS = ("plan_E_high", "plan_E_low", "plan_T_response_s")
+
+
+def is_plan_job(params: dict) -> bool:
+    return str(params.get("planner_procedure", "legacy")).strip().lower() == "plan"
+
+
 # (reference, treatment, label). Deltas are treatment minus reference.
 COMPARISONS = [
+    ("B1_c", "B5_c", "B5_c vs B1_c: habituation-aware greedy (plan environment)"),
+    ("B5_c", "D_plan", "D_plan vs B5_c: plan procedure without service protection"),
+    ("B5_c", "E_plan", "E_plan vs B5_c: practical system benefit of the plan procedure"),
+    ("D_plan", "E_plan", "E_plan vs D_plan: pending-service protection"),
+    ("E_plan", "E_plan_tr", "E_plan_tr vs E_plan: timed recovery constraint"),
     ("A", "B", "B vs A: consistent forecast"),
     ("B", "C", "C vs B: integrated exposure objective"),
     ("C", "C_gate", "C_gate vs C: benefit gate on C"),
@@ -175,7 +216,21 @@ REPORT_METRICS = [
 
 
 def build_params(variant: str, hab_on: bool, mu: float, t_end: float | None,
-                 extra: dict | None = None, config: str = "paper") -> dict:
+                 extra: dict | None = None, config: str = "paper", timed_recovery: dict | None = None) -> dict:
+    if any(k in (extra or {}) for k in PLAN_TR_KEYS):
+        raise ValueError("pass timed-recovery thresholds with --timed-recovery (they apply to E_plan_tr only)")
+    if variant in PLAN_VARIANTS:
+        ladder_variant, plan_over = PLAN_VARIANTS[variant]
+        params = build_params(ladder_variant, hab_on, mu, t_end, None, config)
+        params.update(plan_over)
+        params.update(extra or {})
+        if variant == "E_plan_tr":
+            tr = dict(timed_recovery or {})
+            missing = [k for k in PLAN_TR_KEYS if tr.get(k) is None]
+            if missing:
+                raise ValueError("E_plan_tr needs --timed-recovery with " + ", ".join(missing))
+            params.update({k: float(tr[k]) for k in PLAN_TR_KEYS})
+        return params
     base, overrides = VARIANTS[variant]
     if config == "paper":
         ladder_system = LADDER_BASE["B4"] if base == "B4" else LADDER_BASE[variant]
@@ -199,6 +254,8 @@ def run_job(job: dict) -> dict:
 
     params = dict(job["params"])
     params["seed"] = int(job["seed"])
+    if is_plan_job(params) and job.get("decision_log") and not params.get("plan_log_path"):
+        params["plan_log_path"] = str(job["decision_log"])
     started = time.time()
     last = None
     for frame in ds.run_simulation_frames_persistent(**params):
@@ -217,6 +274,12 @@ def run_job(job: dict) -> dict:
             row[field] = float(metrics.get(field))
         except (TypeError, ValueError):
             row[field] = float("nan")
+    for field, value in metrics.items():
+        if str(field).startswith("plan_"):
+            try:
+                row[field] = float(value)
+            except (TypeError, ValueError):
+                row[field] = value
     for key in ("value_weighted_exposure_windows",):
         if key in metrics:
             row[key] = metrics[key]
@@ -300,14 +363,14 @@ def write_report(rows, outdir: Path, meta: dict) -> None:
                 f"{s['mean_diff']:+.4g} | [{s['ci_lo']:+.4g}, {s['ci_hi']:+.4g}] | {s['pct_of_ref']:+.2f}% |"
             )
         lines.append("")
-        for trt in ("E_adm", "E_cue_adm"):
-            ni = [s for s in stats_rows if s["reference"] == "B5" and s["treatment"] == trt
+        for ref, trt in (("B5", "E_adm"), ("B5", "E_cue_adm"), ("B5_c", "E_plan"), ("B5_c", "E_plan_tr")):
+            ni = [s for s in stats_rows if s["reference"] == ref and s["treatment"] == trt
                   and s["metric"] == "reactive_miss_fraction"]
             if ni:
                 s = ni[0]
                 verdict = "NONINFERIOR" if s["ci_hi"] < NONINFERIORITY_MARGIN_PP else "NOT SHOWN"
                 lines.append(
-                    f"Service noninferiority {trt} vs B5 ({hab}): upper 95% bound "
+                    f"Service noninferiority {trt} vs {ref} ({hab}): upper 95% bound "
                     f"{100 * s['ci_hi']:+.2f} pp vs margin +{100 * NONINFERIORITY_MARGIN_PP:.0f} pp -> {verdict}"
                 )
         lines.append("")
@@ -327,6 +390,8 @@ def main() -> None:
     p.add_argument("--max-workers", type=int, default=1)
     p.add_argument("--extra", default="{}", help="JSON dict of params applied to every job")
     p.add_argument("--config", default="paper", choices=CONFIGS)
+    p.add_argument("--timed-recovery", default="{}",
+                   help='JSON {"plan_E_high": .., "plan_E_low": .., "plan_T_response_s": ..} for E_plan_tr')
     p.add_argument("--analyze-only", action="store_true")
     args = p.parse_args()
 
@@ -336,6 +401,7 @@ def main() -> None:
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
     habs = [h.strip() == "on" for h in args.hab.split(",") if h.strip()]
     extra = json.loads(args.extra)
+    timed_recovery = json.loads(args.timed_recovery)
 
     jobs = []
     for seed in range(args.seed_start, args.seed_start + args.num_runs):
@@ -347,31 +413,53 @@ def main() -> None:
                     continue
                 jobs.append({"system": system, "variant": v, "habituation_condition": cond,
                              "seed": seed,
-                             "params": build_params(v, hab_on, args.mu, args.t_end, extra, args.config)})
+                             "decision_log": str(raw / f"{system}_seed_{seed}_decisions.jsonl"),
+                             "params": build_params(v, hab_on, args.mu, args.t_end, extra, args.config,
+                                                    timed_recovery)})
     print(f"[completion] pending jobs={len(jobs)} outdir={outdir}", flush=True)
     started = time.time()
+
+    def _record(i, n, row):
+        (raw / f"{row['system']}_seed_{row['seed']}.json").write_text(
+            json.dumps(row, indent=2, allow_nan=True), encoding="utf-8")
+        print(f"[completion] {i}/{n} {row['system']} seed={row['seed']} "
+              f"{row['elapsed_s']:.0f}s VWE={row['value_weighted_exposure']:.1f} "
+              f"miss={row['reactive_miss_fraction']:.3f}", flush=True)
+
     if jobs and not args.analyze_only:
-        workers = max(1, min(args.max_workers, len(jobs)))
-        with ProcessPoolExecutor(max_workers=workers) as ex:
-            futs = {ex.submit(run_job, j): j for j in jobs}
-            for i, fut in enumerate(as_completed(futs), 1):
-                job = futs[fut]
-                try:
-                    row = fut.result()
-                except Exception as exc:  # keep the sweep alive; record the failure
-                    print(f"[completion] FAILED {job['system']} seed={job['seed']}: {exc!r}", flush=True)
-                    continue
-                (raw / f"{row['system']}_seed_{row['seed']}.json").write_text(
-                    json.dumps(row, indent=2, allow_nan=True), encoding="utf-8")
-                print(f"[completion] {i}/{len(jobs)} {row['system']} seed={row['seed']} "
-                      f"{row['elapsed_s']:.0f}s VWE={row['value_weighted_exposure']:.1f} "
-                      f"miss={row['reactive_miss_fraction']:.3f}", flush=True)
+        # Plan-procedure jobs use the whole machine through their rollout worker pool,
+        # so they run ONE AT A TIME in this process, after the ordinary jobs (which run
+        # in parallel) have finished; their decision runtimes then see an idle machine.
+        plan_jobs = [j for j in jobs if is_plan_job(j["params"])]
+        other_jobs = [j for j in jobs if not is_plan_job(j["params"])]
+        done = 0
+        if other_jobs:
+            workers = max(1, min(args.max_workers, len(other_jobs)))
+            with ProcessPoolExecutor(max_workers=workers) as ex:
+                futs = {ex.submit(run_job, j): j for j in other_jobs}
+                for fut in as_completed(futs):
+                    job = futs[fut]
+                    done += 1
+                    try:
+                        row = fut.result()
+                    except Exception as exc:  # keep the sweep alive; record the failure
+                        print(f"[completion] FAILED {job['system']} seed={job['seed']}: {exc!r}", flush=True)
+                        continue
+                    _record(done, len(jobs), row)
+        for job in plan_jobs:
+            done += 1
+            try:
+                row = run_job(job)
+            except Exception as exc:  # keep the sweep alive; record the failure
+                print(f"[completion] FAILED {job['system']} seed={job['seed']}: {exc!r}", flush=True)
+                continue
+            _record(done, len(jobs), row)
 
     rows = [json.loads(f.read_text(encoding="utf-8")) for f in sorted(raw.glob("*.json"))]
     rows.sort(key=lambda r: (r["variant"], r["habituation_condition"], int(r["seed"])))
     _write_csv(rows, outdir / "per_run_metrics.csv")
     meta = {"config": args.config, "ladder_argv": PAPER_LADDER_ARGV if args.config == "paper" else None, "mu": args.mu, "seed_start": args.seed_start, "num_runs": args.num_runs,
-            "t_end": args.t_end or _COMMON["T_end"], "extra": extra,
+            "t_end": args.t_end or _COMMON["T_end"], "extra": extra, "timed_recovery": timed_recovery,
             "elapsed_s": time.time() - started,
             "noninferiority_margin_pp": NONINFERIORITY_MARGIN_PP}
     (outdir / "manifest.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
