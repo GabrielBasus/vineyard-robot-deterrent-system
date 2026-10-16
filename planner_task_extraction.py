@@ -490,10 +490,30 @@ def run_task_location_estimation(
     stl_last_service_t_by_cell: dict | None = None,
     stl_mode_to_id: dict | None = None,
     stl_cell_id_for_xy_fn: Callable[[float, float], int | None] | None = None,
+    min_hotspot_score: float = 1.0e-4,
+    patrol_cost_weight: float = 1.0,
+    deterring_cost_multiplier: float = 1.0,
 ) -> None:
-    """Run task generation for the current production frame and return the updated task table."""
+    """Run task generation for the current production frame and return the updated task table.
+
+    ``min_hotspot_score``, ``patrol_cost_weight`` and ``deterring_cost_multiplier``
+    carry estimator-unit settings (see docs/consistent_threshold_mapping.md). Their
+    defaults reproduce the historical behaviour exactly.
+    """
     if not enable_patrolling:
         return
+    deterring_cost_multiplier = float(deterring_cost_multiplier)
+    if deterring_modes and deterring_cost_multiplier != 1.0:
+        # Travel cost in model-unit utility: scale each cue's cost weight (w_eta,
+        # fixed_cost) only for task generation; truth and service times are untouched.
+        deterring_modes = {
+            mode: {
+                **dict(mode_params),
+                "w_eta": float(dict(mode_params).get("w_eta", 1.0)) * deterring_cost_multiplier,
+                "fixed_cost": float(dict(mode_params).get("fixed_cost", 0.0)) * deterring_cost_multiplier,
+            }
+            for mode, mode_params in dict(deterring_modes).items()
+        }
     taskgen.periodic_patrolling(
         robots=robots,
         now_t=now_t,
@@ -565,6 +585,8 @@ def run_task_location_estimation(
         stl_last_service_t_by_cell=stl_last_service_t_by_cell,
         stl_mode_to_id=stl_mode_to_id,
         stl_cell_id_for_xy_fn=stl_cell_id_for_xy_fn,
+        min_hotspot_score=float(min_hotspot_score),
+        cost_w_eta=float(patrol_cost_weight),
     )
 
 

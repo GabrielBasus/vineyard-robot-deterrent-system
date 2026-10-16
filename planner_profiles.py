@@ -6,6 +6,8 @@ from typing import Any, Dict, Iterable, Mapping, MutableMapping
 
 THESIS_CONFIRM_PROFILE_ID = "thesis_confirm"
 THESIS_CALIBRATED_SELECTIVE_PROPOSED_PROFILE_ID = "thesis_calibrated_selective_proposed"
+THESIS_CALIBRATED_SELECTIVE_PROPOSED_CONSISTENT_PROFILE_ID = "thesis_calibrated_selective_proposed_consistent"
+THESIS_CALIBRATED_SELECTIVE_PROPOSED_UNMAPPED_PROFILE_ID = "thesis_calibrated_selective_proposed_unmapped"
 THESIS_DISPATCH_REACT_PROFILE_ID = "thesis_dispatch_react"
 THESIS_DISPATCH_UNC_PROFILE_ID = "thesis_dispatch_unc"
 THESIS_DISPATCH_REACTIVE_FIRST_PROFILE_ID = "thesis_dispatch_reactive_first"
@@ -779,6 +781,85 @@ PLANNER_PROFILES: Dict[str, Dict[str, Any]] = {
         },
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# estimator_mode="consistent" variant of the paper profile.
+# Each model-unit threshold is set to the quantile of its consistent-estimator
+# distribution that the legacy value occupies in its legacy distribution
+# (development seeds 200-209, paper configuration, coupled streams, complete
+# deterrence memory). Provenance: docs/consistent_threshold_mapping.md and
+# docs/consistent_threshold_mapping.json, produced by
+# experiments/consistent_threshold_mapping.py.
+# ---------------------------------------------------------------------------
+CONSISTENT_THRESHOLD_MAPPING: Dict[str, Any] = {
+    # legacy 1e-4 (q=0.3145); ties at 0 in the consistent field, nearest attainable rate
+    "min_hotspot_score": 0.0,
+    # legacy 1e-4 (cut 4.31e-5, q=0.3257); mapped cut <= 0 is infeasible, limit 0+ (TaskGenerator floor)
+    "model_deterring_risk_scale": 1.0e-12,
+    # legacy 0.10 (q=0.3562, pooled B1/B5/A); not converged to 1% (7.5% last change, A-driven)
+    "model_deterring_score_margin": -0.0058985193023672,
+    # legacy 0.95 (q=0): legacy value already at q=0 in the consistent distribution
+    "model_deterring_busy_fallback_p_event_min": 0.95,
+    # legacy 1e6 (q=1): consistent sample maximum
+    "model_deterring_busy_fallback_deltaJ_per_cost_min": 4005250.685871817,
+    # legacy 5.0 (q=0.6600, B4 only)
+    "stl_E_star": 69.90024852998837,
+    # legacy 1.0 (q=0.0144, B4 only)
+    "stl_kernel_self": 2.362878417744021,
+    # utility break-even predicted_deltaJ / cost = 1 (q=0.0172, B1/B5)
+    "deterring_cost_multiplier": 4.8620630391088847e-08,
+    # utility break-even for patrol (q=0.0719, B1/B5); mapped value <= 0 infeasible, limit 0+
+    "patrol_cost_weight": 1.0e-300,
+}
+
+PLANNER_PROFILES[THESIS_CALIBRATED_SELECTIVE_PROPOSED_UNMAPPED_PROFILE_ID] = {
+    "description": (
+        "Paper proposed preset with the legacy-unit thresholds kept under any estimator "
+        "mode (explicit opt-out from the automatic consistent-mode mapping)."
+    ),
+    "values": dict(PLANNER_PROFILES[THESIS_CALIBRATED_SELECTIVE_PROPOSED_PROFILE_ID]["values"]),
+    "rationale": dict(PLANNER_PROFILES[THESIS_CALIBRATED_SELECTIVE_PROPOSED_PROFILE_ID]["rationale"]),
+}
+PLANNER_PROFILES[THESIS_CALIBRATED_SELECTIVE_PROPOSED_CONSISTENT_PROFILE_ID] = {
+    "description": (
+        "Paper proposed preset for estimator_mode='consistent': legacy profile with every "
+        "model-unit threshold quantile-mapped to the consistent estimator's units."
+    ),
+    "values": {
+        **PLANNER_PROFILES[THESIS_CALIBRATED_SELECTIVE_PROPOSED_PROFILE_ID]["values"],
+        **CONSISTENT_THRESHOLD_MAPPING,
+    },
+    "rationale": {
+        **PLANNER_PROFILES[THESIS_CALIBRATED_SELECTIVE_PROPOSED_PROFILE_ID]["rationale"],
+        **{
+            key: "Quantile-mapped from the legacy value; see docs/consistent_threshold_mapping.md."
+            for key in CONSISTENT_THRESHOLD_MAPPING
+        },
+    },
+}
+
+# (profile used under the legacy estimator) -> (profile used under estimator_mode="consistent")
+ESTIMATOR_PROFILE_VARIANTS: Dict[str, str] = {
+    THESIS_CALIBRATED_SELECTIVE_PROPOSED_PROFILE_ID: THESIS_CALIBRATED_SELECTIVE_PROPOSED_CONSISTENT_PROFILE_ID,
+}
+
+
+def resolve_planner_profile_for_estimator(profile_name: str | None, estimator_mode: str | None) -> str:
+    """Return the profile to use for ``estimator_mode``.
+
+    Under ``estimator_mode="consistent"`` a profile with a registered
+    consistent-unit variant (ESTIMATOR_PROFILE_VARIANTS) is replaced by that
+    variant. Any other profile, including the explicit opt-out
+    ``thesis_calibrated_selective_proposed_unmapped`` and the variant itself, is
+    returned unchanged, so a caller overrides the automatic choice by naming a
+    profile explicitly.
+    """
+    canonical = canonicalize_planner_profile_name(profile_name)
+    mode = str(estimator_mode or "legacy").strip().lower()
+    if canonical and mode == "consistent":
+        return ESTIMATOR_PROFILE_VARIANTS.get(canonical, canonical)
+    return canonical
 
 
 def planner_profile_names() -> tuple[str, ...]:
