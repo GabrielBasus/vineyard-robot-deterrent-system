@@ -23,8 +23,10 @@ T_END = 240.0
 def _params(seed=200, **over):
     from experiments.run_plan_completion import build_params
     p = build_params("B5", True, 2e-5, T_END)
-    p.update(seed=seed, estimator_mode="consistent", random_stream_mode="coupled",
-             truth_deterrence_memory="complete", reservation_fraction=0.25, reservation_window_s=600.0)
+    # Evaluation environment (2026-10-16): the original system (legacy estimator,
+    # 200-entry truth deterrence memory) with coupled random streams.
+    p.update(seed=seed, estimator_mode="legacy", random_stream_mode="coupled",
+             truth_deterrence_memory="window200", reservation_fraction=0.25, reservation_window_s=600.0)
     p.update(over)
     return p
 
@@ -155,21 +157,21 @@ def test_sequential_commitment_removes_committed_robot():
     order = {}
 
     def U(c, call):
-        if call > 1:
-            return -1.0
         r = order.setdefault(c.robot_id, len(order))
         return 10.0 - r + 0.001 * (hash((c.x, c.y, c.mode)) % 100)
 
     eng = StubEngine(U)
     _, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0))
-    first, second = eng.calls[0], eng.calls[1]
-    assert first["t0"] == second["t0"]
-    robots0 = {c.robot_id for c in first["candidates"]}
-    assert len(robots0) >= 2, "the first decision needs candidates of at least two robots"
+    # first decision with candidates from at least two robots that went to a second round
+    # (under the legacy estimator only one robot may have candidates at t = 0)
+    pairs = [(a, b) for a, b in zip(eng.calls, eng.calls[1:])
+             if a["t0"] == b["t0"] and len({c.robot_id for c in a["candidates"]}) >= 2]
+    assert pairs, "no decision with candidates of two robots and a second commitment round"
+    first, second = pairs[0]
     best = max(first["candidates"], key=lambda c: U(c, 0))
     assert best.robot_id not in {c.robot_id for c in second["candidates"]}
-    assert [tr["assigned_primary"] for tr in second["forced"]] == [best.robot_id]
-    assert not first["forced"]
+    assert best.robot_id in [tr["assigned_primary"] for tr in second["forced"]]
+    assert len(second["forced"]) == len(first["forced"]) + 1
 
 
 def test_ceiling_blocks_deviations_at_rho(b5_run):
@@ -324,7 +326,7 @@ def test_engine_tracks_obligations_and_cell_exposure():
         assert math.isinf(r["obligations"]["never"]["satisfied_t"])
         assert r["obligations"]["never"]["min_e"] > 0.0
     # cell exposures partition the region rate
-    world = sr._World(snap, list(snap.world_suppression))
+    world = sr._World(snap, list(snap.world_suppression or []))
     rate = world.node_exposure_rate(t0)
     assert float(rate.sum()) == pytest.approx(world.residual_rate(t0), rel=1e-9)
 

@@ -398,6 +398,12 @@ class IntensityForecast:
     legacy_inhib_channels: dict = field(default_factory=dict)   # mode -> (grid, omega)
     legacy_alpha_in: float = 0.0
     legacy_alpha_inhib: float = 0.0
+    # Paper Eq. 20 (system assumption kept as in the original system): the legacy
+    # forecast advances existing excitation by passive decay and does NOT generate
+    # future offspring.  Generating them with the legacy amplitude read as an
+    # expected offspring count is supercritical (alpha_in * omega >> 1) and exploded
+    # the event trees (13 GB arrays, 2026-10-16).  True re-enables it for diagnostics.
+    legacy_future_offspring: bool = False
 
 
 @dataclass
@@ -799,6 +805,8 @@ def _sample_scenario_tree(snap: RolloutSnapshot, seed: int, scenario: int) -> _S
                 inb[iy0, ix0] = G[ky0:ky0 + (y1 - y0), kx0:kx0 + (x1 - x0)].sum()
         child_mean_node = fc.legacy_alpha_in * node_area * fc.omega * inb.ravel()
     gen_lo, gen_hi = 0, t_all.size
+    if legacy and not getattr(fc, "legacy_future_offspring", False):
+        gen_hi = gen_lo  # Eq. 20: no future offspring in the legacy world
     while gen_hi > gen_lo:
         p_ids = np.arange(gen_lo, gen_hi)
         p_ids = p_ids[t_all[p_ids] <= t_end]
@@ -811,6 +819,9 @@ def _sample_scenario_tree(snap: RolloutSnapshot, seed: int, scenario: int) -> _S
         n_new = int(n_each.sum())
         if n_new == 0:
             break
+        if t_all.size + n_new > MAX_SCENARIO_EVENTS:
+            raise MemoryError(f"scenario tree exceeds {MAX_SCENARIO_EVENTS} events "
+                              f"({t_all.size + n_new}); the forecast excitation is supercritical")
         parents = np.repeat(p_ids, n_each)
         delays = rng.exponential(fc.omega, n_new)
         ox, oy, ok = _offspring_positions(x_all[p_ids], y_all[p_ids], node_all[p_ids], n_each)
@@ -2780,6 +2791,10 @@ def _run_task(args):
     return out
 
 
+# Hard cap on events per scenario tree (overload trees are about 7e4 events).
+MAX_SCENARIO_EVENTS = int(os.environ.get("ROLLOUT_MAX_SCENARIO_EVENTS", "2000000"))
+
+
 class RolloutPool:
     """Persistent worker processes, reused across decisions to avoid start-up cost.
 
@@ -2790,8 +2805,50 @@ class RolloutPool:
 
     _BLAS_ENV = ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS", "NUMEXPR_NUM_THREADS")
 
+    # Memory guard (added 2026-10-16 after a 31-worker pool exhausted 32 GB of RAM):
+    # the pool is sized from AVAILABLE memory, keeping a reserve free for the user,
+    # and evaluate() shrinks it before a call if available memory falls below the
+    # reserve.  Results do not depend on the worker count (parallel equals serial).
+    WORKER_MEM_GB = float(os.environ.get("ROLLOUT_WORKER_MEM_GB", "1.5"))
+    RESERVE_FRACTION = float(os.environ.get("ROLLOUT_RESERVE_FRACTION", "0.30"))
+    MAX_WORKERS = int(os.environ.get("ROLLOUT_MAX_WORKERS", "12"))
+
+    @classmethod
+    def reserve_bytes(cls) -> float:
+        import psutil
+        return cls.RESERVE_FRACTION * psutil.virtual_memory().total
+
+    @classmethod
+    def memory_capped_workers(cls, requested: Optional[int]) -> int:
+        import psutil
+        want = int(requested or max(1, (os.cpu_count() or 2) - 1))
+        want = min(want, cls.MAX_WORKERS)
+        spare = psutil.virtual_memory().available - cls.reserve_bytes()
+        cap = int(spare // (cls.WORKER_MEM_GB * 1024 ** 3))
+        if cap < 1:
+            raise MemoryError(
+                f"rollout pool: only {psutil.virtual_memory().available / 1024**3:.1f} GB available, "
+                f"below the {cls.reserve_bytes() / 1024**3:.1f} GB reserve; refusing to start workers")
+        return max(1, min(want, cap))
+
     def __init__(self, n_workers: Optional[int] = None):
-        self.n_workers = int(n_workers or max(1, (os.cpu_count() or 2) - 1))
+        self.requested = n_workers
+        self.n_workers = self.memory_capped_workers(n_workers)
+        self._spawn()
+
+    def ensure_memory(self):
+        """Shrink the pool (or stop) if available memory has fallen below the reserve."""
+        import psutil
+        if psutil.virtual_memory().available >= self.reserve_bytes():
+            return
+        self.close()
+        while self.n_workers > 1 and psutil.virtual_memory().available < self.reserve_bytes():
+            self.n_workers = max(1, self.n_workers // 2)
+        if psutil.virtual_memory().available < self.reserve_bytes():
+            raise MemoryError("rollout pool: available memory below reserve even with the pool closed")
+        self._spawn()
+
+    def _spawn(self):
         # One BLAS thread per worker: the workers already use every core, and a
         # multi-threaded BLAS on the small per-step products only oversubscribes
         # (measured: S_grid 1.8 ms -> 0.05 ms per call).  Spawned workers inherit
@@ -2811,6 +2868,19 @@ class RolloutPool:
 
     def close(self):
         self.ex.shutdown(wait=True)
+
+    def kill(self):
+        """Terminate worker processes immediately (memory emergency)."""
+        procs = list(getattr(self.ex, "_processes", {}).values())
+        for proc in procs:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        try:
+            self.ex.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
 
     def __enter__(self):
         return self
@@ -2892,6 +2962,7 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
         blob_path = None
         try:
             blob = pickle.dumps(snap, protocol=pickle.HIGHEST_PROTOCOL)
+            pool.ensure_memory()
             key = (uuid.uuid4().hex, int(seed))
             if scenario_chunk is None or int(scenario_chunk) <= 0:
                 # adaptive: about four tasks per worker; the snapshot travels by file,
@@ -2906,17 +2977,25 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
                 chunk = max(1, int(scenario_chunk))
             chunks = [list(range(a, min(a + chunk, n_scenarios))) for a in range(0, n_scenarios, chunk)]
             tasks = [(key, blob, int(seed), ch, pol, kw) for pol in policies for ch in chunks]
-            if deadline is None:
-                flat = list(pool.ex.map(_run_task, tasks))
-            else:
-                futs = [pool.ex.submit(_run_task, tk) for tk in tasks]
-                remaining = float(deadline) - time.perf_counter()
-                done, not_done = wait(futs, timeout=max(remaining, 0.0))
-                if not_done:
+            # Poll memory while the workers run; if available memory falls below half
+            # the reserve, stop the workers and raise instead of exhausting the machine.
+            import psutil
+            critical = 0.5 * pool.reserve_bytes()
+            futs = [pool.ex.submit(_run_task, tk) for tk in tasks]
+            not_done = set(futs)
+            while not_done:
+                if deadline is not None and time.perf_counter() >= float(deadline):
                     for f in not_done:
                         f.cancel()
                     raise EvaluationTimeout(time.perf_counter() - t_start)
-                flat = [f.result() for f in futs]
+                if psutil.virtual_memory().available < critical:
+                    for f in not_done:
+                        f.cancel()
+                    pool.kill()
+                    raise MemoryError("rollout evaluation stopped: available memory fell below "
+                                      f"{critical / 1024**3:.1f} GB")
+                _, not_done = wait(not_done, timeout=0.5)
+            flat = [f.result() for f in futs]
         finally:
             if own:
                 pool.close()

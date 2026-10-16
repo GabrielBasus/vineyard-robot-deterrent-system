@@ -20,8 +20,9 @@ Seeds: development 200-209 (smoke and tuning), final evaluation 300-329. Never t
 on evaluation seeds.
 
 Plan decision procedure (habituation_stl/plan_procedure.py, planner_procedure="plan"):
-  B1_c, B5_c  B1 and B5 in the plan environment (consistent estimator, coupled
-              streams, complete truth deterrence memory),
+  B1_c, B5_c  B1 and B5 in the plan environment: the original system (legacy
+              estimator, paper thresholds, 200-entry truth deterrence memory, paper
+              excitation kernel) with coupled random streams (Plan Sec. 6),
   D_plan      B5 plus deviations admitted by continuation rollouts, U(a) > eps_gate,
               no service protection (plan variant D),
   E_plan      D_plan with pending-service protection (plan variant E),
@@ -160,8 +161,10 @@ VARIANTS: dict[str, tuple[str, dict]] = {
 # Plan decision procedure (planner_procedure="plan", habituation_stl/plan_procedure.py).
 # Every system in this group runs in the same environment: the consistent planner
 # estimator, coupled exogenous random streams and complete truth deterrence memory.
-PLAN_ENV = {"estimator_mode": "consistent", "random_stream_mode": "coupled",
-            "truth_deterrence_memory": "complete"}
+# User decision 2026-10-16: the system keeps its original assumptions; only the plan's
+# components are new. Coupled random streams are kept (Plan Sec. 6 requires them).
+PLAN_ENV = {"estimator_mode": "legacy", "random_stream_mode": "coupled",
+            "truth_deterrence_memory": "window200"}
 # rho = 0.25 over 600 s, the paper's reservation setting, used as a CEILING on a
 # robot's predictive-time share for admitting deviations (it never forces work).
 _PLAN = {"planner_procedure": "plan", "reservation_fraction": 0.25, "reservation_window_s": 600.0}
