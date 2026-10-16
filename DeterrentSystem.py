@@ -72,7 +72,11 @@ from system_stage_helpers import (
     run_truth_generation_stage,
     TruthGenerationCounters,
 )
-from planner_profiles import canonicalize_planner_profile_name, get_planner_profile_values
+from planner_profiles import (
+    canonicalize_planner_profile_name,
+    get_planner_profile_values,
+    resolve_planner_profile_for_estimator,
+)
 from planner_dispatch import (
     evaluate_model_deterring_dispatch_gating,
     has_direct_detection_conflict,
@@ -2357,6 +2361,12 @@ def run_simulation_frames_persistent(
     stl_strict_admission=False,     # Plan §4: drop predictive candidates with U(a) <= gate
     reactive_service_deadline_s=90.0,  # Plan §6 service metrics: reactive deadline after detection (s)
     stl_shadow_overrides=None,      # diagnostic: dict of Dynamics overrides for same-state re-scoring
+    # Estimator-unit settings (docs/consistent_threshold_mapping.md). Defaults are the
+    # historical values; the *_consistent planner profile sets mapped values.
+    stl_kernel_self=1.0,            # Dynamics.kernel_self: suppression amplitude scale (exposure units)
+    min_hotspot_score=1.0e-4,       # patrol / border hotspot excess-intensity floor
+    patrol_cost_weight=1.0,         # travel-cost weight in patrol utility (model units per s)
+    deterring_cost_multiplier=1.0,  # multiplier on cue w_eta / fixed_cost in preventive utility
     # Plan §6 persistent operation:
     habituation_initial_eta=1.0,    # starting cue effectiveness everywhere (1.0 = fresh)
     mu_step_time_s=None,            # scored-run time at which truth demand changes (None = never)
@@ -2551,10 +2561,29 @@ def run_simulation_frames_persistent(
         model_deterring_budget_per_robot_per_hr = 3
         model_deterring_budget_mode = "count_per_hour"
         model_deterring_budget_utility_per_robot_per_hr = 6.0
-    planner_profile = canonicalize_planner_profile_name(planner_profile)
+    planner_profile = resolve_planner_profile_for_estimator(
+        canonicalize_planner_profile_name(planner_profile), estimator_mode
+    )
     planner_profile_values = {}
     if planner_profile:
         planner_profile_values = get_planner_profile_values(planner_profile)
+        # Estimator-unit thresholds (only the *_consistent profiles set these keys).
+        model_deterring_risk_scale = float(
+            planner_profile_values.get("model_deterring_risk_scale", model_deterring_risk_scale)
+        )
+        model_deterring_risk_threshold = float(
+            planner_profile_values.get("model_deterring_risk_threshold", model_deterring_risk_threshold)
+        )
+        model_deterring_busy_risk_override = float(
+            planner_profile_values.get("model_deterring_busy_risk_override", model_deterring_busy_risk_override)
+        )
+        stl_E_star = float(planner_profile_values.get("stl_E_star", stl_E_star))
+        stl_kernel_self = float(planner_profile_values.get("stl_kernel_self", stl_kernel_self))
+        min_hotspot_score = float(planner_profile_values.get("min_hotspot_score", min_hotspot_score))
+        patrol_cost_weight = float(planner_profile_values.get("patrol_cost_weight", patrol_cost_weight))
+        deterring_cost_multiplier = float(
+            planner_profile_values.get("deterring_cost_multiplier", deterring_cost_multiplier)
+        )
         enable_assignment_task_value_term = bool(
             planner_profile_values.get("enable_assignment_task_value_term", enable_assignment_task_value_term)
         )
@@ -4510,6 +4539,7 @@ def run_simulation_frames_persistent(
         strict_admission=bool(stl_strict_admission),
         shadow_overrides=tuple(sorted(dict(stl_shadow_overrides or {}).items())),
         rollout_cue_dynamics=bool(stl_rollout_cue_dynamics),
+        kernel_self=float(stl_kernel_self),
     )
     last_service_t_by_cell = {cell_id: 0.0 for cell_id in range(len(cells))}
     eta_at_apply_samples = []
@@ -5397,6 +5427,9 @@ def run_simulation_frames_persistent(
             stl_local_cell_ids_by_robot=_local_cell_ids_by_robot(planning_robots.keys()),
             stl_pending_events_by_robot=_stl_pending_events_by_robot(now_t, planning_robots.keys()),
             stl_reactive_tasks=_stl_reactive_tasks(now_t),
+            min_hotspot_score=float(min_hotspot_score),
+            patrol_cost_weight=float(patrol_cost_weight),
+            deterring_cost_multiplier=float(deterring_cost_multiplier),
             stl_last_service_t_by_cell=last_service_t_by_cell,
             stl_mode_to_id=mode_to_id,
             stl_cell_id_for_xy_fn=_cell_id_for_xy,
@@ -5531,6 +5564,9 @@ def run_simulation_frames_persistent(
                 "stl_local_cell_ids_by_robot": _local_cell_ids_by_robot(_active_robot_ids()),
                 "stl_pending_events_by_robot": _stl_pending_events_by_robot(now_t, _active_robot_ids()),
                 "stl_reactive_tasks": _stl_reactive_tasks(now_t),
+                "min_hotspot_score": float(min_hotspot_score),
+                "patrol_cost_weight": float(patrol_cost_weight),
+                "deterring_cost_multiplier": float(deterring_cost_multiplier),
                 "stl_last_service_t_by_cell": last_service_t_by_cell,
                 "stl_mode_to_id": mode_to_id,
                 "stl_cell_id_for_xy_fn": _cell_id_for_xy,
