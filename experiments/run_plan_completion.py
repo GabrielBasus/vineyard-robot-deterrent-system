@@ -167,7 +167,10 @@ PLAN_ENV = {"estimator_mode": "legacy", "random_stream_mode": "coupled",
             "truth_deterrence_memory": "window200"}
 # rho = 0.25 over 600 s, the paper's reservation setting, used as a CEILING on a
 # robot's predictive-time share for admitting deviations (it never forces work).
-_PLAN = {"planner_procedure": "plan", "reservation_fraction": 0.25, "reservation_window_s": 600.0}
+# plan_compute_budget_s=1e9: no wall-clock timeout in evaluation runs (the simulator clock
+# is frozen while the planner computes; a budget would only add machine-load dependence).
+_PLAN = {"planner_procedure": "plan", "reservation_fraction": 0.25, "reservation_window_s": 600.0,
+         "plan_compute_budget_s": 1e9}
 # name -> (ladder variant the system is built on, overrides)
 PLAN_VARIANTS: dict[str, tuple[str, dict]] = {
     "B1_c": ("B1", dict(PLAN_ENV)),

@@ -77,6 +77,10 @@ class PlanConfig:
     log_path: Optional[str] = None
     seed: int = 0
     scenario_chunk: int = 0                  # 0 = adaptive (snapshot sent by file, about 4 tasks per worker)
+    # Calibration aids (dev seeds only): observe_only never deviates, so the executed
+    # system is exactly B5; exposure_log_path records every cell's forecast e_z per step.
+    observe_only: bool = False
+    exposure_log_path: Optional[str] = None
 
     @property
     def timed_recovery(self) -> bool:
@@ -261,6 +265,10 @@ class PlanProcedure:
 
     def monitor(self, L):
         """Per-step trigger / reset / violation bookkeeping (no-op unless timed recovery is on)."""
+        if self.cfg.exposure_log_path:
+            e_log = self.cell_exposure(L)
+            with open(self.cfg.exposure_log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"t": float(L["t"]), "e": {str(k): v for k, v in e_log.items()}}) + "\n")
         if not self.cfg.timed_recovery:
             return
         t = float(L["t"])
@@ -317,6 +325,8 @@ class PlanProcedure:
     def decide(self, L) -> list:
         """Run the decision at the simulator's Stage 3; return the deviation rows to inject."""
         cfg = self.cfg
+        if cfg.observe_only:
+            return []
         t0 = float(L["t"])
         idx = len(self.records)
         wall0 = time.perf_counter()

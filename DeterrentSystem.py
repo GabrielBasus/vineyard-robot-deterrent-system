@@ -2441,6 +2441,8 @@ def run_simulation_frames_persistent(
     plan_pool_workers=None,         # rollout worker processes; None = os.cpu_count() - 1
     plan_oracle_fraction=0.25,      # fraction of decisions also evaluated on a truth snapshot
     plan_log_path=None,             # per-decision JSONL records
+    plan_observe_only=False,        # calibration: never deviate (executed system = B5)
+    plan_exposure_log_path=None,    # calibration: per-step forecast cell exposure JSONL
     plan_seed=None,                 # decision-seed root; None = seed
     plan_engine=None,               # test hook: object with evaluate(...) replacing the rollout engine
     report_metrics_end=True,
@@ -7501,6 +7503,8 @@ def run_simulation_frames_persistent(
                 pool_workers=(None if plan_pool_workers is None else int(plan_pool_workers)),
                 oracle_fraction=float(plan_oracle_fraction),
                 log_path=plan_log_path,
+                observe_only=bool(plan_observe_only),
+                exposure_log_path=plan_exposure_log_path,
                 seed=int(seed if plan_seed is None else plan_seed) if (seed is not None or plan_seed is not None) else 0,
             ),
             engine=plan_engine,
@@ -7661,7 +7665,7 @@ def run_simulation_frames_persistent(
         # --------------------------------------------------------------------
         truth_step = _run_truth_generation_algorithm(t)
         _expire_infeasible_predictive_tasks(t)
-        if plan_proc is not None and plan_proc.cfg.timed_recovery:
+        if plan_proc is not None and (plan_proc.cfg.timed_recovery or plan_proc.cfg.exposure_log_path):
             plan_proc.monitor(locals())
 
         # --------------------------------------------------------------------
