@@ -2774,6 +2774,8 @@ def _pool_ping(_x=None):
 def _run_task(args):
     """Worker task: one policy over a chunk of scenarios (trees cached per worker)."""
     key, blob, seed, scenarios, candidate, kw = args
+    kw = dict(kw)
+    slim = bool(kw.pop("slim", False))
     ent = _POOL_CACHE.get(key)
     if ent is None:
         _POOL_CACHE.clear()
@@ -2787,8 +2789,29 @@ def _run_task(args):
     for s in scenarios:
         if s not in trees:
             trees[s] = _sample_scenario_tree(snap, seed, s)
-        out.append(_Sim(snap, trees[s], candidate, scenario=s, **kw).run())
+        r = _Sim(snap, trees[s], candidate, scenario=s, **kw).run()
+        out.append(_slim_result(r) if slim else r)
     return out
+
+
+def _slim_result(r: dict) -> dict:
+    """Keep only what the decision procedure reads (J, pending completions, obligations).
+
+    Full results carry per-task records for every (policy, scenario); at overload one
+    decision returned about 106 MB of pickles that expanded to about 2 GB in the main
+    process (2026-10-18).  The decision is unchanged: service_feasibility reads only
+    completed_t and deadline_t, obligation_satisfaction reads satisfied_t, U reads J.
+    """
+    return {
+        "J": r["J"], "J_bg": r["J_bg"], "J_exc": r["J_exc"], "J_sched": r["J_sched"],
+        "counted_exposure": r["counted_exposure"],
+        "pending_completion": {k: {"completed_t": v["completed_t"], "deadline_t": v["deadline_t"]}
+                               for k, v in r["pending_completion"].items()},
+        "detections": r["detections"], "reactive_completed": r["reactive_completed"],
+        "predictive_completed": r["predictive_completed"], "patrol_completed": r["patrol_completed"],
+        "candidate_completed_t": r["candidate_completed_t"],
+        "obligations": r["obligations"],
+    }
 
 
 # Hard cap on events per scenario tree (overload trees are about 7e4 events).
@@ -2927,7 +2950,7 @@ class EvaluationTimeout(RuntimeError):
 def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scenarios: int = 16, seed: int = 0,
              *, n_workers: Optional[int] = None, reactive_deadline_s: float = 90.0,
              planner_model_advance: str = "per_step", pool: Optional["RolloutPool"] = None,
-             scenario_chunk: int = 8, deadline: Optional[float] = None) -> EvaluationResult:
+             scenario_chunk: int = 8, deadline: Optional[float] = None, slim: bool = False) -> EvaluationResult:
     """Evaluate pi_0 (B5) and every candidate continuation with common random numbers.
 
     Returns per-scenario J_H, pending-task completion times (inf if not
@@ -2946,6 +2969,8 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
             p.deadline_t = p.created_t + float(reactive_deadline_s)
     policies = [NOOP] + list(candidates)
     kw = {"reactive_deadline_s": float(reactive_deadline_s), "planner_model_advance": str(planner_model_advance)}
+    if slim:
+        kw["slim"] = True
     if pool is None and n_workers is None:
         n_workers = min(len(policies) * 2, max(1, (os.cpu_count() or 2) - 1))
     if pool is None and n_workers <= 1:

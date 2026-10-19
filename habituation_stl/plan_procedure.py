@@ -118,7 +118,7 @@ class RolloutEngine:
             self.pool = sr.RolloutPool(self.n_workers)
         return sr.evaluate(snapshot, candidates, n_scenarios=n_scenarios, seed=seed, pool=self.pool,
                            reactive_deadline_s=reactive_deadline_s, deadline=deadline,
-                           scenario_chunk=self.scenario_chunk)
+                           scenario_chunk=self.scenario_chunk, slim=True)
 
     def close(self):
         if self.pool is not None:
