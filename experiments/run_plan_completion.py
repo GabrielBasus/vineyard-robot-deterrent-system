@@ -163,8 +163,10 @@ VARIANTS: dict[str, tuple[str, dict]] = {
 # estimator, coupled exogenous random streams and complete truth deterrence memory.
 # User decision 2026-10-16: the system keeps its original assumptions; only the plan's
 # components are new. Coupled random streams are kept (Plan Sec. 6 requires them).
+# User decision 2026-10-19: exact deterrence pruning (drop an entry only when its
+# remaining suppression is negligible) instead of the 200-entry cap.
 PLAN_ENV = {"estimator_mode": "legacy", "random_stream_mode": "coupled",
-            "truth_deterrence_memory": "window200"}
+            "truth_deterrence_memory": "complete"}
 # rho = 0.25 over 600 s, the paper's reservation setting, used as a CEILING on a
 # robot's predictive-time share for admitting deviations (it never forces work).
 # plan_compute_budget_s=1e9: no wall-clock timeout in evaluation runs (the simulator clock

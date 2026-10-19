@@ -2443,6 +2443,8 @@ def run_simulation_frames_persistent(
     plan_oracle_fraction=0.25,      # fraction of decisions also evaluated on a truth snapshot
     plan_log_path=None,             # per-decision JSONL records
     plan_observe_only=False,        # calibration: never deviate (executed system = B5)
+    plan_log_per_scenario=False,    # diagnostics: per-scenario U and service violations per candidate
+    plan_oracle_all_candidates=False,  # diagnostics: oracle-evaluate every round-0 candidate
     plan_exposure_log_path=None,    # calibration: per-step forecast cell exposure JSONL
     plan_seed=None,                 # decision-seed root; None = seed
     plan_engine=None,               # test hook: object with evaluate(...) replacing the rollout engine
@@ -7506,6 +7508,8 @@ def run_simulation_frames_persistent(
                 oracle_fraction=float(plan_oracle_fraction),
                 log_path=plan_log_path,
                 observe_only=bool(plan_observe_only),
+                log_per_scenario=bool(plan_log_per_scenario),
+                oracle_all_candidates=bool(plan_oracle_all_candidates),
                 exposure_log_path=plan_exposure_log_path,
                 seed=int(seed if plan_seed is None else plan_seed) if (seed is not None or plan_seed is not None) else 0,
             ),

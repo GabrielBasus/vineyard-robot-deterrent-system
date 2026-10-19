@@ -83,6 +83,10 @@ class PlanConfig:
     # Calibration aids (dev seeds only): observe_only never deviates, so the executed
     # system is exactly B5; exposure_log_path records every cell's forecast e_z per step.
     observe_only: bool = False
+    # Diagnostics for the scenario-count test (2026-10-19): per-scenario U and service
+    # violations for every candidate, and oracle evaluation of all round-0 candidates.
+    log_per_scenario: bool = False
+    oracle_all_candidates: bool = False
     exposure_log_path: Optional[str] = None
 
     @property
@@ -174,6 +178,28 @@ def service_feasibility(res, *, protect_late: bool):
                         late_viol = True
         out.append((ontime_viol, late_viol))
     return out, f0
+
+
+def per_scenario_service_violations(res, *, protect_late: bool):
+    """Per candidate, per scenario: [on-time violation, late violation] (same rule as service_feasibility)."""
+    base = res.per_scenario[0]
+    out = []
+    for i in range(1, len(res.per_scenario)):
+        rows = []
+        for s in range(len(base)):
+            pc0 = base[s]["pending_completion"]
+            pca = res.per_scenario[i][s]["pending_completion"]
+            ov = lv = False
+            for key, info in pc0.items():
+                d = float(info["deadline_t"]); c0 = float(info["completed_t"])
+                ca = float(pca[key]["completed_t"]) if key in pca else math.inf
+                if c0 <= d:
+                    ov = ov or not (ca <= d)
+                elif protect_late and math.isfinite(c0):
+                    lv = lv or not (ca <= c0)
+            rows.append([bool(ov), bool(lv)])
+        out.append(rows)
+    return out
 
 
 def obligation_satisfaction(res, obligation_ids):
@@ -411,6 +437,11 @@ class PlanProcedure:
                 "F0_sizes": [int(v) for v in f0], "eval_wall_s": float(res.wall_time_s),
                 "chosen": None,
             }
+            if cfg.log_per_scenario:
+                rnd["cand_indices"] = [int(i) for i in remaining]
+                rnd["U_per_scenario"] = np.asarray(res.U, float).tolist()
+                rnd["viol_per_scenario"] = per_scenario_service_violations(
+                    res, protect_late=bool(cfg.protect_late_tasks))
             for j, i in enumerate(remaining):
                 cand_log[i]["rounds"].append({"round": len(rounds), "U_mean": float(U_mean[j]),
                                               "U_se": float(U_se[j]), "J_mean": float(res.J_mean[j + 1]),
@@ -484,6 +515,15 @@ class PlanProcedure:
         base = sr.decision_snapshot_from_sim_locals(L, horizon_s=cfg.horizon_s,
                                                     reactive_deadline_s=cfg.reactive_deadline_s, oracle=True)
         out = []
+        if cfg.oracle_all_candidates and rounds and rounds[0].get("cand_indices"):
+            idxs = list(rounds[0]["cand_indices"])
+            resA = self.engine.evaluate(base, [cands[i] for i in idxs], n_scenarios=int(cfg.n_scenarios),
+                                        seed=dec_seed, reactive_deadline_s=float(cfg.reactive_deadline_s),
+                                        deadline=None)
+            all_round0 = {"cand_indices": idxs, "U_oracle": np.asarray(resA.U_mean, float).tolist(),
+                          "U_oracle_se": np.asarray(resA.U_se, float).tolist()}
+        else:
+            all_round0 = None
         for k, rnd in enumerate(rounds):
             top = rnd.get("top")
             if top is None:
@@ -504,7 +544,7 @@ class PlanProcedure:
                 "Ja_oracle": float(res.J_mean[1]), "Ja_oracle_se": float(res.J_se[1]),
                 "U_oracle": float(res.U_mean[0]), "U_oracle_se": float(res.U_se[0]),
             })
-        return {"rounds": out, "wall_s": time.perf_counter() - w0}
+        return {"rounds": out, "all_round0": all_round0, "wall_s": time.perf_counter() - w0}
 
     # ------------------------------------------------------------- summary
     def finalize(self, *, exposure_event_log, t_end: float, t_report_offset: float = 0.0) -> dict:
