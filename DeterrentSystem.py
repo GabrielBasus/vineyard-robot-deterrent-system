@@ -2434,6 +2434,7 @@ def run_simulation_frames_persistent(
     plan_service_protection=True,   # pending-service feasibility (plan variant E; False = variant D)
     plan_protect_late_tasks=True,   # optional condition C_j(pi_a) <= C_j(pi_0) for baseline-late tasks
     plan_eps_gate=0.0,              # admission margin eps_gate
+    plan_gate_se_multiplier=0.0,    # admit only if U_mean > eps_gate + k * U_se (Monte Carlo significance)
     plan_E_high=None,               # timed recovery (Plan Eq. 4): all three given = on
     plan_E_low=None,
     plan_T_response_s=None,
@@ -7495,6 +7496,7 @@ def run_simulation_frames_persistent(
                 service_protection=bool(plan_service_protection),
                 protect_late_tasks=bool(plan_protect_late_tasks),
                 eps_gate=float(plan_eps_gate),
+                gate_se_multiplier=float(plan_gate_se_multiplier),
                 reservation_fraction=float(reservation_fraction),
                 E_high=(None if plan_E_high is None else float(plan_E_high)),
                 E_low=(None if plan_E_low is None else float(plan_E_low)),

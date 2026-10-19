@@ -170,7 +170,10 @@ PLAN_ENV = {"estimator_mode": "legacy", "random_stream_mode": "coupled",
 # plan_compute_budget_s=1e9: no wall-clock timeout in evaluation runs (the simulator clock
 # is frozen while the planner computes; a budget would only add machine-load dependence).
 _PLAN = {"planner_procedure": "plan", "reservation_fraction": 0.25, "reservation_window_s": 600.0,
-         "plan_compute_budget_s": 1e9}
+         "plan_compute_budget_s": 1e9,
+         # Gate (user decision 2026-10-18): eps_gate = 0 with Monte Carlo significance,
+         # admit only if the mean paired U exceeds 2 standard errors over scenarios.
+         "plan_eps_gate": 0.0, "plan_gate_se_multiplier": 2.0}
 # name -> (ladder variant the system is built on, overrides)
 PLAN_VARIANTS: dict[str, tuple[str, dict]] = {
     "B1_c": ("B1", dict(PLAN_ENV)),

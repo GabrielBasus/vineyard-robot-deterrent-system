@@ -67,6 +67,9 @@ class PlanConfig:
     service_protection: bool = True          # plan variant E (False: variant D)
     protect_late_tasks: bool = True          # C_j(pi_a) <= C_j(pi_0) for baseline-late finite tasks
     eps_gate: float = 0.0
+    # Monte Carlo significance (user decision 2026-10-18): admit only if the mean paired
+    # benefit exceeds eps_gate + gate_se_multiplier * its standard error over scenarios.
+    gate_se_multiplier: float = 0.0
     reservation_fraction: float = 0.0        # rho: ceiling on a robot's predictive-time share
     E_high: Optional[float] = None           # timed recovery (Plan Eq. 4); all three or none
     E_low: Optional[float] = None
@@ -388,7 +391,7 @@ class PlanProcedure:
                 elif sat is not None and any(
                         any(s0 and not sa for s0, sa in zip(sat[0][oid], sat[j + 1][oid])) for oid in ob_ids):
                     r = "infeasible_obligation"
-                elif not (U_mean[j] > float(cfg.eps_gate)):
+                elif not (U_mean[j] > float(cfg.eps_gate) + float(cfg.gate_se_multiplier) * float(U_se[j])):
                     r = "gate"
                 reasons.append(r)
             # obligation relaxation: no feasible policy (pi_0 or candidate) satisfies it in every scenario
