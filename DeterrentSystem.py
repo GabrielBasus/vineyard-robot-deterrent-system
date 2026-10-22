@@ -4795,6 +4795,10 @@ def run_simulation_frames_persistent(
         if planner_hab_by_robot is None:
             return planner_hab
         return planner_hab_by_robot.field(str(rid))
+
+    # Decision 17 wiring of the B4 pipeline and B5 scoring (TaskGenerator): None in
+    # shared mode, so the generator reads the fleet field exactly as before.
+    _stl_hab_for_robot_fn = None if planner_hab_by_robot is None else _planner_hab_for_robot
     # Drop the φ_hab clause when habituation is disabled: with η≡1 frozen, the
     # hab clause evaluates to a constant in every candidate, which dominates the
     # softmin and collapses all utility scores toward zero, breaking task/mode
@@ -5849,6 +5853,7 @@ def run_simulation_frames_persistent(
             predictive_utility_mode=str(predictive_utility_mode),
             predictive_fixed_deterring_mode=predictive_fixed_deterring_mode,
             stl_hab=planner_hab,
+            stl_hab_for_robot_fn=_stl_hab_for_robot_fn,
             stl_spec_params=stl_spec_params,
             stl_dynamics=stl_dynamics,
             stl_cell_polys=cells,
@@ -5987,6 +5992,7 @@ def run_simulation_frames_persistent(
                 "predictive_utility_mode": str(predictive_utility_mode),
                 "predictive_fixed_deterring_mode": predictive_fixed_deterring_mode,
                 "stl_hab": planner_hab,
+                "stl_hab_for_robot_fn": _stl_hab_for_robot_fn,
                 "stl_spec_params": stl_spec_params,
                 "stl_dynamics": stl_dynamics,
                 "stl_cell_polys": cells,
@@ -7536,7 +7542,15 @@ def run_simulation_frames_persistent(
             "stl_eval_runtime_mean_ms": float(np.mean(runtimes) * 1e3) if runtimes.size else float("nan"),
             "stl_eval_runtime_p95_ms": float(np.percentile(runtimes, 95) * 1e3) if runtimes.size else float("nan"),
             "stl_eval_runtime_p99_ms": float(np.percentile(runtimes, 99) * 1e3) if runtimes.size else float("nan"),
+            **_stl_eval_reevaluation_metrics(runtimes, list(getattr(taskgen, "stl_eval_meta", []) or [])),
             **_stl_ranking_metrics(list(getattr(taskgen, "stl_eval_log", []) or [])),
+            **{
+                f"{k}_first_eval": v
+                for k, v in _stl_ranking_metrics(
+                    [row for row in list(getattr(taskgen, "stl_eval_log", []) or [])
+                     if not (len(row) > 8 and bool(row[8]))]
+                ).items()
+            },
             "exposure_window_s": float(exposure_window_s),
             "value_weighted_exposure_windows": _exposure_windows(),
             **bus.relay_metrics(),
@@ -7658,15 +7672,60 @@ def run_simulation_frames_persistent(
                 out[f"outcome_window{k}_{key}"] = val
         return out
 
+    def _stl_eval_reevaluation_metrics(runtimes, meta):
+        """Follow-up (d): valuation counts and runtime, all valuations and first evaluations only.
+
+        ``meta`` rows (t, robot, is_reevaluation) are parallel to ``runtimes``. A re-evaluation
+        is a repeated valuation of the same candidate (robot, x, y, cue) in the same decision;
+        every valuation is kept, the *_first_eval metrics drop the re-evaluations. Per-decision
+        counts are per (planning time, robot) group, as in _stl_ranking_metrics.
+        """
+        runtimes = np.asarray(runtimes, dtype=float)
+        n = min(int(runtimes.size), len(meta))
+        flags = np.asarray([bool(m[2]) for m in meta[:n]], dtype=bool)
+        first_rt = runtimes[:n][~flags] if n else np.asarray([], dtype=float)
+        per_all, per_first = {}, {}
+        for (t_m, r_m, re_m) in meta[:n]:
+            key = (float(t_m), str(r_m))
+            per_all[key] = per_all.get(key, 0) + 1
+            per_first[key] = per_first.get(key, 0) + (0 if re_m else 1)
+
+        def _q(vals, prefix):
+            arr = np.asarray(list(vals), dtype=float)
+            return {
+                f"{prefix}_mean": float(np.mean(arr)) if arr.size else float("nan"),
+                f"{prefix}_p50": float(np.percentile(arr, 50)) if arr.size else float("nan"),
+                f"{prefix}_p90": float(np.percentile(arr, 90)) if arr.size else float("nan"),
+                f"{prefix}_max": float(np.max(arr)) if arr.size else float("nan"),
+            }
+
+        return {
+            "stl_eval_first_count": int(n - int(np.sum(flags))),
+            "stl_eval_reevaluation_count": int(np.sum(flags)),
+            "stl_eval_reevaluation_fraction": (float(np.sum(flags)) / n) if n else float("nan"),
+            **_q(per_all.values(), "stl_eval_per_decision"),
+            **_q(per_first.values(), "stl_eval_per_decision_first_eval"),
+            "stl_eval_runtime_first_eval_mean_ms": float(np.mean(first_rt) * 1e3) if first_rt.size else float("nan"),
+            "stl_eval_runtime_first_eval_p95_ms": (
+                float(np.percentile(first_rt, 95) * 1e3) if first_rt.size else float("nan")),
+            "stl_eval_runtime_first_eval_p99_ms": (
+                float(np.percentile(first_rt, 99) * 1e3) if first_rt.size else float("nan")),
+            "stl_eval_runtime_total_s": float(np.sum(runtimes)) if runtimes.size else 0.0,
+            "stl_eval_runtime_first_eval_total_s": float(np.sum(first_rt)) if first_rt.size else 0.0,
+        }
+
     def _stl_ranking_metrics(log_rows):
         """Summarize per-decision candidate rankings, masking and travel-recovery gaps.
 
         A decision group is one robot at one planning time. Masked = every candidate U is 0.
         Shadow comparisons use the same snapshot, so they isolate the valuation change.
+        Rows carry a 9th field is_reevaluation (follow-up d); this function uses the rows
+        it is given (the caller reports all rows and first evaluations only).
         """
         groups = {}
         gaps, rel_gaps = [], []
-        for t_row, rid_row, _cell, _mode, u_row, u_sh, gap, eta_now in log_rows:
+        for row in log_rows:
+            t_row, rid_row, _cell, _mode, u_row, u_sh, gap, eta_now = row[:8]
             groups.setdefault((t_row, rid_row), []).append((u_row, u_sh))
             if math.isfinite(gap):
                 gaps.append(gap)

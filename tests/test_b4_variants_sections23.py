@@ -35,7 +35,10 @@ from planner_committed_schedule import emulate_robot_schedule
 from Robot import SlidingWindowTimeTracker
 
 DATA = Path(__file__).resolve().parent / "data" / "b4_variant_A_reference.json"
-_RUNTIME_KEYS = ("stl_eval_runtime_mean_ms", "stl_eval_runtime_p95_ms", "stl_eval_runtime_p99_ms")
+_RUNTIME_KEYS = ("stl_eval_runtime_mean_ms", "stl_eval_runtime_p95_ms", "stl_eval_runtime_p99_ms",
+                 "stl_eval_runtime_first_eval_mean_ms", "stl_eval_runtime_first_eval_p95_ms",
+                 "stl_eval_runtime_first_eval_p99_ms", "stl_eval_runtime_total_s",
+                 "stl_eval_runtime_first_eval_total_s")
 LASER_ID = 2  # mode_labels = (direct_detection, formation, laser, biosonic)
 
 

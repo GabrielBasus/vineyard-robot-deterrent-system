@@ -24,6 +24,16 @@ no preempt_predictive_with_reactive) on the robot's committed tasks only:
         goal without a task (an idle-roam leg): drop the goal;
     record [t, t + dt] in the tracker under the goal task's stream (or idle).
 
+Predictive-time share (follow-up b, 2026-10-21): the rule reads the robot's
+predictive share over its reservation accounting window (reservation_window_s,
+600 s). The emulation advances a COPY of the robot's SlidingWindowTimeTracker
+exactly as the simulator does: the share at step t is read before [t, t + dt] is
+recorded under the stream of the emulated goal task (or "idle"), and segments
+older than t - window drop out. So while the ceiling blocks a predictive task the
+robot waits (recorded idle), the share decays as older predictive time leaves the
+window, and the task becomes eligible at the first step at which the rule allows
+it (share < rho), within the emulated horizon.
+
 Stated modelling conditions of the emulation (see the report / open questions):
   * only the committed tasks (no new arrivals, prunings, expiries or reassignments);
   * motion and the rule's travel estimates use the planner's travel model
@@ -62,7 +72,9 @@ def emulate_robot_schedule(
     tasks       : the robot's committed task rows (never mutated), in active_tasks order.
     select_fn   : select_fn(tasks, t, eta_seconds_fn, predictive_share, robot_is_idle)
                   -> (task | None, urgent), the simulator's dispatch rule.
-    tracker     : a COPY of the robot's SlidingWindowTimeTracker (advanced here) or None.
+    tracker     : a COPY of the robot's SlidingWindowTimeTracker, advanced here step by step
+                  (its predictive share decays over its window during the emulation), or
+                  None (share 0 throughout; only for callers without a reservation tracker).
     Returns {"completions": [(task, t_complete)], "free_t": float, "free_xy": (x, y)}.
     free_t is the first step at which the robot is free of every committed task
     (completion step + dt), now_t if it has none, inf if not free within the horizon.

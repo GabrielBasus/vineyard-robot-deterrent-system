@@ -52,7 +52,12 @@ class TaskGenerator:
         self._predictive_timing_mode = "synthetic"
         # Wall-clock seconds per STL/rollout valuation call (Plan §6 runtime diagnostic).
         self.stl_eval_runtime_s: list[float] = []
-        # One row per STL/rollout valuation: (t, robot, cell, mode, U, U_shadow, gap, eta_now).
+        # Parallel to stl_eval_runtime_s: (t, robot, is_reevaluation) per valuation call.
+        # is_reevaluation: the same candidate (robot, x, y, cue) was already valued in the
+        # same decision (one periodic_patrolling call); follow-up (d) keeps and flags it.
+        self.stl_eval_meta: list[tuple] = []
+        # One row per STL/rollout valuation:
+        # (t, robot, cell, mode, U, U_shadow, gap, eta_now, is_reevaluation).
         self.stl_eval_log: list[tuple] = []
         # Plan Section 3 diagnostic: per-candidate binding (clause, time, cell)
         # records on a sampled fraction of decisions, appended to a JSONL file.
@@ -593,11 +598,19 @@ class TaskGenerator:
                              stl_last_service_t_by_cell: Mapping[int, float] | None = None,
                              stl_mode_to_id: Mapping[str, int] | None = None,
                              stl_cell_id_for_xy_fn: Callable[[float, float], int | None] | None = None,
-                             stl_robot_queue_by_robot: Mapping[str, Mapping[str, Any]] | None = None):
+                             stl_robot_queue_by_robot: Mapping[str, Mapping[str, Any]] | None = None,
+                             stl_hab_for_robot_fn: Callable[[str], Any] | None = None):
         """
         Build patrolling-from-hotspots tasks for each robot at 'now_t'.
         Optionally keep a small deterring window if you also want clustered deterring here.
         By default deterring_window_s=0 to avoid duplicating immediate tasks.
+
+        stl_hab_for_robot_fn (decision 17, planner_hab_mode="per_robot"): rid -> that
+        robot's own planner effectiveness field. When given, every read of planner
+        effectiveness made for robot rid's candidates (legacy_habituation eta scaling
+        and its cue choice, the STL / Eq. 3 valuation and its q_hat) uses that field
+        instead of the fleet field ``stl_hab``. None (default): ``stl_hab`` for every
+        robot, exactly as before.
         """
         if busy_deterring_robots is None:
             busy_deterring_robots = set()
@@ -683,8 +696,13 @@ class TaskGenerator:
         ):
             binding_log_records = []
             self.binding_log_decisions_sampled += 1
+        # Follow-up (d): every valuation is kept; a repeated valuation of the same
+        # candidate (robot, x, y, cue) within this decision is flagged is_reevaluation.
+        stl_eval_seen_keys: set = set()
 
         for rid, rob in robots.items():
+            # Decision 17: the planner effectiveness this robot's own decision reads.
+            rob_stl_hab = stl_hab if stl_hab_for_robot_fn is None else stl_hab_for_robot_fn(str(rid))
             # ----------------------------------------------------------------
             # Algorithm Block: Robot-local field preparation and hotspot search
             # ----------------------------------------------------------------
@@ -1026,7 +1044,7 @@ class TaskGenerator:
 
             def _habituation_eta_for_candidate(x, y, mode):
                 """Return current cue effectiveness for non-STL habituation-aware scoring."""
-                if stl_hab is None:
+                if rob_stl_hab is None:
                     return 1.0
                 target_cell_id = None
                 if callable(stl_cell_id_for_xy_fn):
@@ -1041,7 +1059,7 @@ class TaskGenerator:
                 if mode_id is None:
                     return 1.0
                 try:
-                    return float(stl_hab.effectiveness(int(target_cell_id), int(mode_id)))
+                    return float(rob_stl_hab.effectiveness(int(target_cell_id), int(mode_id)))
                 except Exception:
                     return 1.0
 
@@ -1098,6 +1116,9 @@ class TaskGenerator:
                     target_cell_id = None
                     if callable(stl_cell_id_for_xy_fn):
                         target_cell_id = stl_cell_id_for_xy_fn(float(x), float(y))
+                    eval_key = (str(rid), float(x), float(y), str(mode))
+                    is_reevaluation = eval_key in stl_eval_seen_keys
+                    stl_eval_seen_keys.add(eval_key)
                     _stl_t0 = time.perf_counter()
                     stl_summary = estimate_stl_counterfactual_value(
                         rob.m,
@@ -1105,7 +1126,7 @@ class TaskGenerator:
                         y,
                         mode=mode,
                         mode_to_id=dict(stl_mode_to_id or {}),
-                        hab=stl_hab,
+                        hab=rob_stl_hab,
                         spec_params=stl_spec_params,
                         dynamics=stl_dynamics,
                         cell_polys=list(stl_cell_polys or []),
@@ -1128,11 +1149,13 @@ class TaskGenerator:
                         cue_omega=omega_u,
                         binding_log_fn=(
                             None if binding_log_records is None
-                            else (lambda rec, _rid=str(rid): binding_log_records.append(
-                                {"t": float(now_t), "robot": _rid, **rec}))
+                            else (lambda rec, _rid=str(rid), _re=bool(is_reevaluation):
+                                  binding_log_records.append(
+                                      {"t": float(now_t), "robot": _rid, "is_reevaluation": _re, **rec}))
                         ),
                     )
                     self.stl_eval_runtime_s.append(time.perf_counter() - _stl_t0)
+                    self.stl_eval_meta.append((float(now_t), str(rid), bool(is_reevaluation)))
                     if stl_summary.get("stl_available", False):
                         self.stl_eval_log.append((
                             float(now_t), str(rid), stl_summary.get("stl_target_cell"), str(mode),
@@ -1140,6 +1163,7 @@ class TaskGenerator:
                             float(stl_summary.get("predictive_stl_U_shadow", float("nan"))),
                             float(stl_summary.get("stl_travel_recovery_gap", float("nan"))),
                             float(stl_summary.get("stl_eta_now", float("nan"))),
+                            bool(is_reevaluation),
                         ))
                     stl_u = float(stl_summary.get("predictive_stl_U", 0.0))
                     return {
