@@ -1,116 +1,194 @@
-# Section 4 Implementation Assumptions
+# Section 4: The plan decision procedure (implementation and assumptions)
 
-## Overview
+This document describes the decision procedure of the improvement plan (Plan Sections 4
+and 5) as implemented by `planner_procedure="plan"`. It replaces the earlier description of
+the B4-pipeline continuation rollout (`stl_valuation_mode="continuation_rollout"`, variants
+D and E), which were dropped from the evaluation by Section 6 decision 4; that code is kept
+only for reproduction of earlier results.
 
-Section 4 replaces the integrated-exposure valuation with a continuation rollout
-that models subsequent greedy robot interventions.  The objective is:
+Line numbers refer to commit `32c83b9` (branch `thesis-improvement`). `plan_procedure.py`
+and `scenario_rollout.py` are being edited concurrently; when they move, search for the
+named function.
 
-    U(a) = J_H(pi_0) - J_H(pi_a)
-    J_H   = integral_0^H sum_z e_z(s) ds  under greedy continuation policy pi
+Abbreviations: `PP` = `habituation_stl/plan_procedure.py`, `SR` =
+`habituation_stl/scenario_rollout.py`, `DS` = `DeterrentSystem.py`, `RPC` =
+`experiments/run_plan_completion.py`.
 
-A positive U(a) means the candidate action reduces net accumulated exposure over
-the horizon compared to taking no predictive action.
+## 1. What the executed system is
 
-## Approximations
+The executed system is **B5 plus admitted predictive deviations** (PP:1-11). At every
+replan the simulator runs its normal B5 pipeline (generation, `unc` dispatch, freshest-cue
+rule). Before it does, the procedure may commit *deviations*: forced-first deterrence tasks
+(robot, x, y, cue) that the robot executes first and then rejoins B5 (`SR.forced_task_row`,
+SR:526; executed by DS:8380-8392). A robot without a deviation does exactly what B5 does, so
+the executed fallback is the first action of the baseline continuation pi_0.
 
-### A4.1 -- Constant travel time
+The simulator accepts `planner_procedure="plan"` only for the pipeline the rollout engine
+mirrors (DS:8107-8126): `dispatch_policy="unc"`, lane-projection motion, local motion
+orchestration, mixed predictive topology, no deferred action selection, pass-through
+pre-assignment, ground truth on, no idle roaming, background events stamped at the step start.
 
-All robot-to-cell travel times are approximated as the scalar `avg_travel_s`
-(default 30 s).  Actual travel varies by robot position and cell location.
-The constant-travel approximation is conservative: cells that are closer than
-avg_travel_s will be served sooner, so the true benefit of intervention is at
-least as large as computed.
+Variants (RPC, `PLAN_VARIANTS`): `D_plan` (no service protection), `E_plan` (service
+protection; confirmatory system, decision 2), `E_plan_tr` (+ timed recovery, Plan Eq. 4,
+exploratory), `E_plan_floor` (+ effectiveness floor 0.4, decision 26), `C_plan` (one-intervention
+Eq. 3 valuation, no service protection, decision 8). All run in `PLAN_ENV` (legacy estimator,
+coupled random streams, complete truth deterrence memory, `stl_forecast_correction=True`).
 
-### A4.2 -- Greedy intervention mode
+## 2. Algorithm: Plan Section 5 steps 1-6 with code locations
 
-Default (`rollout_cue_dynamics=False`): subsequent greedy interventions always use
-mode 0 effectiveness from the hab snapshot at planning time, with suppression
-strength `beta[0]`.  Mode selection is not simulated per step.
+Called at Stage 3 of a step whose replan is due, before the B5 replan (DS:8318-8324:
+`active_tasks.extend(plan_proc.decide(locals()))`). The simulator clock is frozen while the
+procedure computes.
 
-With `rollout_cue_dynamics=True` (Plan Section 3, "value future cue use"): each
-greedy intervention picks the mode maximizing `eta(c, m) * beta[m]` on the
-rollout's habituation copy, evaluated at its own application time
-`apply_t = t_assign + avg_travel_s`, and suppresses with that mode's `q = eta(c, m)`
-and `beta[m]`.  This is a myopic per-intervention rule (best cue now), not an
-optimization over the rest of the rollout; it mirrors a variety-seeking executor
-rather than the planner's own STL-scored mode choice.
+**Step 1. Reconstruct and freeze one snapshot.**
+`PP.decide` (PP:535) builds `SR.decision_snapshot_from_sim_locals(L, ...)` (PP:547; SR:3575).
+`start_stage="replan"`: exactly the state the B5 dispatcher is about to see (truth and expiry
+stages of step t done, nothing of the replan done). The policy side (robots, their
+estimators, tasks, TaskGenerator state, planner habituation, commitments) is planner
+information; the world (background, excitation parents, suppression terms, cue parameters)
+is the planner's belief (`SR.planner_forecast_from_sim_locals`, SR:3468). Pending reactive
+tasks get deadlines d_j = creation + `reactive_override_slack_s` (90 s). The horizon must
+cover every pending deadline (assertion PP:554). With an information provider (decision 17,
+per-robot information sets), the snapshot is restricted to what reached the decision's
+robots (PP:549-551, `SR.restrict_snapshot_to_information`, SR:3653); `None` = instant full
+sharing.
 
-### A4.3 -- Habituation state inside the rollout
+**Step 2. Baseline continuation.** pi_0 = the B5 decision rule mirrored in the engine
+(`SR._Sim`, SR:1252) continued from the snapshot for horizon H (`forecast_horizon_s`,
+300 s). Evaluated together with the candidates in step 3 (pi_0 is policy 0 of every
+evaluation).
 
-Default (`rollout_cue_dynamics=False`): habituation is frozen.  The hab object is
-the snapshot at the moment of planning; neither pending events, the candidate, nor
-greedy interventions deplete it, and no recovery is modeled between steps.  The
-candidate's own q_hat still comes from `_compute_q_hat` (which, under
-`forecast_correction`, accounts for pending events and travel-time recovery).
-Because repeated cues are never depleted, the frozen rollout cannot see that a
-candidate consumes a fresh cue the continuation would later need, so U(a) is
-blind to the value of preserving a cue.
+**Step 3. Candidates and their continuations.** Candidates are every (robot, preventive seed,
+cue) pair that B5's own generation scores at t (`SR.generation_details`, SR:3696;
+`PP.generate_candidates`, PP:510). Before evaluation a candidate is excluded if its robot
+already executes a deviation (`robot_committed`) or its predictive-time share is not below
+rho = 0.25 over 600 s (`ceiling`, PP:562-577; share = `Robot.predictive_share`, which counts
+patrol time as predictive, user decision 2026-10-15). pi_0 and all remaining candidates are
+evaluated by `SR.evaluate` (SR:3137; via `PP.RolloutEngine`, PP:161) with **16 Monte Carlo
+scenarios and common random numbers**: one scenario tree of exogenous events per scenario
+(`SR._sample_scenario_tree`, SR:675), shared by every policy; action-dependent intensities,
+detections and tasks are simulated inside each policy's rollout. Each candidate's
+continuation is "candidate first, then B5" (engine rule R12, SR:171).
 
-With `rollout_cue_dynamics=True`: the rollout works on `hab.copy()` (the live
-object is never mutated) and processes events chronologically through a
-time-ordered queue:
+**Step 4. Feasibility and explicit relaxation.** Per candidate, in this order (PP:604-623):
+* `infeasible_service` (service protection, E only): F0^s = {j : C^s_j(pi_0) <= d_j} per
+  scenario s; reject if any j in F0^s has C^s_j(pi_a) > d_j in any scenario
+  (`PP.service_feasibility`, PP:266). Uncompleted or dropped tasks have C = +inf.
+* `infeasible_late` (E only, `plan_protect_late_tasks=True`): a baseline-late task with
+  finite C^s_j(pi_0) must not finish later under pi_a.
+* `infeasible_obligation` (timed recovery only): an obligation pi_0 satisfies in a scenario
+  must be satisfied by pi_a in that scenario.
+* `floor` (E_plan_floor only): planner q_hat at the candidate's application < 0.4 in any
+  scenario where it is applied (never-applied candidates are exempt; decision 26).
+Obligation relaxation (decision 28, PP:626-642): an obligation that neither pi_0 nor any
+otherwise feasible candidate satisfies in every scenario is kept as a **bounded
+violation**: it imposes no dominance constraint, and selection minimises its exceedance
+(step 5). `plan_obligation_relaxation="drop"` reproduces the earlier rule.
 
-* known pending events `(rel_t, cell, mode)` deplete their cue at `rel_t`;
-* the candidate suppresses with q_hat from `_compute_q_hat` and depletes
-  `(cell, mode)` at `lead`;
-* each greedy intervention is assigned at a step time but resolved at its
-  `apply_t`: the copy is recovered to `apply_t` (after all earlier applications),
-  the mode and q are read, the suppression is added, and the cue is depleted with
-  `hab.apply(c, m)` (including cross-mode generalization when `gamma > 0`);
-* recovery between events uses `hab.recover(dt)` (Eq. 6).
+**Step 5. Selection and admission.** Admit only if the Monte Carlo gate passes:
+U_mean > eps_gate + k * U_se with eps_gate = 0 and k = 2 (user decision 2026-10-18; PP:620),
+U(a) = J_H(pi_0) - J_H(pi_a) paired over scenarios. Among admissible candidates of ALL robots
+the fleet-wide argmax of U is committed (PP:687); with bounded obligations the choice is
+lexicographic: smallest mean-over-scenarios exceedance of E_low summed over the kept
+obligations, then largest U, and a candidate is chosen only if its exceedance is not larger
+than pi_0's (PP:670-685). The committed deviation is added to the snapshot and the remaining
+robots' candidates are re-evaluated (sequential commitment, multiagent rollout; PP:694-731),
+until no candidate is admissible, none remain, or the budget is exhausted. Executing "its
+first action" = injecting the forced-first task; B5 then replans around it.
 
-Applications are resolved lazily, just before the exposure sample they can affect
-is read (any event with time <= the grid time read at a greedy step).
+**Step 6. Record and replan.** Each decision appends a JSONL record (PP:756-774): every
+candidate with its per-round U mean/SE, J, q_hat range at application, rejection reason and
+final status (`REJECTION_REASONS`, PP:80); per round J0, F0 sizes, evaluation wall time and
+the terminal summary (decision 30: unfinished tasks by stream, residual exposure rate and
+busy robots at t + H, per policy and scenario); the admitted deviations with B5's own rank
+of the same choice (decision 12) and predicted travel (decision 13); runtime and timeout
+flag; F0-protected tasks (decision 29). At run end `PP.finalize` (PP:867) attaches realized
+exposure over [t, t + H], realized travel of deviations and the realized deadline outcome of
+F0-protected tasks, and `PP.summary_metrics` (PP:888) returns the run metrics. Replanning at
+the next `task_replan_period_s` (45 s) uses fresh observations; outstanding timed-recovery
+obligations persist across replans (`PP.monitor`, PP:461, called every step at DS:8314).
 
-Remaining approximations under the flag:
+## 3. Runtime measurement
 
-* Travel is still the constant `avg_travel_s` (A4.1), so application times are
-  approximate and every greedy intervention lands exactly `avg_travel_s` after
-  assignment.
-* Pending events only deplete cues; their suppression is not added to the
-  rollout exposure (unchanged from the default, which ignores them entirely
-  apart from robot availability).
-* The candidate's q_hat is computed from the live hab by `_compute_q_hat`, not
-  from the rollout copy.  With `forecast_correction=True` the two agree (same
-  pending events, same recovery); with it off, q_hat is the decision-time eta.
-* Suppressions on the same cell are still independent and additive in effect
-  (A4.4): no overlap or saturation between them.
-* If a greedy step falls within half a monitor period of an application time,
-  that application may be resolved one step early relative to a later-assigned
-  intervention; with the default `avg_travel_s=30` and `monitor_dt=30` this
-  ordering slip cannot occur for greedy interventions (apply_t - t_assign = 30 s
-  > monitor_dt / 2), and recovery is never run backward.
+* Per decision: `runtime_s` = wall clock from entry of `decide` to the end of selection
+  (`time.perf_counter`, PP:542 and PP:739), excluding the oracle evaluation (which runs
+  after, PP:771-773, and is a diagnostic). Per round `eval_wall_s` (engine wall time).
+* Per run: `plan_runtime_mean_s`, `plan_runtime_p95_s`, `plan_runtime_p99_s`,
+  `plan_runtime_max_s`, `plan_candidates_per_decision_mean`, `plan_evaluated_candidates_total`.
+* Evaluation runs use no budget (`plan_compute_budget_s=1e9`, decision 16): the simulator
+  clock is frozen during planning, so a budget would only add machine-load dependence.
+  Runtimes therefore depend on the rollout pool size (memory-capped, at most 12 workers) and
+  on concurrent load: the evaluation (`run_plan_studies --study all`) runs two plan runs at
+  once AND overlaps ordinary simulations with them (user decision 2026-10-22), so the
+  quantiles describe that loaded machine, not an idle one or a real-time guarantee.
 
-### A4.4 -- Analytic exposure trajectories
+## 4. Fallback behavior
 
-Cell exposure between greedy steps is evaluated from the analytic nominal signal
-updated by suppressions that have already been applied in this rollout.  This is
-the same analytic model used by the STL monitor and the integrated-exposure
-objective.  Interaction between suppressions (two robots acting on the same cell
-at overlapping times) is not modeled; each suppression is computed independently.
+* **No admissible candidate:** nothing is injected; every robot executes B5 (the first
+  action of pi_0).
+* **Timeout** (`plan_compute_budget_s`; exploratory timeout study only, 45 s): the
+  evaluation is cancelled when the wall-clock deadline passes (`SR.EvaluationTimeout`,
+  SR:3129); deviations committed in earlier rounds of the same decision stay committed;
+  every candidate not decided gets status `timeout`; the worker pool is killed and restarted
+  so the next decision gets its full budget (PP:178-184). Reported: `plan_timeouts`,
+  `plan_timeout_rate`.
+* **Memory:** the rollout pool is sized from available memory (30% reserve, 1.5 GB per
+  worker, cap 12; SR:3013-3053) and shrinks or stops (MemoryError) if available memory falls
+  below the reserve. A memory stop ends the run; the harness records it as a failed job and
+  never substitutes results.
 
-## Service Protection (Plan §4E)
+## 5. Stated assumptions of the procedure
 
-The service protection filter (variant E) checks feasibility under the baseline
-robot availability, then verifies that committing one robot to the candidate action
-for `lead_s` seconds does not prevent any already-feasible reactive task from
-being served.
+All of them are also listed in `docs/STATED_ASSUMPTIONS.md`.
 
-A reactive task with deadline `d` is feasible when at least one robot is free
-at or before `d - avg_travel_s`.  The filter rejects the candidate if any such
-task becomes infeasible under the candidate robot commitment.
+1. **Planner world = legacy estimator belief** (user decision 2026-10-16): the rollout world
+   is the robots' legacy SESTPP estimates, which differ from the truth in form and units
+   (engine residual R14). Plan Eq. 20 is kept: the legacy world forecast does not generate
+   future offspring (SR:401-405).
+2. **Engine residual differences R1-R14** between the engine's B5 and the real B5
+   (`SR.B5_RESIDUAL_DIFFERENCES`, SR:141-187): frozen zones and health, lane-projection
+   motion only, same-step event order, cell-expected exposure weights, node-snapped
+   offspring kernels in the J integral, planner world in place of truth, unmirrored
+   metrics/telemetry, no `predictive_action_variants`, no diagnostic counters, scenario-keyed
+   patrol jitter, no preventive-capacity recomputation, candidate-first execution rule,
+   planner-model mu EMA only through the estimators, belief snapshots.
+3. **16 scenarios with common random numbers** (user decision 2026-10-21 after the
+   scenario-count test): J_hat is a Monte Carlo mean, not the planner-model expectation.
+4. **Gate**: eps_gate = 0 with a 2-standard-error Monte Carlo significance margin.
+5. **Reservation as a ceiling that counts patrols**: a robot with predictive share >= rho
+   (patrol time included) proposes no deviation; the ceiling never forces work.
+6. **Finite horizon, no terminal cost**: J_H stops at t + H; a pending task not completed by
+   t + H has completion time +inf in every comparison (decision 30); the terminal summary
+   is logged, not costed.
+7. **Deadlines**: d_j = creation + 90 s for every reactive task (no per-task deadlines).
+8. **Service protection protects predicted completions only** (Plan Sec. 4): no guarantee
+   under unforecast arrivals or travel error; the disturbance study measures F0-protected
+   tasks that still missed.
+9. **Timed-recovery thresholds** E_high = 323.8, E_low = 29.1, T_response = 300 s are pooled
+   over loads from dev seeds 200-209 under B5 (docs/calibration/timed_recovery_thresholds.json);
+   a stand-in for physical values (no physical values exist).
+10. **Effectiveness floor** 0.4 on planner q_hat at application, any applied scenario.
+11. **Sequential commitment**: one deviation per robot per decision, fleet argmax per round;
+    no joint optimisation over robots.
+12. **Information**: instant full sharing by default; per-robot information sets via the
+    information provider (decision 17) with relays as in `docs/communication_assumptions.md`.
+13. **No coverage requirement** in D/E (decision 25); A/B keep the original uniform coverage clause.
+14. **Oracle** (diagnostic, Section 5 doc): truth snapshot, 64 independent scenarios.
 
-The filter is conservative: it uses the same constant `avg_travel_s` as the
-rollout (A4.1).
+## 6. Parameters (evaluation values)
 
-## Parameters
-
-| Parameter | Default | Description |
+| Parameter | Value | Source |
 |---|---|---|
-| `n_robots` | 4 | Total number of robots |
-| `avg_travel_s` | 30.0 | Constant travel time to any cell (s) |
-| `service_hold_s` | 20.0 | Time a robot holds at a cell after arrival (s) |
-| `greedy_dt_s` | 45.0 | Greedy assignment interval (s); matches task_replan_period_s |
-| `benefit_gate` | 0.0 | Minimum U(a) to admit action; 0 = admit any positive-benefit action |
-| `service_protection` | False | If True, enable Plan §4E service feasibility filter |
-| `rollout_cue_dynamics` | False | If True, carry cue depletion and recovery through the rollout and choose greedy modes per intervention (A4.2, A4.3); DeterrentSystem kwarg `stl_rollout_cue_dynamics` |
+| `plan_n_scenarios` | 16 | decision 2026-10-21 |
+| `plan_horizon_s` | `forecast_horizon_s` = 300 s | default |
+| `reactive_override_slack_s` (deadline) | 90 s | paper config |
+| `plan_eps_gate`, `plan_gate_se_multiplier` | 0.0, 2.0 | decision 2026-10-18 |
+| `reservation_fraction`, `reservation_window_s` | 0.25, 600 s (ceiling) | paper rho |
+| `plan_compute_budget_s` | 1e9 (none); 45 s in the timeout study | decision 16 |
+| `plan_oracle_fraction`, `plan_oracle_scenarios` | 0.25, 64 | decision 31 |
+| `plan_oracle_all_candidates` | True | decision 12 |
+| `plan_obligation_relaxation` | `bounded_violation` | decision 28 |
+| `plan_E_high`, `plan_E_low`, `plan_T_response_s` | 323.8, 29.1, 300 s (E_plan_tr) | 2026-10-17 |
+| `plan_eta_floor` | 0.4 (E_plan_floor) | decision 26 |
+| `plan_valuation` | `continuation`; `one_intervention` (C_plan) | decision 8 |
+| `task_replan_period_s` | 45 s | paper config |

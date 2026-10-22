@@ -1,5 +1,11 @@
 """
-run_persistent_operation.py -- Plan §6 persistent operation experiment.
+run_persistent_operation.py -- Plan §6 persistent operation experiment (EARLIER DESIGN).
+
+SUPERSEDED for the evaluation by `py -3.10 -m experiments.run_plan_studies --study persistent`,
+which implements decision 22 (production T_rec 1800 s only, 5400 s runs, outcome windows
+[0, 1800) and [1800, 5400], fresh vs depleted-from-B5_c start, demand switch at 2700 s,
+B5_c / D_plan / E_plan, seeds 300-309).  This script is kept for the earlier T_rec sweep;
+its defaults no longer include the dropped rollout variants (decision 4).
 
 The submitted runs last 1800 s from fresh cues with constant demand. This sweep
 extends evaluation to:
@@ -106,8 +112,8 @@ def analyze(rows, outdir: Path, reference: str, t_end: float) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description="Plan §6 persistent operation sweep")
     p.add_argument("--outdir", default="results/testbench/persistent_operation")
-    p.add_argument("--systems", default="B5,A,E_cue_adm")
-    p.add_argument("--reference", default="B5")
+    p.add_argument("--systems", default="B5_c,D_plan,E_plan")
+    p.add_argument("--reference", default="B5_c")
     p.add_argument("--conditions", default=",".join(CONDITIONS))
     p.add_argument("--mu", type=float, default=1e-4)
     p.add_argument("--t-end", type=float, default=T_END_S)

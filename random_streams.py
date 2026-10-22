@@ -38,6 +38,9 @@ PURPOSE_THINNING = 11
 PURPOSE_OFFSPRING = 12
 PURPOSE_DETECTION = 13
 PURPOSE_RELAY = 14
+# Decision 29 disturbance study (user decision 2026-10-22): start time of the unforecast
+# arrival burst, drawn per seed only (identical for every policy of a seed).
+PURPOSE_ARRIVAL_BURST = 15
 
 # Relay message kinds (EventBus neighbor_drop_prob draws, see relay_uniform).
 RELAY_KIND_DETECTION = 1          # key: truth event id
@@ -107,3 +110,15 @@ class CoupledRandomStreams:
                 PURPOSE_RELAY, (int(kind), *_as_key(message_id), robot_key(recipient_id))
             ).random()
         )
+
+    def arrival_burst_start_s(self, lo_s: float = 300.0, hi_s: float = 1200.0) -> float:
+        """Start time (scored-run seconds) of the decision-29 arrival burst.
+
+        Uniform on [lo_s, hi_s] from the stream (seed, PURPOSE_ARRIVAL_BURST); it depends
+        only on the seed, so every variant run with the same seed sees the same burst.
+        """
+        lo, hi = float(lo_s), float(hi_s)
+        if not (hi >= lo):
+            raise ValueError(f"arrival burst window needs hi >= lo, got [{lo}, {hi}]")
+        u = float(self.keyed_rng(PURPOSE_ARRIVAL_BURST, ()).random())
+        return lo + (hi - lo) * u
