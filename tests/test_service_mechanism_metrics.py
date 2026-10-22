@@ -128,10 +128,26 @@ class ServiceAndMechanism(unittest.TestCase):
         exp_truth.recover(float(L["dt"]))      # first step recovers once
         self.assertEqual(len(L["cue_application_log"]), 0)
         np.testing.assert_array_equal(L["truth_hab"].eta, exp_truth.eta)
+        # User decision 2026-10-22 (AUDIT round): the PLANNER starts fresh (eta0 everywhere,
+        # as at a normal run start), only the truth is depleted.
+        self.assertLess(float(np.min(saved["planner_eta"])), 1.0)
         exp_pl = L["planner_hab"].copy()
-        exp_pl.eta = np.asarray(saved["planner_eta"], float)
+        exp_pl.eta = np.full_like(exp_pl.eta, float(L["habituation_initial_eta"]))
         exp_pl.recover(float(L["dt"]))
         np.testing.assert_array_equal(L["planner_hab"].eta, exp_pl.eta)
+        self.assertEqual(L["initial_hab_state_info"]["planner_start"], "fresh")
+        gen.close()
+
+    def test_decision22_depleted_start_planner_fresh_per_robot(self):
+        # per_robot: every robot's own field also starts fresh
+        gen = ds.run_simulation_frames_persistent(**_b5c_params(30.0, initial_hab_state_path=self.state_path,
+                                                                planner_hab_mode="per_robot"))
+        next(gen)
+        L = gen.gi_frame.f_locals
+        for rid in L["robots"]:
+            np.testing.assert_array_equal(L["_planner_hab_for_robot"](rid).eta, L["planner_hab"].eta)
+        self.assertTrue(np.all(L["planner_hab"].eta == L["planner_hab"].eta.flat[0]))
+        self.assertLess(float(np.min(L["truth_hab"].eta)), float(np.min(L["planner_hab"].eta)))
         gen.close()
 
 

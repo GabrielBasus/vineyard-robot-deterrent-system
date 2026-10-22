@@ -51,9 +51,15 @@ class RobotHabituationState:
         self.t = float(now_t)
 
     def _recover_eta(self, eta: np.ndarray, dt: float) -> np.ndarray:
+        """Recovery over dt by HabituationField.recover, the planner field's own routine
+        (Plan Section 2 "same state-update routine"; user decision 2026-10-22 AUDIT round),
+        applied to a scratch copy.  dt <= 0 leaves eta unchanged."""
         if dt <= 0.0:
             return eta
-        return 1.0 - (1.0 - eta) * math.exp(-float(dt) / float(self.field.T_rec))
+        scratch = self.field.copy()
+        scratch.eta = np.array(eta, dtype=float, copy=True)
+        scratch.recover(float(dt))
+        return scratch.eta
 
     def apply(self, t_event: float, cell: int, mode: int) -> None:
         """Apply one received intervention (own completion or relayed message)."""

@@ -1417,6 +1417,7 @@ class _Sim:
         self.obl_sat = {}
         self.obl_min_e = {}
         self.obl_e_deadline = {}
+        self._obl_deadline = {}
         if self.obligations:
             XX, YY = np.meshgrid(snap.xs, snap.ys, indexing="xy")
             owner = np.full(XX.shape, -1, np.int64)
@@ -1427,6 +1428,7 @@ class _Sim:
                 owner[ins] = cid
             self._cell_owner = owner
             for ob in self.obligations:
+                self._obl_deadline[ob["id"]] = float(ob["deadline_t"])
                 self.obl_sat[ob["id"]] = math.inf
                 self.obl_min_e[ob["id"]] = math.inf
                 self.obl_e_deadline[ob["id"]] = math.nan
@@ -2467,8 +2469,13 @@ class _Sim:
             "patrol_completed": int(self.patrol_completed),
             "candidate_completed_t": float(self.candidate_completed_t),
             "forced_completed": dict(self.forced_completed),
+            # user decision 2026-10-22: an obligation whose deadline lies after t0 + H and that
+            # is unmet at t0 + H is OPEN (neither met nor failed); e_deadline then holds e_z at
+            # the last rollout step t0 + H (horizon proxy)
             "obligations": {oid: {"satisfied_t": float(self.obl_sat[oid]), "min_e": float(self.obl_min_e[oid]),
-                                  "e_deadline": float(self.obl_e_deadline[oid])}
+                                  "e_deadline": float(self.obl_e_deadline[oid]),
+                                  "open": bool(not math.isfinite(self.obl_sat[oid])
+                                               and float(self._obl_deadline[oid]) > t_end + 1e-9)}
                             for oid in self.obl_sat},
             "terminal": terminal,
             "terminal_summary": self._terminal_summary(t_end, pend, new),
@@ -3895,10 +3902,11 @@ def robot_information_snapshot(L: dict, snap: RolloutSnapshot, robot_id, *, orac
         block) is the record r knows (``_known_deterrences_for_robot(r)``: r's own
         completions plus the intervention records that reached r, same message id, delay
         and drop as the habituation records).  The other robots' poses, goals and tasks
-        stay the centralized task state.  Each robot's own detection history
-        (Robot.recent_events, read by B5's detection-cluster seeds) is kept as the fleet
-        state: what r believes about another robot's detections is not decided (open
-        question in the report).
+        stay the centralized task state.  Detection histories (Robot.recent_events, read
+        by B5's detection-cluster seeds; user decision 2026-10-22): r's own is its own
+        recent_events; another robot q's is ONLY q's detections that reached r through the
+        existing (lossy: border radius, neighbors only; delayed / dropped) detection relay
+        (``_detection_history_for_robot(r, q)``).
     Oracle snapshots (``oracle=True``) keep the truth world and change only the policy
     side (r's estimator copies, effectiveness record and action record), so the oracle
     evaluates exactly the policies the planner evaluated with r's information.
@@ -3910,9 +3918,15 @@ def robot_information_snapshot(L: dict, snap: RolloutSnapshot, robot_id, *, orac
     out.recent_deterrences = list(L["_known_deterrences_for_robot"](rid))
     own_model = L["robots"][rid].m
     robots = []
+    hist_fn = L.get("_detection_history_for_robot")
     for rs in snap.robots:
         planner = copy.copy(rs.planner)            # shallow: pose-independent robot fields shared read-only
         planner.m = copy.deepcopy(own_model)      # r's estimator for every robot (one independent copy each)
+        if hist_fn is not None and str(rs.rid) != rid:
+            # user decision 2026-10-22: another robot's detection history in r's beliefs is
+            # only that robot's detections that reached r via the (lossy, delayed) relay
+            maxlen = getattr(rs.planner.recent_events, "maxlen", None)
+            planner.recent_events = deque(hist_fn(rid, rs.rid), maxlen=maxlen)
         robots.append(dataclasses.replace(rs, planner=planner))
     out.robots = robots
     if not oracle:

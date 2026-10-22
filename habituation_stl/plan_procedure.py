@@ -16,7 +16,9 @@ Decision procedure at a replan time t (Plan Sec. 5, steps 1 to 6):
    start_stage="replan": exactly the state the B5 dispatcher sees).
 2./3. Candidates: every (robot, preventive seed, cue) pair B5's generation
    scores at t (``generation_details``), for robots that are free (no deviation
-   still executing) and below the predictive-time ceiling.  pi_0 and all
+   still executing).  There is NO reservation ceiling on admission (user decision
+   2026-10-22, AUDIT round: "no ceiling anywhere"); the robots' predictive-time
+   shares are logged only.  pi_0 and all
    candidates are evaluated by Monte Carlo continuation rollouts with common
    random numbers (``scenario_rollout.evaluate``), one region (the whole
    field) for every robot so U is comparable across robots.
@@ -35,7 +37,7 @@ Decision procedure at a replan time t (Plan Sec. 5, steps 1 to 6):
 Section 6 additions (user decisions 2026-10-21):
 
 * valuation="one_intervention" (decision 8, variant C_plan): same candidates,
-  ceiling, gate, fleet argmax and sequential commitment as D_plan, but U(a) is the
+  gate, fleet argmax and sequential commitment as D_plan, but U(a) is the
   one-intervention Eq. 3 counterfactual (scenario_rollout.one_intervention_J): in
   both arms the world evolves from the snapshot (every past suppression term kept)
   with NO future intervention of any robot, except that in arm a the candidate's
@@ -88,7 +90,6 @@ import numpy as np
 from habituation_stl import scenario_rollout as sr
 
 REJECTION_REASONS = (
-    "ceiling",              # robot's predictive-time share >= rho (reservation as a ceiling)
     "robot_committed",      # robot already executes a deviation (earlier decision or earlier round)
     "infeasible_service",   # some scenario: a task in F0^s finishes after its deadline
     "infeasible_late",      # some scenario: a baseline-late task finishes later than under pi_0
@@ -115,7 +116,9 @@ class PlanConfig:
     # Monte Carlo significance (user decision 2026-10-18): admit only if the mean paired
     # benefit exceeds eps_gate + gate_se_multiplier * its standard error over scenarios.
     gate_se_multiplier: float = 0.0
-    reservation_fraction: float = 0.0        # rho: ceiling on a robot's predictive-time share
+    # rho of the reservation (logged with every decision next to the robots' predictive-time
+    # shares).  NOT an admission rule: the ceiling was removed (user decision 2026-10-22).
+    reservation_fraction: float = 0.0
     E_high: Optional[float] = None           # timed recovery (Plan Eq. 4); all three or none
     E_low: Optional[float] = None
     T_response_s: Optional[float] = None
@@ -349,6 +352,24 @@ def obligation_satisfaction(res, obligation_ids):
                       for r in pol_res]
         sat.append(d)
     return sat
+
+
+def obligation_open_state(res, obligation_ids):
+    """opn[p][oid] = per-scenario (open, e_z at the last tracked step) under policy p.
+
+    User decision 2026-10-22: an obligation whose deadline lies after t0 + H and that is
+    unmet at t0 + H is OPEN in that scenario (neither met nor failed); its e_z at t0 + H
+    is the engine's e_deadline (the last tracked step).  Engines that report no "open"
+    flag (deadline within H, or older results) give open = False."""
+    opn = []
+    for pol_res in res.per_scenario:
+        d = {}
+        for oid in obligation_ids:
+            d[oid] = [(bool(r.get("obligations", {}).get(oid, {}).get("open", False)),
+                       float(r.get("obligations", {}).get(oid, {}).get("e_deadline", math.nan)))
+                      for r in pol_res]
+        opn.append(d)
+    return opn
 
 
 def terminal_table(res):
@@ -602,6 +623,7 @@ class PlanProcedure:
             gen = sr.generation_details(snap0)
         cands = self.generate_candidates(snap0, gen)
         forced = self._forced_robots(L["active_tasks"])
+        # logged only (no ceiling, user decision 2026-10-22 AUDIT round)
         rho = float(cfg.reservation_fraction)
         share = {rs.rid: float(L["robots"][rs.rid].predictive_share(t0)) for rs in snap0.robots}
         status = {}
@@ -610,8 +632,6 @@ class PlanProcedure:
             st = None
             if c.robot_id in forced:
                 st = "robot_committed"
-            elif not (share[c.robot_id] < rho):
-                st = "ceiling"
             status[i] = st
             rank, b5s = self._b5_rank(gen, c)
             cand_log.append({"robot": c.robot_id, "x": c.x, "y": c.y, "mode": c.mode, "origin": c.label,
@@ -653,6 +673,7 @@ class PlanProcedure:
             n_pol = len(remaining)
             svc, f0, eta_app = [], [], []
             sat_g, J0_g = [], []
+            open_g = []
             U_mean, U_se, Ja_mean, Ja_se = [], [], [], []
             f0_now = []
             for gi, res in enumerate(evals):
@@ -661,6 +682,7 @@ class PlanProcedure:
                 f0.extend(f0_g)
                 f0_now.append((groups[gi][0], f0_membership(res)))
                 sat_g.append(obligation_satisfaction(res, ob_ids) if ob_ids else None)
+                open_g.append(obligation_open_state(res, ob_ids) if ob_ids else None)
                 Um, Us, Jm, Js = self._U(res)
                 U_mean.extend(Um)
                 U_se.extend(Us)
@@ -678,6 +700,22 @@ class PlanProcedure:
                 s_g = sat_g[g_of[j]]
                 return s_g[0][oid], s_g[jl_of[j] + 1][oid]
 
+            def _ob_dominance_violated(j, oid):
+                """Dominance of one kept obligation in some scenario (user decision 2026-10-22):
+                pi_0 meets it (within its window, or by t0 + H when the deadline is later)
+                and the candidate does not; or neither meets it, it is OPEN under both
+                (deadline after t0 + H) and the candidate's e_z at t0 + H exceeds pi_0's."""
+                s0s, sas = _sat(j, oid)
+                o_g = open_g[g_of[j]]
+                o0s, oas = o_g[0][oid], o_g[jl_of[j] + 1][oid]
+                for s0, sa, (op0, e0), (opa, ea) in zip(s0s, sas, o0s, oas):
+                    if s0 and not sa:
+                        return True
+                    if (not s0) and (not sa) and op0 and opa and _finite(e0) and _finite(ea) \
+                            and float(ea) > float(e0):
+                        return True
+                return False
+
             def _reasons(cons_ids):
                 out = []
                 for j in range(n_pol):
@@ -686,8 +724,7 @@ class PlanProcedure:
                         r = "infeasible_service"
                     elif cfg.service_protection and svc[j][1]:
                         r = "infeasible_late"
-                    elif ob_ids and any(
-                            any(s0 and not sa for s0, sa in zip(*_sat(j, oid))) for oid in cons_ids):
+                    elif ob_ids and any(_ob_dominance_violated(j, oid) for oid in cons_ids):
                         r = "infeasible_obligation"
                     elif cfg.eta_floor is not None and any(
                             _finite(v) and float(v) < float(cfg.eta_floor) for v in eta_app[j]):
@@ -771,8 +808,13 @@ class PlanProcedure:
                     exc = obligation_exceedance(evals[0], bounded_ids, float(cfg.E_low))
                     # aggregation: mean over scenarios, summed over the kept obligations
                     X = [float(sum(_m(exc[p][oid]) for oid in bounded_ids)) for p in range(n_pol + 1)]
+                    # user decision 2026-10-22: for an obligation OPEN at t0 + H (deadline later)
+                    # the size is the exceedance of E_low at t0 + H, logged as a horizon proxy
+                    o0 = open_g[0][0] if open_g and open_g[0] is not None else {}
                     rnd["obligation_exceedance"] = {"ids": list(bounded_ids), "X_pi0": X[0],
-                                                    "X": [X[j + 1] for j in range(n_pol)]}
+                                                    "X": [X[j + 1] for j in range(n_pol)],
+                                                    "horizon_proxy_ids": [oid for oid in bounded_ids
+                                                                          if any(op for op, _ in o0.get(oid, []))]}
                     jc = min(admissible, key=lambda j: (X[j + 1], -U_mean[j], j))
                     # pi_0 (U = 0) is preferred unless the candidate's exceedance is not larger;
                     # an admissible candidate has U > eps_gate >= 0, so it wins exact ties
@@ -785,6 +827,8 @@ class PlanProcedure:
                 else:
                     # fleet-level argmax (per-robot information: across the robots' own U)
                     jb = max(admissible, key=lambda j: (U_mean[j], -j))
+                    # ties go to the lowest index (accepted 2026-10-22); count exact ties
+                    rnd["exact_u_tie"] = bool(sum(1 for j in admissible if U_mean[j] == U_mean[jb]) > 1)
             if jb is None:
                 for j, i in enumerate(remaining):
                     status[i] = reasons[j]
@@ -879,6 +923,14 @@ class PlanProcedure:
             "rounds": rounds, "candidates": cand_log, "timed_out": bool(timed_out), "runtime_s": float(runtime),
             "admitted": [adm for _, _, adm in commitments],
             "J_hat_executed": J_exec, "J_hat_executed_se": J_exec_se,
+            # C_plan (one-intervention valuation): J_hat_executed is the ONE-INTERVENTION J
+            # (no future interventions of any robot), not an estimate of the executed
+            # policy's exposure; it is excluded from plan_realized_minus_pred_*.
+            "J_hat_executed_kind": ("one_intervention_J" if cfg.valuation == "one_intervention"
+                                    else "continuation_J"),
+            # final status counts of this decision's candidates (decision-level rejection reasons)
+            "rejected_counts": {k: int(sum(1 for cl in cand_log if cl["status"] == k)) for k in REJECTION_REASONS},
+            "exact_u_tie": bool(any(rnd.get("exact_u_tie") for rnd in rounds)),
             "pending": len(snap0.pending_reactive), "max_deadline_margin_s": float(t0 + cfg.horizon_s - max_deadline)
             if deadlines else None,
             "obligations_outstanding": ob_ids, "obligations_relaxed": relaxed_ids,
@@ -937,9 +989,18 @@ class PlanProcedure:
             return bases[rid]
 
         out = []
-        all_round0 = None
-        if cfg.oracle_all_candidates and rounds and rounds[0].get("cand_indices"):
-            idxs = list(rounds[0]["cand_indices"])
+        all_rounds = []
+        for k, rnd in enumerate(rounds):
+            top = rnd.get("top")
+            chosen = rnd.get("chosen")
+            if cfg.oracle_all_candidates:
+                # user decision 2026-10-22: the oracle evaluates EVERY candidate of every round
+                # (on that round's snapshot: the earlier rounds' commitments included)
+                idxs = list(rnd.get("cand_indices") or [])
+            else:
+                idxs = [top] if top is not None else []
+            if not idxs:
+                continue
             if self.info_provider is None:
                 groups = [(None, idxs)]
             else:
@@ -948,42 +1009,45 @@ class PlanProcedure:
                     if cands[i].robot_id not in order:
                         order.append(cands[i].robot_id)
                 groups = [(rid, [i for i in idxs if cands[i].robot_id == rid]) for rid in order]
-            UA, UA_se, idx_o = [], [], []
+            by_cand = {}
             for rid, idx_g in groups:
-                resA = self._evaluate(base_for(rid), [cands[i] for i in idx_g], n_scenarios=n_o, seed=oseed,
-                                      deadline=None)
-                u, u_se, _, _ = self._U(resA)
-                UA.extend(np.asarray(u, float).tolist())
-                UA_se.extend(np.asarray(u_se, float).tolist())
-                idx_o.extend(idx_g)
-            U_plan = [next(e["U_mean"] for e in cand_log[i]["rounds"] if e["round"] == 0) for i in idx_o]
-            all_round0 = {"cand_indices": idx_o, "U_oracle": UA, "U_oracle_se": UA_se,
-                          "U_planner": U_plan,
-                          # decision 12: rank agreement planner U vs oracle U over all round-0 candidates
-                          "kendall_tau": kendall_tau_b(U_plan, UA)}
-        for k, rnd in enumerate(rounds):
-            top = rnd.get("top")
+                b = base_for(rid if rid is not None else cands[idx_g[0]].robot_id)
+                snap = dataclasses.replace(b, active_tasks=list(b.active_tasks)
+                                           + [copy.deepcopy(row) for _, row, _ in commitments[:k]])
+                res = self._evaluate(snap, [cands[i] for i in idx_g], n_scenarios=n_o, seed=oseed, deadline=None)
+                U_o, U_o_se, J_o, J_o_se = self._U(res)
+                for jl, i in enumerate(idx_g):
+                    by_cand[i] = (float(U_o[jl]), float(U_o_se[jl]), float(J_o[0]), float(J_o_se[0]),
+                                  float(J_o[jl + 1]), float(J_o_se[jl + 1]))
+            if cfg.oracle_all_candidates:
+                idx_o = [i for _, idx_g in groups for i in idx_g]
+                U_plan = [next(e["U_mean"] for e in cand_log[i]["rounds"] if e["round"] == k) for i in idx_o]
+                UA = [by_cand[i][0] for i in idx_o]
+                all_rounds.append({"round": k, "cand_indices": idx_o, "U_oracle": UA,
+                                   "U_oracle_se": [by_cand[i][1] for i in idx_o],
+                                   "U_planner": U_plan,
+                                   "robots": [str(cands[i].robot_id) for i in idx_o],
+                                   "chosen": (int(chosen) if chosen is not None else None),
+                                   # decision 12: rank agreement planner U vs oracle U in this round
+                                   "kendall_tau": kendall_tau_b(U_plan, UA)})
             if top is None:
                 continue
-            b = base_for(cands[top].robot_id)
-            snap = dataclasses.replace(b, active_tasks=list(b.active_tasks)
-                                       + [copy.deepcopy(row) for _, row, _ in commitments[:k]])
-            res = self._evaluate(snap, [cands[top]], n_scenarios=n_o, seed=oseed, deadline=None)
-            U_o, U_o_se, J_o, J_o_se = self._U(res)
+            U_t, U_t_se, J0_t, J0_t_se, Ja_t, Ja_t_se = by_cand[top]
             # planner estimates of the same two policies in the same round
             J0_hat = float(rnd["J0_mean"])
             ca = next((e for e in cand_log[top]["rounds"] if e["round"] == k), None)
             out.append({
-                "round": k, "candidate": int(top), "admitted": bool(rnd.get("chosen") == top),
+                "round": k, "candidate": int(top), "admitted": bool(chosen == top),
                 "J0_hat": J0_hat, "J0_hat_se": float(rnd["J0_se"]),
                 "Ja_hat": float(ca["J_mean"]) if ca else math.nan,
                 "U_hat": float(ca["U_mean"]) if ca else math.nan, "U_hat_se": float(ca["U_se"]) if ca else math.nan,
-                "J0_oracle": float(J_o[0]), "J0_oracle_se": float(J_o_se[0]),
-                "Ja_oracle": float(J_o[1]), "Ja_oracle_se": float(J_o_se[1]),
-                "U_oracle": float(U_o[0]), "U_oracle_se": float(U_o_se[0]),
+                "J0_oracle": J0_t, "J0_oracle_se": J0_t_se,
+                "Ja_oracle": Ja_t, "Ja_oracle_se": Ja_t_se,
+                "U_oracle": U_t, "U_oracle_se": U_t_se,
             })
-        return {"rounds": out, "all_round0": all_round0, "n_scenarios": n_o, "seed": oseed,
-                "wall_s": time.perf_counter() - w0}
+        all_round0 = next((a for a in all_rounds if a["round"] == 0), None)
+        return {"rounds": out, "all_round0": all_round0, "all_rounds": all_rounds, "n_scenarios": n_o,
+                "seed": oseed, "wall_s": time.perf_counter() - w0}
 
     # ------------------------------------------------------------- summary
     def _task_key_fns(self):
@@ -1085,8 +1149,14 @@ class PlanProcedure:
         taus = [r["oracle"]["all_round0"]["kendall_tau"] for r in recs
                 if r.get("oracle") and r["oracle"].get("all_round0")
                 and _finite(r["oracle"]["all_round0"]["kendall_tau"])]
+        # C_plan: J_hat_executed is the one-intervention J, not an estimate of the executed
+        # policy's exposure, so it is kept out of plan_realized_minus_pred_* (reported apart)
         real = [(r["J_hat_executed"], r["realized_exposure"]) for r in recs
-                if r.get("realized_window_complete") and _finite(r["J_hat_executed"])]
+                if r.get("realized_window_complete") and _finite(r["J_hat_executed"])
+                and r.get("J_hat_executed_kind", "continuation_J") == "continuation_J"]
+        real_one = [(r["J_hat_executed"], r["realized_exposure"]) for r in recs
+                    if r.get("realized_window_complete") and _finite(r["J_hat_executed"])
+                    and r.get("J_hat_executed_kind") == "one_intervention_J"]
         adms = [a for r in recs for a in r["admitted"]]
         ranks = [a["b5_rank"] for a in adms if a.get("b5_rank") is not None]
         trav = [(a["pred_travel_s_mean"], a["real_travel_s"]) for a in adms
@@ -1107,6 +1177,10 @@ class PlanProcedure:
                   if ent.get("terminal_summary") for row in ent["terminal_summary"]["per_policy"][0]]
         n_dec = len(recs)
         n_to = int(sum(1 for r in recs if r["timed_out"]))
+        # decision-level rejection reasons (user decision 2026-10-22): per decision, the
+        # number of candidates ending with each reason; groups feasibility (service + late)
+        # and obligation (infeasible_obligation + obligation_exceedance)
+        per_dec = {k: [int((r.get("rejected_counts") or {}).get(k, 0)) for r in recs] for k in REJECTION_REASONS}
         out = {
             "plan_decision_count": n_dec,
             "plan_candidates_total": int(n_cand),
@@ -1116,6 +1190,14 @@ class PlanProcedure:
             "plan_deviations_admitted": int(sum(len(r["admitted"]) for r in recs)),
             "plan_decisions_with_deviation": int(sum(1 for r in recs if r["admitted"])),
             **{f"plan_rejected_{k}": int(v) for k, v in counts.items()},
+            **{f"plan_rejected_{k}_per_decision_mean": _m(v) for k, v in per_dec.items()},
+            "plan_rejected_feasibility": int(counts["infeasible_service"] + counts["infeasible_late"]),
+            "plan_rejected_obligation": int(counts["infeasible_obligation"] + counts["obligation_exceedance"]),
+            "plan_rejected_feasibility_per_decision_mean": _m(
+                [a + b for a, b in zip(per_dec["infeasible_service"], per_dec["infeasible_late"])]),
+            "plan_rejected_obligation_per_decision_mean": _m(
+                [a + b for a, b in zip(per_dec["infeasible_obligation"], per_dec["obligation_exceedance"])]),
+            "plan_exact_u_tie_count": int(sum(1 for r in recs if r.get("exact_u_tie"))),
             "plan_runtime_mean_s": _m(rt), "plan_runtime_p95_s": _q(rt, 95), "plan_runtime_p99_s": _q(rt, 99),
             "plan_runtime_max_s": float(np.max(rt)) if rt else float("nan"),
             "plan_timeouts": n_to,
@@ -1125,23 +1207,30 @@ class PlanProcedure:
             "plan_floor_q_hat_scenario_disagreements": int(floor_disagree),
             "plan_oracle_rounds": len(orc),
             "plan_oracle_scenarios": int(self.cfg.oracle_scenarios),
-            "plan_oracle_J0_se_mean": _m([o["J0_oracle_se"] for o in orc]),
-            "plan_oracle_U_se_mean": _m([o["U_oracle_se"] for o in orc]),
-            "plan_pred_err_J0_bias": _m(e0), "plan_pred_err_J0_mean_abs": _m(np.abs(e0)),
-            "plan_pred_err_J0_p95_abs": _q(np.abs(e0), 95), "plan_pred_err_J0_max_abs": float(np.max(np.abs(e0))) if e0 else float("nan"),
+            "plan_oracle_decisions": int(sum(1 for r in recs if r.get("oracle"))),
+            "plan_oracle_wall_s_total": float(sum(r["oracle"]["wall_s"] for r in recs if r.get("oracle"))),
+            "plan_oracle_J0_se_mean_raw_units": _m([o["J0_oracle_se"] for o in orc]),
+            "plan_oracle_U_se_mean_raw_units": _m([o["U_oracle_se"] for o in orc]),
+            # SECONDARY Prop. 2 (user decision 2026-10-22): raw errors in exposure units
+            # (planner world J vs oracle truth-world J; unit-mixed across loads and cells)
+            "plan_pred_err_J0_bias_raw_units": _m(e0), "plan_pred_err_J0_mean_abs_raw_units": _m(np.abs(e0)),
+            "plan_pred_err_J0_p95_abs_raw_units": _q(np.abs(e0), 95),
+            "plan_pred_err_J0_max_abs_raw_units": float(np.max(np.abs(e0))) if e0 else float("nan"),
             "plan_pred_err_J0_rel_mean": _m(rel0),
-            "plan_pred_err_Ja_bias": _m(ea), "plan_pred_err_Ja_mean_abs": _m(np.abs(ea)),
-            "plan_pred_err_Ja_p95_abs": _q(np.abs(ea), 95),
-            "plan_pred_err_U_bias": _m(eu), "plan_pred_err_U_mean_abs": _m(np.abs(eu)),
-            "plan_pred_err_U_p95_abs": _q(np.abs(eu), 95), "plan_pred_err_U_max_abs": float(np.max(np.abs(eu))) if eu else float("nan"),
+            "plan_pred_err_Ja_bias_raw_units": _m(ea), "plan_pred_err_Ja_mean_abs_raw_units": _m(np.abs(ea)),
+            "plan_pred_err_Ja_p95_abs_raw_units": _q(np.abs(ea), 95),
+            "plan_pred_err_U_bias_raw_units": _m(eu), "plan_pred_err_U_mean_abs_raw_units": _m(np.abs(eu)),
+            "plan_pred_err_U_p95_abs_raw_units": _q(np.abs(eu), 95),
+            "plan_pred_err_U_max_abs_raw_units": float(np.max(np.abs(eu))) if eu else float("nan"),
             "plan_oracle_U_sign_agree_fraction": _m([float(np.sign(o["U_hat"]) == np.sign(o["U_oracle"]))
                                                       for o in orc if _finite(o["U_hat"])]),
             "plan_oracle_admitted_rounds": len(adm_orc),
-            "plan_oracle_admitted_U_oracle_mean": _m([o["U_oracle"] for o in adm_orc]),
+            "plan_oracle_admitted_U_oracle_mean_raw_units": _m([o["U_oracle"] for o in adm_orc]),
             "plan_oracle_admitted_U_oracle_positive_fraction": _m([float(o["U_oracle"] > 0) for o in adm_orc]),
             "plan_oracle_kendall_tau_n": len(taus),
             "plan_oracle_kendall_tau_mean": _m(taus),
             "plan_oracle_kendall_tau_median": _q(taus, 50),
+            **self._prop2_scale_free(recs, None, "plan_prop2_"),
             "plan_dev_differs_from_b5_fraction": _m([float(a["differs_from_b5"]) for a in adms]),
             "plan_dev_b5_rank_mean": _m(ranks),
             "plan_dev_b5_rank1_fraction": _m([float(k == 1) for k in ranks]),
@@ -1159,8 +1248,11 @@ class PlanProcedure:
             "plan_terminal_pi0_residual_rate_mean": _m([row[4] for row in term0]),
             "plan_terminal_pi0_robots_busy_mean": _m([row[5] for row in term0]),
             "plan_realized_windows": len(real),
-            "plan_realized_minus_pred_mean": _m([b - a for a, b in real]),
-            "plan_realized_minus_pred_mean_abs": _m([abs(b - a) for a, b in real]),
+            "plan_realized_minus_pred_mean_raw_units": _m([b - a for a, b in real]),
+            "plan_realized_minus_pred_mean_abs_raw_units": _m([abs(b - a) for a, b in real]),
+            # C_plan only: realized exposure minus the one-intervention J (not a Prop. 2 error)
+            "plan_realized_minus_one_intervention_J_windows": len(real_one),
+            "plan_realized_minus_one_intervention_J_mean_raw_units": _m([b - a for a, b in real_one]),
             "plan_obligations_created": len(self.obligations),
             "plan_obligations_discharged": sum(1 for o in self.obligations if o["status"] == "discharged"),
             "plan_obligations_violated": sum(1 for o in self.obligations if o["status"] == "violated"),
@@ -1175,16 +1267,76 @@ class PlanProcedure:
         return out
 
     @staticmethod
-    def _per_robot_prediction_metrics(recs) -> dict:
-        """User answer Q4 (2026-10-22), per-robot information sets only: Prop. 2 per robot.
-        For every robot, realized J minus that robot's own J-hat of the executed policy over
-        the decisions with a complete realized window; then the mean and the spread (SD over
-        robots, ddof=0, and max - min) of the per-robot mean errors across robots."""
-        err = {}
+    def _prop2_scale_free(recs, robot, prefix) -> dict:
+        """PRIMARY Prop. 2 metrics (user decision 2026-10-22), scale free, on the oracle-sampled
+        decisions; ``robot`` None = every candidate, else only that robot's candidates.
+
+          sign_agree_fraction: sign(U_planner) == sign(U_oracle), over every oracle-evaluated
+            candidate (all candidates of every round with plan_oracle_all_candidates, else
+            the top candidate of each round);
+          kendall_tau_mean / _median / _n: Kendall tau-b between planner U and oracle U per
+            round (rounds with >= 2 candidates of the robot; all-candidates oracle only);
+          admitted_oracle_U_positive_fraction: admitted deviations with oracle U > 0.
+        """
+        sign, taus, adm = [], [], []
         for r in recs:
+            o = r.get("oracle")
+            if not o:
+                continue
+            all_rounds = o.get("all_rounds")
+            if all_rounds:
+                for a in all_rounds:
+                    sel = [j for j, rid in enumerate(a.get("robots") or []) if robot is None or rid == str(robot)]
+                    up = [a["U_planner"][j] for j in sel]
+                    uo = [a["U_oracle"][j] for j in sel]
+                    sign.extend(float(np.sign(x) == np.sign(y)) for x, y in zip(up, uo) if _finite(x))
+                    if len(sel) >= 2:
+                        tau = kendall_tau_b(up, uo)
+                        if _finite(tau):
+                            taus.append(tau)
+                    ch = a.get("chosen")
+                    if ch is not None and ch in a["cand_indices"]:
+                        j = a["cand_indices"].index(ch)
+                        if j in sel:
+                            adm.append(float(a["U_oracle"][j] > 0))
+            else:
+                cand_robot = {i: str(c["robot"]) for i, c in enumerate(r["candidates"])}
+                for e in o["rounds"]:
+                    if robot is not None and cand_robot.get(e["candidate"]) != str(robot):
+                        continue
+                    if _finite(e["U_hat"]):
+                        sign.append(float(np.sign(e["U_hat"]) == np.sign(e["U_oracle"])))
+                    if e["admitted"]:
+                        adm.append(float(e["U_oracle"] > 0))
+        return {
+            f"{prefix}sign_agree_fraction": _m(sign),
+            f"{prefix}sign_agree_n": len(sign),
+            f"{prefix}kendall_tau_mean": _m(taus),
+            f"{prefix}kendall_tau_median": _q(taus, 50),
+            f"{prefix}kendall_tau_n": len(taus),
+            f"{prefix}admitted_oracle_U_positive_fraction": _m(adm),
+            f"{prefix}admitted_oracle_n": len(adm),
+        }
+
+    @classmethod
+    def _per_robot_prediction_metrics(cls, recs) -> dict:
+        """User answer Q4 (2026-10-22), per-robot information sets only: Prop. 2 per robot.
+
+        PRIMARY (scale free, user decision 2026-10-22): per robot r, the plan_prop2_* metrics
+        over r's own candidates (r's U estimates vs the oracle on r's policy side), and their
+        mean and spread (SD, ddof=0) across robots.
+        SECONDARY (raw units): for every robot, realized J minus that robot's own J-hat of the
+        executed policy over the decisions with a complete realized window; then the mean and
+        the spread (SD over robots, ddof=0, and max - min) of the per-robot mean errors."""
+        err = {}
+        rids = set()
+        for r in recs:
+            for c in r.get("candidates", []):
+                rids.add(str(c["robot"]))
             if not r.get("realized_window_complete"):
                 continue
             for rid, v in (r.get("J_hat_executed_by_robot") or {}).items():
+                rids.add(str(rid))
                 if _finite(v):
                     err.setdefault(str(rid), []).append(float(r["realized_exposure"]) - float(v))
         out = {}
@@ -1192,18 +1344,26 @@ class PlanProcedure:
         for rid in sorted(err):
             e = np.asarray(err[rid], float)
             out[f"plan_pr_realized_minus_pred_n_{rid}"] = int(e.size)
-            out[f"plan_pr_realized_minus_pred_mean_{rid}"] = _m(e)
-            out[f"plan_pr_realized_minus_pred_mean_abs_{rid}"] = _m(np.abs(e))
+            out[f"plan_pr_realized_minus_pred_mean_raw_units_{rid}"] = _m(e)
+            out[f"plan_pr_realized_minus_pred_mean_abs_raw_units_{rid}"] = _m(np.abs(e))
             means.append(_m(e))
             abss.append(_m(np.abs(e)))
         m = np.asarray(means, float)
         out.update({
             "plan_pr_robots": len(means),
-            "plan_pr_realized_minus_pred_mean": _m(m),
-            "plan_pr_realized_minus_pred_spread_sd": float(np.std(m)) if m.size else float("nan"),
-            "plan_pr_realized_minus_pred_spread_range": float(m.max() - m.min()) if m.size else float("nan"),
-            "plan_pr_realized_minus_pred_mean_abs": _m(abss),
+            "plan_pr_realized_minus_pred_mean_raw_units": _m(m),
+            "plan_pr_realized_minus_pred_spread_sd_raw_units": float(np.std(m)) if m.size else float("nan"),
+            "plan_pr_realized_minus_pred_spread_range_raw_units": float(m.max() - m.min()) if m.size else float("nan"),
+            "plan_pr_realized_minus_pred_mean_abs_raw_units": _m(abss),
         })
+        per = {rid: cls._prop2_scale_free(recs, rid, "") for rid in sorted(rids)}
+        for rid, d in per.items():
+            for k, v in d.items():
+                out[f"plan_pr_prop2_{k}_{rid}"] = v
+        for k in ("sign_agree_fraction", "kendall_tau_mean", "admitted_oracle_U_positive_fraction"):
+            vals = np.asarray([d[k] for d in per.values() if _finite(d[k])], float)
+            out[f"plan_pr_prop2_{k}_robot_mean"] = _m(vals)
+            out[f"plan_pr_prop2_{k}_robot_spread_sd"] = float(np.std(vals)) if vals.size else float("nan")
         return out
 
 

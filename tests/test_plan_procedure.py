@@ -35,13 +35,14 @@ class StubEngine:
     """evaluate() returns U_fn(candidate, call) for every scenario; optional infeasibility."""
 
     def __init__(self, U_fn, *, infeasible_fn=None, n_s=4, timeout=False, ob_sat_fn=None,
-                 eta_fn=None, ob_e_fn=None, U1_fn=None):
+                 eta_fn=None, ob_e_fn=None, U1_fn=None, ob_open_fn=None):
         self.U_fn = U_fn
         self.infeasible_fn = infeasible_fn or (lambda c, call: False)
         self.ob_sat_fn = ob_sat_fn or (lambda pol_index, ob: True)
         self.eta_fn = eta_fn                     # (candidate, scenario) -> q_hat at application
         self.ob_e_fn = ob_e_fn or (lambda pol_index, ob: math.nan)   # e_z at the deadline
         self.U1_fn = U1_fn                       # one-intervention U (candidate, call)
+        self.ob_open_fn = ob_open_fn or (lambda pol_index, ob: False)   # open at t0 + H
         self.calls = []
         self.n_s = n_s
         self.timeout = timeout
@@ -65,7 +66,8 @@ class StubEngine:
 
         def res(done_t, pol_index, cand=None):
             obs = {ob["id"]: {"satisfied_t": (t0 + 1.0 if self.ob_sat_fn(pol_index, ob) else math.inf),
-                              "min_e": 0.0, "e_deadline": float(self.ob_e_fn(pol_index, ob))}
+                              "min_e": 0.0, "e_deadline": float(self.ob_e_fn(pol_index, ob)),
+                              "open": bool(self.ob_open_fn(pol_index, ob))}
                    for ob in snapshot.obligations}
             out = []
             for s in range(S):
@@ -195,16 +197,73 @@ def test_sequential_commitment_removes_committed_robot():
     assert len(second["forced"]) == len(first["forced"]) + 1
 
 
-def test_ceiling_blocks_deviations_at_rho(b5_run):
+def test_no_reservation_ceiling_on_admission(tmp_path):
+    """User decision 2026-10-22 (AUDIT round): no ceiling anywhere.  With rho = 0 every
+    robot's predictive share is >= rho, yet candidates are evaluated and admitted; the
+    shares are only logged."""
     eng = StubEngine(lambda c, call: 5.0)
-    frames, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0,
-                                reservation_fraction=0.0))
+    path = tmp_path / "c.jsonl"
+    _, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0,
+                           reservation_fraction=0.0, plan_log_path=str(path)))
     m = last["metrics_compact"]
-    assert m["plan_deviations_admitted"] == 0
-    assert m["plan_rejected_ceiling"] > 0
-    assert not eng.calls
-    # rho = 0 changes nothing else for B5 ("unc" ignores reservation_fraction)
-    assert [f["vwe"] for f in frames] == [f["vwe"] for f in b5_run[0]]
+    assert m["plan_deviations_admitted"] >= 1
+    assert eng.calls
+    assert "plan_rejected_ceiling" not in m
+    recs = _records(path)
+    assert all(r["rho"] == 0.0 and set(r["robot_share"]) for r in recs)
+
+
+def test_rejection_reasons_per_decision_and_exact_ties(tmp_path):
+    """Decision-level rejection counts (plan_rejected_*) and the exact-U-tie count."""
+    path = tmp_path / "t.jsonl"
+    _, last = _run(_params(planner_procedure="plan", plan_engine=StubEngine(lambda c, call: 5.0),
+                           plan_oracle_fraction=0.0, plan_log_path=str(path)))
+    m = last["metrics_compact"]
+    recs = _records(path)
+    for k in ("gate", "not_selected", "infeasible_service", "floor", "timeout"):
+        assert m[f"plan_rejected_{k}"] == sum(r["rejected_counts"][k] for r in recs)
+        assert m[f"plan_rejected_{k}_per_decision_mean"] == pytest.approx(
+            float(np.mean([r["rejected_counts"][k] for r in recs])))
+    assert m["plan_rejected_feasibility"] == m["plan_rejected_infeasible_service"] + m["plan_rejected_infeasible_late"]
+    # every candidate has U = 5: the fleet argmax ties whenever two robots compete
+    ties = [r for r in recs if r["exact_u_tie"]]
+    assert m["plan_exact_u_tie_count"] == len(ties) > 0
+
+
+def test_obligation_open_beyond_horizon_progress_constraint(tmp_path):
+    """User decision 2026-10-22: an obligation with deadline > t0 + H unmet at t0 + H is open;
+    if neither pi_0 nor the candidate meets it, the candidate's e_z at t0 + H must not exceed
+    pi_0's (infeasible_obligation otherwise).  Policy 1 of every call meets it (so it is not
+    relaxed); the others leave it open with e = 20 > pi_0's 10 and are rejected."""
+    eng = StubEngine(lambda c, call: 5.0, ob_sat_fn=lambda pol, ob: pol == 1,
+                     ob_open_fn=lambda pol, ob: pol != 1, ob_e_fn=lambda pol, ob: 10.0 if pol == 0 else 20.0)
+    path = tmp_path / "o.jsonl"
+    _, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0,
+                           plan_E_high=0.0, plan_E_low=-1.0, plan_T_response_s=1000.0, plan_log_path=str(path)))
+    m = last["metrics_compact"]
+    assert m["plan_rejected_infeasible_obligation"] > 0
+    assert m["plan_deviations_admitted"] >= 1
+    rec = _records(path)[0]
+    rnd0 = rec["rounds"][0]
+    first = [rec["candidates"][i] for i in rnd0["cand_indices"]]
+    reasons = [c["rounds"][0]["reason"] for c in first]
+    assert reasons[0] is None and all(r == "infeasible_obligation" for r in reasons[1:])
+    # lower e_z at the horizon end than pi_0: no progress violation
+    eng2 = StubEngine(lambda c, call: 5.0, ob_sat_fn=lambda pol, ob: pol == 1,
+                      ob_open_fn=lambda pol, ob: pol != 1, ob_e_fn=lambda pol, ob: 10.0 if pol == 0 else 5.0)
+    _, last2 = _run(_params(planner_procedure="plan", plan_engine=eng2, plan_oracle_fraction=0.0,
+                            plan_E_high=0.0, plan_E_low=-1.0, plan_T_response_s=1000.0))
+    assert last2["metrics_compact"]["plan_rejected_infeasible_obligation"] == 0
+
+
+def test_obligation_within_horizon_unchanged_by_progress_rule():
+    """(c) T_response <= H: the engine never reports an open obligation, so the same stub
+    without "open" gives no progress rejection (the historical dominance rule only)."""
+    eng = StubEngine(lambda c, call: 5.0, ob_sat_fn=lambda pol, ob: pol == 1,
+                     ob_e_fn=lambda pol, ob: 10.0 if pol == 0 else 20.0)
+    _, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0,
+                           plan_E_high=0.0, plan_E_low=-1.0, plan_T_response_s=50.0))
+    assert last["metrics_compact"]["plan_rejected_infeasible_obligation"] == 0
 
 
 def test_timeout_falls_back_to_b5(b5_run):
@@ -342,12 +401,19 @@ def test_engine_tracks_obligations_and_cell_exposure():
     t0 = snap.t0
     snap.horizon_s = 30.0
     snap.obligations = [{"id": "always", "cell": 0, "deadline_t": t0 + 20.0, "e_low": math.inf},
-                        {"id": "never", "cell": 1, "deadline_t": t0 + 20.0, "e_low": -1.0}]
+                        {"id": "never", "cell": 1, "deadline_t": t0 + 20.0, "e_low": -1.0},
+                        # deadline after t0 + H (T_response > H): open at the horizon end
+                        {"id": "beyond", "cell": 1, "deadline_t": t0 + 1000.0, "e_low": -1.0},
+                        {"id": "beyond_met", "cell": 0, "deadline_t": t0 + 1000.0, "e_low": math.inf}]
     res = sr.run_policy(snap, sr.NOOP, n_scenarios=2, seed=3)
     for r in res:
         assert r["obligations"]["always"]["satisfied_t"] == t0 + 1.0
         assert math.isinf(r["obligations"]["never"]["satisfied_t"])
         assert r["obligations"]["never"]["min_e"] > 0.0
+        assert not r["obligations"]["never"]["open"] and not r["obligations"]["always"]["open"]
+        assert r["obligations"]["beyond"]["open"] and not r["obligations"]["beyond_met"]["open"]
+        # e_z at t0 + H (the last rollout step) is the horizon proxy
+        assert math.isfinite(r["obligations"]["beyond"]["e_deadline"]) and r["obligations"]["beyond"]["e_deadline"] > 0
     # cell exposures partition the region rate
     world = sr._World(snap, list(snap.world_suppression or []))
     rate = world.node_exposure_rate(t0)
@@ -506,6 +572,15 @@ class InfoCapture(StubEngine):
                 snapshot.forecast.bg_node_rate,
                 sr.planner_forecast_from_sim_locals(L, t0=snapshot.t0, horizon_s=snapshot.horizon_s)[0].bg_node_rate)),
             "world_hab": snapshot.world_habituation is not None,
+            "events_own_full": all(list(rs.planner.recent_events) == list(L["robots"][rs.rid].recent_events)
+                                   for rs in snapshot.robots if rs.rid == rid),
+            "events_others_relayed": all(
+                list(rs.planner.recent_events) == L["_detection_history_for_robot"](rid, rs.rid)
+                and set(rs.planner.recent_events) <= set(L["robots"][rs.rid].recent_events)
+                for rs in snapshot.robots if rs.rid != rid),
+            "events_others_strict_subset": any(
+                len(rs.planner.recent_events) < len(L["robots"][rs.rid].recent_events)
+                for rs in snapshot.robots if rs.rid != rid),
         })
         return super().evaluate(snapshot, candidates, **kw)
 
@@ -552,13 +627,18 @@ def test_per_robot_information_sets_drive_the_decision(tmp_path):
     assert m["plan_decision_count"] == len(recs)
     assert m["plan_pr_robots"] == len(robot_ids)
     for rid in robot_ids:
-        assert f"plan_pr_realized_minus_pred_mean_{rid}" in m
-    for k in ("plan_pr_realized_minus_pred_mean", "plan_pr_realized_minus_pred_spread_sd",
-              "plan_pr_realized_minus_pred_spread_range", "plan_pr_realized_minus_pred_mean_abs"):
+        assert f"plan_pr_realized_minus_pred_mean_raw_units_{rid}" in m
+    for k in ("plan_pr_realized_minus_pred_mean_raw_units", "plan_pr_realized_minus_pred_spread_sd_raw_units",
+              "plan_pr_realized_minus_pred_spread_range_raw_units", "plan_pr_realized_minus_pred_mean_abs_raw_units"):
         assert math.isfinite(m[k])
-    per = [m[f"plan_pr_realized_minus_pred_mean_{rid}"] for rid in sorted(robot_ids)]
-    assert m["plan_pr_realized_minus_pred_mean"] == pytest.approx(float(np.mean(per)))
-    assert m["plan_pr_realized_minus_pred_spread_range"] == pytest.approx(max(per) - min(per))
+    per = [m[f"plan_pr_realized_minus_pred_mean_raw_units_{rid}"] for rid in sorted(robot_ids)]
+    assert m["plan_pr_realized_minus_pred_mean_raw_units"] == pytest.approx(float(np.mean(per)))
+    assert m["plan_pr_realized_minus_pred_spread_range_raw_units"] == pytest.approx(max(per) - min(per))
+    # primary scale-free Prop. 2 per robot (stub oracle U = planner U)
+    assert m["plan_pr_prop2_sign_agree_fraction_robot_mean"] == pytest.approx(1.0)
+    # user decision 2026-10-22: r's belief of another robot's detection history = relayed only
+    assert all(e["events_own_full"] and e["events_others_relayed"] for e in planner + oracle)
+    assert any(e["events_others_strict_subset"] for e in planner)
 
 
 def test_per_robot_action_record_with_instant_relay_equals_fleet_record():
@@ -638,6 +718,18 @@ def test_oracle_independent_scenarios_and_kendall_tau(tmp_path):
     assert m["plan_oracle_kendall_tau_n"] > 0 and m["plan_oracle_kendall_tau_mean"] == pytest.approx(1.0)
     recs = [r for r in _records(path) if r["oracle"]]
     assert recs and all(r["oracle"]["n_scenarios"] == 8 for r in recs)
+    # user decision 2026-10-22: the oracle evaluates every candidate of every round
+    for r in recs:
+        assert [a["round"] for a in r["oracle"]["all_rounds"]] == [rnd["round"] for rnd in r["rounds"]]
+        for a, rnd in zip(r["oracle"]["all_rounds"], r["rounds"]):
+            assert sorted(a["cand_indices"]) == sorted(rnd["cand_indices"])
+    # primary scale-free Prop. 2 (stub: oracle U = planner U)
+    assert m["plan_prop2_sign_agree_fraction"] == pytest.approx(1.0)
+    assert m["plan_prop2_sign_agree_n"] == sum(len(a["cand_indices"]) for r in recs for a in r["oracle"]["all_rounds"])
+    assert m["plan_prop2_kendall_tau_mean"] == pytest.approx(1.0)
+    if m["plan_prop2_admitted_oracle_n"]:
+        assert m["plan_prop2_admitted_oracle_U_positive_fraction"] == pytest.approx(1.0)
+    assert "plan_pred_err_U_mean_abs_raw_units" in m and "plan_pred_err_U_mean_abs" not in m
 
 
 def test_admitted_deviation_ranking_travel_and_f0_logged(tmp_path):

@@ -204,8 +204,8 @@ def test_reevaluations_flagged_per_candidate_and_decision(reeval_run):
     assert [bool(f) for _, _, f in meta] == expected
     assert any(expected), "no re-evaluation occurred; the test would not exercise the flag"
     assert not all(expected)
-    # eval-log rows carry the flag in position 8
-    assert all(len(r) == 9 and isinstance(r[8], bool) for r in taskgen.stl_eval_log)
+    # eval-log rows carry the flag in position 8 (position 9: full Section 2 shadow, nan when off)
+    assert all(len(r) == 10 and isinstance(r[8], bool) for r in taskgen.stl_eval_log)
 
 
 def test_reevaluation_metrics_total_and_first_only(reeval_run):

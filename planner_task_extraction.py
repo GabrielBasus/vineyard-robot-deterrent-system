@@ -495,6 +495,7 @@ def run_task_location_estimation(
     deterring_cost_multiplier: float = 1.0,
     stl_robot_queue_by_robot: dict | None = None,
     stl_hab_for_robot_fn: Callable[[str], object] | None = None,
+    stl_shadow_full: dict | None = None,
 ) -> None:
     """Run task generation for the current production frame and return the updated task table.
 
@@ -591,6 +592,7 @@ def run_task_location_estimation(
         cost_w_eta=float(patrol_cost_weight),
         stl_robot_queue_by_robot=stl_robot_queue_by_robot,
         stl_hab_for_robot_fn=stl_hab_for_robot_fn,
+        stl_shadow_full=stl_shadow_full,
     )
 
 

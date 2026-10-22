@@ -83,6 +83,48 @@ class RelayDelayDrop(unittest.TestCase):
             self.assertGreaterEqual(u, 0.5)
 
 
+    def test_lazy_message_key_drawn_only_when_sent(self):
+        """User decision 2026-10-22: no drop draw for messages that are not sent.  An
+        id-less intervention (negative id, e.g. a plan deviation) consumes a bus sequence
+        number only when one of its records is relayed; one key is shared by both records."""
+        _, bus = self._bus(drop=0.3)
+        seq0 = bus._intervention_seq
+        key_fn = bus.lazy_intervention_key(-1000001)
+        self.assertEqual(bus._intervention_seq, seq0)        # nothing sent: nothing drawn
+        k1, k2 = key_fn(), key_fn()
+        self.assertEqual(k1, k2)
+        self.assertEqual(bus._intervention_seq, seq0 + 1)
+        # an action with an id: the key is the action id (coupled across systems), no sequence
+        k = bus.lazy_intervention_key(42)()
+        self.assertEqual(k, bus.intervention_key(42))
+        self.assertEqual(bus._intervention_seq, seq0 + 1)
+        # no drop: no key at all
+        _, bus0 = self._bus()
+        self.assertIsNone(bus0.lazy_intervention_key(-5)())
+
+    def test_detection_record_only_for_delivered_sender_history(self):
+        robots, bus = self._bus(delay=120.0, drop=0.5)
+        for rid, rob in robots.items():
+            rob.zone_polygon = [(0, 0), (100, 0), (100, 100), (0, 100)] if rid == "r0" else \
+                [(100, 0), (200, 0), (200, 100), (100, 100)]
+        got = []
+        bus.detection_record_fn = lambda r, q, x, y, t: got.append((r, q, x, y, t))
+        n = 300
+        for k in range(n):
+            bus.send_boundary_events([{"target_robot": "r1", "x": 99.0, "y": 50.0, "t": float(k)}],
+                                     source_id="r0", message_key=bus.next_detection_key((k, 0)))
+        # outside the sender's zone: not part of its detection history
+        bus.send_boundary_events([{"target_robot": "r1", "x": 150.0, "y": 50.0, "t": 0.0}], source_id="r0",
+                                 message_key=bus.next_detection_key((9999, 0)))
+        self.assertEqual(got, [])                            # delayed: nothing yet
+        bus.deliver_due(1e9)
+        self.assertEqual(len(robots["r1"].boundary) + bus.relay_dropped_by_kind["detection"], n + 1)
+        # recorded = delivered AND in the sender's history (the out-of-zone one never is)
+        self.assertEqual(len(got), sum(1 for b in robots["r1"].boundary if b["x"] == 99.0))
+        self.assertGreater(bus.relay_dropped_by_kind["detection"], 0)
+        self.assertTrue(all(g[0] == "r1" and g[1] == "r0" and g[2] == 99.0 for g in got))
+
+
 class ChronologicalReconstruction(unittest.TestCase):
     def _template(self):
         return HabituationField(n_cells=3, n_modes=2, T_rec=600.0, kappa=0.5, gamma=0.2, eta0=1.0)
@@ -110,6 +152,23 @@ class ChronologicalReconstruction(unittest.TestCase):
             t += dt
         np.testing.assert_allclose(late.field.eta, ref.eta, rtol=0, atol=1e-12)
         self.assertGreater(late.late_applied_total, 0)
+
+    def test_replay_uses_habituation_field_recover_bitwise(self):
+        """User decision 2026-10-22 (AUDIT round): the late-record replay recovers with
+        HabituationField.recover (the planner field's own routine), so it equals, bit for
+        bit, the same sequence of recover / update calls made on a HabituationField."""
+        st = RobotHabituationState(self._template(), update_fn=_mult, max_lag_s=50.0)
+        for k in range(11):
+            st.recover(1.0, float(k))          # t = 0..10; checkpoint at t = -1
+        st.apply(10.0, 0, 1)                    # own completion, on time
+        st.apply(4.0, 1, 0)                     # relayed, late: replay from the checkpoint
+        self.assertEqual(st.late_applied_total, 1)
+        exp = self._template()
+        exp.recover(5.0)                        # -1 -> 4
+        exp.apply(1, 0)
+        exp.recover(6.0)                        # 4 -> 10
+        exp.apply(0, 1)
+        self.assertTrue(np.array_equal(st.field.eta, exp.eta))
 
     def test_instant_equals_shared_bitwise(self):
         tmpl = self._template()

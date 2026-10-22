@@ -7,6 +7,7 @@ import os
 import random
 from collections import deque
 from types import SimpleNamespace
+from dataclasses import replace as _dc_replace
 from typing import Any, Dict, List
 
 import matplotlib.pyplot as plt
@@ -175,6 +176,10 @@ class EventBus:
         # Per-robot B5-facing intervention records (planner_hab_mode="per_robot"): callback
         # (recipient_id, record) installed by the simulator.
         self.intervention_record_fn = None
+        # Per-robot detection beliefs (planner_hab_mode="per_robot", user decision
+        # 2026-10-22): callback (recipient_id, sender_id, x, y, t) called when a relayed
+        # detection of the sender's own history reaches the recipient.  None = off.
+        self.detection_record_fn = None
         self.bytes_per_boundary_msg = int(bytes_per_boundary_msg)
         self.bytes_per_intervention_msg = int(bytes_per_intervention_msg)
         self.boundary_msg_count = 0
@@ -280,6 +285,41 @@ class EventBus:
                 (lambda delayed, _r=rid, _rec=dict(record): self.intervention_record_fn(_r, _rec)),
             )
 
+    def lazy_intervention_key(self, action_id):
+        """Message id of one intervention, drawn on first use only (user decision 2026-10-22:
+        no draw for messages that are not sent).  Returns a callable; every call returns the
+        same key.  None when drops are off (no key needed)."""
+        if self.neighbor_drop_prob <= 0.0:
+            return lambda: None
+        box = []
+
+        def _key():
+            if not box:
+                box.append(self.intervention_key(action_id))
+            return box[0]
+        return _key
+
+    def _detection_deliver(self, rid, source_id, x, y, t, ingest_fn, in_sender_history):
+        """Deliver fn of one relayed detection: the historical ingest, then (per_robot
+        detection beliefs only) the record of the sender's detection at the recipient."""
+        record_fn = self.detection_record_fn
+        if record_fn is None or not in_sender_history:
+            return ingest_fn
+
+        def _deliver(delayed):
+            ingest_fn(delayed)
+            record_fn(rid, source_id, float(x), float(y), float(t))
+        return _deliver
+
+    def _in_sender_history(self, source_id, x, y) -> bool:
+        """Whether the sender's Robot.ingest_detection put (x, y) in its recent_events
+        (inside its zone), i.e. the detection belongs to the sender's detection history."""
+        if self.detection_record_fn is None:
+            return False
+        rob = self.robots.get(source_id)
+        poly = getattr(rob, "zone_polygon", None) if rob is not None else None
+        return bool(poly) and bool(point_in_polygon(float(x), float(y), poly))
+
     def relay_metrics(self) -> dict:
         out = {
             "neighbor_delay_s": float(self.neighbor_delay_s),
@@ -341,8 +381,11 @@ class EventBus:
             self.boundary_bytes += self.bytes_per_boundary_msg
             self._relay(
                 "detection", key, rid, t,
-                (lambda delayed, _rob=robot: _rob.ingest_boundary_event(
-                    x=float(x), y=float(y), t=float(t), weight=1.0, delayed=delayed)),
+                self._detection_deliver(
+                    rid, source_id, x, y, t,
+                    (lambda delayed, _rob=robot: _rob.ingest_boundary_event(
+                        x=float(x), y=float(y), t=float(t), weight=1.0, delayed=delayed)),
+                    self._in_sender_history(source_id, x, y)),
             )
 
     def broadcast_intervention(self, *, x: float, y: float, t: float, amplitude: float,
@@ -397,11 +440,14 @@ class EventBus:
                 self.boundary_bytes += self.bytes_per_boundary_msg
                 self._relay(
                     "detection", message_key, rid, ev['t'],
-                    (lambda delayed, _rob=self.robots[rid], _ev=ev: _rob.ingest_boundary_event(
-                        x=_ev['x'], y=_ev['y'], t=_ev['t'],
-                        weight=_ev.get('weight', 0.35), sigma=_ev.get('sigma'), omega=_ev.get('omega'),
-                        delayed=delayed,
-                    )),
+                    self._detection_deliver(
+                        rid, source_id, ev['x'], ev['y'], ev['t'],
+                        (lambda delayed, _rob=self.robots[rid], _ev=ev: _rob.ingest_boundary_event(
+                            x=_ev['x'], y=_ev['y'], t=_ev['t'],
+                            weight=_ev.get('weight', 0.35), sigma=_ev.get('sigma'), omega=_ev.get('omega'),
+                            delayed=delayed,
+                        )),
+                        self._in_sender_history(source_id, ev['x'], ev['y'])),
                 )
     
     def send_intervention_events(
@@ -2566,6 +2612,13 @@ def run_simulation_frames_persistent(
     stl_strict_admission=False,     # Plan §4: drop predictive candidates with U(a) <= gate
     reactive_service_deadline_s=90.0,  # Plan §6 service metrics: reactive deadline after detection (s)
     stl_shadow_overrides=None,      # diagnostic: dict of Dynamics overrides for same-state re-scoring
+    # Diagnostic (user decision 2026-10-22, AUDIT round): a second same-state shadow that
+    # re-scores every STL candidate with a FULL Section 2 configuration, inputs and dynamics.
+    # Dict over the five Section 2 flags (keys without or with the "stl_" prefix):
+    # forecast_correction, forward_trajectory_correction, committed_schedule,
+    # queue_aware_lead, forecast_planner_update_model; a missing key = False.
+    # Variant A passes all five True (B's set).  None = off (bit-for-bit historical).
+    stl_shadow_full_section2=None,
     # Estimator-unit settings (docs/consistent_threshold_mapping.md). Defaults are the
     # historical values; the *_consistent planner profile sets mapped values.
     stl_kernel_self=1.0,            # Dynamics.kernel_self: suppression amplitude scale (exposure units)
@@ -2581,7 +2634,7 @@ def run_simulation_frames_persistent(
     # gives [0, 1800) and [1800, T_end]. None = no per-window outcome report.
     outcome_window_boundaries_s=None,
     save_final_hab_state_path=None,  # JSON: truth (and planner) eta per cell and cue at run end
-    initial_hab_state_path=None,     # JSON written by save_final_hab_state_path: start state of eta
+    initial_hab_state_path=None,     # JSON written by save_final_hab_state_path: TRUTH start eta (planner starts fresh)
     # Decision 17: planner effectiveness information. "shared" = one fleet field
     # (historical); "per_robot" = each robot reconstructs its own field from the
     # interventions it has received (docs/communication_assumptions.md).
@@ -4771,8 +4824,10 @@ def run_simulation_frames_persistent(
         eta0=float(habituation_initial_eta),
     )
     hab = truth_hab
-    # Decision 22 (persistent operation): start truth and planner effectiveness from
-    # the end state saved by an earlier run (save_final_hab_state_path).
+    # Decision 22 (persistent operation): start the TRUTH effectiveness from the end state
+    # saved by an earlier run (save_final_hab_state_path).  The PLANNER starts fresh, as at a
+    # normal run start (user decision 2026-10-22, re-asked in the AUDIT round: cold start,
+    # no informed reference); the file's planner field is not read.
     initial_hab_state_info = None
     if initial_hab_state_path:
         with open(str(initial_hab_state_path), "r", encoding="utf-8") as _fh:
@@ -4783,17 +4838,16 @@ def run_simulation_frames_persistent(
                 f"initial_hab_state_path cue modes {_labels} differ from this run's {list(mode_labels)}"
             )
         _truth_eta0 = np.asarray(_init_state["truth_eta"], dtype=float)
-        _planner_eta0 = np.asarray(_init_state["planner_eta"], dtype=float)
-        if _truth_eta0.shape != truth_hab.eta.shape or _planner_eta0.shape != planner_hab.eta.shape:
+        if _truth_eta0.shape != truth_hab.eta.shape:
             raise ValueError(
                 f"initial_hab_state_path eta shape {_truth_eta0.shape} differs from this run's "
                 f"{truth_hab.eta.shape} (cells x cues)"
             )
         truth_hab.eta = np.array(_truth_eta0, dtype=float, copy=True)
-        planner_hab.eta = np.array(_planner_eta0, dtype=float, copy=True)
         initial_hab_state_info = {
             "path": str(initial_hab_state_path),
             "source_t_end": _init_state.get("t_end"),
+            "planner_start": "fresh",
         }
     # Decision 17: per-robot planner effectiveness (information sets).
     planner_hab_mode = str(planner_hab_mode or "shared").strip().lower()
@@ -4839,6 +4893,37 @@ def run_simulation_frames_persistent(
                 del lst[: len(lst) - maxlen]
 
         bus.intervention_record_fn = _known_deterrence_add
+
+    # User decision 2026-10-22 (AUDIT round, re-asked): in robot r's beliefs, another robot
+    # q's detection history (Robot.recent_events, read by B5's detection-cluster seeds) is
+    # ONLY q's detections that reached r through the existing (lossy, delayed) detection
+    # relay.  Kept per (r, q) in event-time order with the cap of Robot.recent_events.
+    relayed_detections_by_robot = None
+    if planner_hab_mode == "per_robot":
+        relayed_detections_by_robot = {
+            str(_r): {str(_q): [] for _q in robots.keys() if str(_q) != str(_r)} for _r in robots.keys()
+        }
+
+        def _relayed_detection_add(rid_recv, rid_send, x, y, t_event):
+            lst = relayed_detections_by_robot[str(rid_recv)].setdefault(str(rid_send), [])
+            rec = (float(x), float(y), float(t_event))
+            pos = len(lst)
+            while pos > 0 and float(lst[pos - 1][2]) > rec[2]:
+                pos -= 1
+            lst.insert(pos, rec)
+            cap = robots[str(rid_send)].recent_events.maxlen
+            if cap is not None and len(lst) > cap:
+                del lst[: len(lst) - cap]
+
+        bus.detection_record_fn = _relayed_detection_add
+
+    def _detection_history_for_robot(rid_believer, rid_subject):
+        """Read-only accessor (per-robot information sets): robot ``rid_subject``'s detection
+        history as robot ``rid_believer`` knows it (copies, (x, y, t) in time order).  Own
+        history, or "shared" mode: the subject's Robot.recent_events."""
+        if relayed_detections_by_robot is None or str(rid_believer) == str(rid_subject):
+            return list(robots[str(rid_subject)].recent_events)
+        return list(relayed_detections_by_robot[str(rid_believer)].get(str(rid_subject), []))
 
     def _known_deterrences_for_robot(rid):
         """Read-only accessor (plan procedure, per-robot information sets): the B5-facing
@@ -4928,6 +5013,36 @@ def run_simulation_frames_persistent(
                 "preempt_deterring_goals=True, preempt_predictive_with_reactive=False, "
                 "goal_switch_margin_s=0, local lane-projection motion"
             )
+    _SECTION2_SHADOW_KEYS = ("forecast_correction", "forward_trajectory_correction", "committed_schedule",
+                             "queue_aware_lead", "forecast_planner_update_model")
+    stl_shadow_full_flags = None
+    stl_shadow_full_dynamics = None
+    if stl_shadow_full_section2 is not None:
+        stl_shadow_full_flags = {k: False for k in _SECTION2_SHADOW_KEYS}
+        for _k, _v in dict(stl_shadow_full_section2).items():
+            _kk = str(_k)[4:] if str(_k).startswith("stl_") else str(_k)
+            if _kk not in stl_shadow_full_flags:
+                raise ValueError(f"stl_shadow_full_section2: unknown Section 2 flag {_k!r}; "
+                                 f"allowed {list(_SECTION2_SHADOW_KEYS)}")
+            stl_shadow_full_flags[_kk] = bool(_v)
+        if stl_shadow_full_flags["queue_aware_lead"] and not stl_shadow_full_flags["committed_schedule"]:
+            raise ValueError("stl_shadow_full_section2: queue_aware_lead needs committed_schedule")
+        if stl_shadow_full_flags["committed_schedule"] and (
+                str(dispatch_policy) == "unc" or not bool(preempt_deterring_goals)
+                or bool(preempt_predictive_with_reactive) or float(goal_switch_margin_s) > 0.0
+                or str(motion_orchestration_mode) != "local" or str(motion_planning_mode) == "graph"):
+            raise ValueError("stl_shadow_full_section2: committed_schedule has the same requirements as "
+                             "stl_committed_schedule")
+        stl_shadow_full_dynamics = _dc_replace(
+            stl_dynamics,
+            shadow_overrides=(),
+            forecast_correction=bool(stl_shadow_full_flags["forecast_correction"]),
+            forward_trajectory_correction=bool(stl_shadow_full_flags["forward_trajectory_correction"]),
+            hab_update_model=(
+                _canonical_habituation_update_model(planner_habituation_update_model)
+                if stl_shadow_full_flags["forecast_planner_update_model"] else ""
+            ),
+        )
     taskgen.configure_binding_log(
         stl_binding_log_path, float(stl_binding_log_fraction), int(seed if seed is not None else 0)
     )
@@ -5075,7 +5190,7 @@ def run_simulation_frames_persistent(
         if global_predictive_model is not None and union is not None:
             global_predictive_model.accumulate_detection_exposure(union, step_dt)
 
-    def _stl_pending_events_by_robot(now_t, robot_ids=None):
+    def _stl_pending_events_by_robot(now_t, robot_ids=None, committed_schedule=None):
         """Collect pending committed deterrence completions visible to all planners.
 
         Proposal §2 item 2.3: known intervening applications are processed
@@ -5089,7 +5204,7 @@ def run_simulation_frames_persistent(
         every robot receives the same merged list.
         """
         ids = set(str(r) for r in (robot_ids if robot_ids is not None else robots.keys()))
-        if bool(stl_committed_schedule):
+        if bool(stl_committed_schedule if committed_schedule is None else committed_schedule):
             # Plan Section 2 (decision 5): every committed application, reactive
             # direct detections included (mapped to the cue the simulator depletes
             # for them), timed by each robot's committed schedule.
@@ -5200,11 +5315,23 @@ def run_simulation_frames_persistent(
         _stl_schedule_cache["value"] = value
         return value
 
-    def _stl_robot_queue_by_robot(now_t):
+    def _stl_robot_queue_by_robot(now_t, queue_aware_lead=None):
         """Per-robot queue state for the queue-aware lead, or None when disabled."""
-        if not bool(stl_queue_aware_lead):
+        if not bool(stl_queue_aware_lead if queue_aware_lead is None else queue_aware_lead):
             return None
         return dict(_stl_committed_schedules(now_t)["queue"])
+
+    def _stl_shadow_full_inputs(now_t, robot_ids):
+        """Inputs of the full Section 2 shadow (stl_shadow_full_section2), or None when off."""
+        if stl_shadow_full_dynamics is None:
+            return None
+        return {
+            "dynamics": stl_shadow_full_dynamics,
+            "pending_events_by_robot": _stl_pending_events_by_robot(
+                now_t, robot_ids, committed_schedule=bool(stl_shadow_full_flags["committed_schedule"])),
+            "robot_queue_by_robot": _stl_robot_queue_by_robot(
+                now_t, queue_aware_lead=bool(stl_shadow_full_flags["queue_aware_lead"])),
+        }
 
     def _stl_reactive_tasks(now_t):
         """Collect pending reactive tasks with relative deadlines for Plan §4E service protection.
@@ -5922,6 +6049,7 @@ def run_simulation_frames_persistent(
             stl_local_cell_ids_by_robot=_local_cell_ids_by_robot(planning_robots.keys()),
             stl_pending_events_by_robot=_stl_pending_events_by_robot(now_t, planning_robots.keys()),
             stl_robot_queue_by_robot=_stl_robot_queue_by_robot(now_t),
+            stl_shadow_full=_stl_shadow_full_inputs(now_t, planning_robots.keys()),
             stl_reactive_tasks=_stl_reactive_tasks(now_t),
             min_hotspot_score=float(min_hotspot_score),
             patrol_cost_weight=float(patrol_cost_weight),
@@ -6061,6 +6189,7 @@ def run_simulation_frames_persistent(
                 "stl_local_cell_ids_by_robot": _local_cell_ids_by_robot(_active_robot_ids()),
                 "stl_pending_events_by_robot": _stl_pending_events_by_robot(now_t, _active_robot_ids()),
                 "stl_robot_queue_by_robot": _stl_robot_queue_by_robot(now_t),
+                "stl_shadow_full": _stl_shadow_full_inputs(now_t, _active_robot_ids()),
                 "stl_reactive_tasks": _stl_reactive_tasks(now_t),
                 "min_hotspot_score": float(min_hotspot_score),
                 "patrol_cost_weight": float(patrol_cost_weight),
@@ -7776,31 +7905,24 @@ def run_simulation_frames_persistent(
             "stl_eval_runtime_first_eval_total_s": float(np.sum(first_rt)) if first_rt.size else 0.0,
         }
 
-    def _stl_ranking_metrics(log_rows):
-        """Summarize per-decision candidate rankings, masking and travel-recovery gaps.
-
-        A decision group is one robot at one planning time. Masked = every candidate U is 0.
-        Shadow comparisons use the same snapshot, so they isolate the valuation change.
-        Rows carry a 9th field is_reevaluation (follow-up d); this function uses the rows
-        it is given (the caller reports all rows and first evaluations only).
-        """
-        groups = {}
-        gaps, rel_gaps = [], []
-        for row in log_rows:
-            t_row, rid_row, _cell, _mode, u_row, u_sh, gap, eta_now = row[:8]
-            groups.setdefault((t_row, rid_row), []).append((u_row, u_sh))
-            if math.isfinite(gap):
-                gaps.append(gap)
-                if math.isfinite(eta_now) and eta_now > 0.0:
-                    rel_gaps.append(gap / eta_now)
-        multi = [g for g in groups.values() if len(g) >= 2]
-        masked = sum(1 for g in groups.values() if all(abs(u) <= 1e-12 for u, _ in g))
+    def _stl_shadow_comparison(groups, idx):
+        """Top-1 agreement, Kendall tau and masked fraction of the primary U vs shadow ``idx``
+        (1 = forecast-only shadow, 2 = full Section 2 shadow) over decision groups."""
         top1, taus = [], []
-        for g in multi:
-            if not all(math.isfinite(u_sh) for _, u_sh in g):
+        masked_sh = 0
+        n_sh = 0
+        for g in groups.values():
+            ss_all = [r[idx] for r in g]
+            if all(math.isfinite(v) for v in ss_all):
+                n_sh += 1
+                if all(abs(v) <= 1e-12 for v in ss_all):
+                    masked_sh += 1
+            if len(g) < 2:
                 continue
-            us = [u for u, _ in g]
-            ss = [u_sh for _, u_sh in g]
+            if not all(math.isfinite(r[idx]) for r in g):
+                continue
+            us = [r[0] for r in g]
+            ss = [r[idx] for r in g]
             if max(us) <= 1e-12 and max(ss) <= 1e-12:
                 continue  # both masked: no ranking to compare
             top1.append(int(int(np.argmax(us)) == int(np.argmax(ss))))
@@ -7812,13 +7934,51 @@ def run_simulation_frames_persistent(
                     disc += int(a < 0)
             if conc + disc > 0:
                 taus.append((conc - disc) / (conc + disc))
+        return {
+            "compared_groups": int(len(top1)),
+            "top1_agree_fraction": float(np.mean(top1)) if top1 else float("nan"),
+            "kendall_tau_mean": float(np.mean(taus)) if taus else float("nan"),
+            "masked_group_fraction": (float(masked_sh) / n_sh) if n_sh else float("nan"),
+        }
+
+    def _stl_ranking_metrics(log_rows):
+        """Summarize per-decision candidate rankings, masking and travel-recovery gaps.
+
+        A decision group is one robot at one planning time. Masked = every candidate U is 0.
+        Shadow comparisons use the same snapshot, so they isolate the valuation change.
+        Rows carry a 9th field is_reevaluation (follow-up d) and a 10th field U_shadow_full
+        (stl_shadow_full_section2); this function uses the rows it is given (the caller
+        reports all rows and first evaluations only).
+
+        Two shadows (user decision 2026-10-22, dual shadow):
+          stl_shadow_forecast_*: stl_shadow_overrides, Dynamics overrides only; the shadow
+            re-uses the variant's OWN inputs (its pending-event timeline and its lead).
+            stl_shadow_compared_groups / _top1_agree_fraction / _kendall_tau_mean are the
+            same numbers under their historical names.
+          stl_shadow_full_*: stl_shadow_full_section2, inputs AND dynamics rebuilt.
+        """
+        groups = {}
+        gaps, rel_gaps = [], []
+        for row in log_rows:
+            t_row, rid_row, _cell, _mode, u_row, u_sh, gap, eta_now = row[:8]
+            u_full = float(row[9]) if len(row) > 9 else float("nan")
+            groups.setdefault((t_row, rid_row), []).append((u_row, u_sh, u_full))
+            if math.isfinite(gap):
+                gaps.append(gap)
+                if math.isfinite(eta_now) and eta_now > 0.0:
+                    rel_gaps.append(gap / eta_now)
+        masked = sum(1 for g in groups.values() if all(abs(r[0]) <= 1e-12 for r in g))
+        fc = _stl_shadow_comparison(groups, 1)
+        full = _stl_shadow_comparison(groups, 2)
         gap_arr = np.asarray(gaps, dtype=float)
         return {
             "stl_decision_groups": int(len(groups)),
             "stl_masked_group_fraction": (float(masked) / len(groups)) if groups else float("nan"),
-            "stl_shadow_compared_groups": int(len(top1)),
-            "stl_shadow_top1_agree_fraction": float(np.mean(top1)) if top1 else float("nan"),
-            "stl_shadow_kendall_tau_mean": float(np.mean(taus)) if taus else float("nan"),
+            "stl_shadow_compared_groups": fc["compared_groups"],
+            "stl_shadow_top1_agree_fraction": fc["top1_agree_fraction"],
+            "stl_shadow_kendall_tau_mean": fc["kendall_tau_mean"],
+            **{f"stl_shadow_forecast_{k}": v for k, v in fc.items()},
+            **{f"stl_shadow_full_{k}": v for k, v in full.items()},
             "stl_travel_recovery_gap_mean": float(np.mean(gap_arr)) if gap_arr.size else float("nan"),
             "stl_travel_recovery_gap_p90": float(np.percentile(gap_arr, 90)) if gap_arr.size else float("nan"),
             "stl_travel_recovery_gap_max": float(np.max(gap_arr)) if gap_arr.size else float("nan"),
@@ -7884,10 +8044,10 @@ def run_simulation_frames_persistent(
         # Decision 17: the executing robot's own field (the shared field in "shared" mode).
         own_planner_hab = _planner_hab_for_robot(rid)
         # per_robot: one message id for this intervention's habituation record and its
-        # B5-facing record (drawn at the point relay_habituation drew it before)
-        _pr_msg_key = None
-        if planner_hab_by_robot is not None and bus.neighbor_drop_prob > 0.0:
-            _pr_msg_key = bus.intervention_key(task_row.get("id", -1))
+        # B5-facing record, drawn only when one of them is actually relayed (user decision
+        # 2026-10-22: no drop draw for messages that are not sent).  The id is the action id
+        # (coupled across systems); only id-less actions consume a bus sequence number.
+        _pr_msg_key = bus.lazy_intervention_key(task_row.get("id", -1)) if planner_hab_by_robot is not None else None
         if bool(enable_habituation) and cell_id is not None and mode_idx is not None:
             eta_at_apply = truth_hab.effectiveness(cell_id, mode_idx)
             planner_eta_metric = float(own_planner_hab.effectiveness(cell_id, mode_idx))
@@ -7901,7 +8061,8 @@ def run_simulation_frames_persistent(
                 planner_hab_by_robot.apply(rid, float(now_t), int(cell_id), int(mode_idx))
                 bus.relay_habituation(
                     t=float(now_t), cell=int(cell_id), mode=int(mode_idx),
-                    action_id=task_row.get("id", -1), source_id=rid, message_key=_pr_msg_key,
+                    action_id=task_row.get("id", -1), source_id=rid,
+                    message_key=(_pr_msg_key() if len(robots) > 1 else None),
                 )
         if cell_id is not None and mode_idx is not None:
             # Decisions 14 and 15: effectiveness at application by stream, cue reuse.
@@ -7933,7 +8094,9 @@ def run_simulation_frames_persistent(
         recent_deterrences.append(deterrence_entry)
         if known_deterrences_by_robot is not None:
             _known_deterrence_add(rid, deterrence_entry)
-            bus.relay_intervention_record(record=deterrence_entry, message_key=_pr_msg_key, source_id=rid)
+            bus.relay_intervention_record(record=deterrence_entry,
+                                          message_key=(_pr_msg_key() if len(robots) > 1 else None),
+                                          source_id=rid)
         if truth_deterrence_store is not recent_deterrences:
             truth_deterrence_store.append(deterrence_entry)
         feedback_beta = float(params.get("beta", 1.0))

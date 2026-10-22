@@ -347,7 +347,8 @@ def eq3_counterfactual_value(model, x, y, *, cells, cell_polys, weight_fn, hab, 
                              cue_sigma, cue_omega, pending_events=None, dt=1.0) -> dict:
     """Plan Eq. (3) value of one candidate (variant C), see task_value.integrated_exposure_eq3.
 
-    Region = the robot's modeled cells (its STL local cells plus the target cell).
+    Region = the cells passed in ``cells``; estimate_stl_counterfactual_value passes every
+    cell of the field (decision 6, 2026-10-22).
     q_hat as in the STL path (_compute_q_hat: Eqs. 1-2 with pending events when
     forecast_correction, eta(t) otherwise, 1 when the hab clause is inactive).
     Amplitude q_hat * beta_c (decision 1) times the legacy model's alpha_inhib, kernel
@@ -530,13 +531,17 @@ def estimate_stl_counterfactual_value(
             states[int(cid)] = CellState(e0=float(e0), g0=float(g0))
 
     eq3_info = {}
+    # Decision 6 (re-asked 2026-10-22, AUDIT round): variant C's Eq. 3 sums over ALL cells
+    # of the field, not the robot's STL local cells (the robustness valuation of A/B keeps
+    # the local cells above).
+    eq3_cells = [int(c) for c in range(len(cell_polys)) if cell_polys[c]]
 
     def _value(dyn):
         if str(getattr(dyn, "valuation_mode", "")) == EQ3_VALUATION_MODE:
             if cue_sigma is None or cue_omega is None:
                 raise ValueError("integrated_exposure_eq3 needs cue_sigma and cue_omega")
             info = eq3_counterfactual_value(
-                model, x, y, cells=cells, cell_polys=cell_polys, weight_fn=weight_fn, hab=hab,
+                model, x, y, cells=eq3_cells, cell_polys=cell_polys, weight_fn=weight_fn, hab=hab,
                 spec_params=spec_params, dynamics=dyn, target_cell_id=int(target_cell_id),
                 mode_id=int(mode_id), completion_lead_s=float(completion_lead_s), now_t=float(now_t),
                 cue_sigma=float(cue_sigma), cue_omega=float(cue_omega),
