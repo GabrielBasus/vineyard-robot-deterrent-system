@@ -2644,7 +2644,9 @@ def run_simulation_frames_persistent(
     plan_eta_floor=None,            # reject candidates with planner q_hat at application below this (decision 26)
     plan_obligation_relaxation="bounded_violation",  # Eq. 4 relaxation (decision 28); "drop" = earlier rule
     plan_oracle_scenarios=64,       # oracle scenarios, independent seed stream (decision 31)
-    plan_info_provider=None,        # decision 17 integration point: callable(L, snapshot) -> snapshot
+    plan_info_provider=None,        # decision 17: callable(L, snapshot, robot_id, oracle=False) -> snapshot;
+                                    # None + planner_hab_mode="per_robot" installs
+                                    # scenario_rollout.robot_information_snapshot
     report_metrics_end=True,
     emit_rejected_model_det_debug=False,
     emit_planning_diagnostics=False,
@@ -8125,6 +8127,14 @@ def run_simulation_frames_persistent(
         if _plan_bad:
             raise ValueError("planner_procedure='plan' requires " + ", ".join(_plan_bad))
         from habituation_stl.plan_procedure import PlanConfig, PlanProcedure
+        _plan_info_provider = plan_info_provider
+        if _plan_info_provider is None and planner_hab_mode == "per_robot":
+            # Decision 17 (follow-up 2026-10-22): the plan procedure uses the CANDIDATE'S
+            # ROBOT information set: its estimator world, its effectiveness record
+            # (_planner_hab_for_robot), and the centralized task state; pi_0 per robot.
+            # Read-only accessors it uses from these locals: robots[rid].m and
+            # _planner_hab_for_robot(rid).  "shared" keeps one snapshot (unchanged).
+            from habituation_stl.scenario_rollout import robot_information_snapshot as _plan_info_provider
         plan_proc = PlanProcedure(
             PlanConfig(
                 n_scenarios=int(plan_n_scenarios),
@@ -8153,7 +8163,7 @@ def run_simulation_frames_persistent(
                 oracle_scenarios=int(plan_oracle_scenarios),
             ),
             engine=plan_engine,
-            info_provider=plan_info_provider,
+            info_provider=_plan_info_provider,
         )
 
     def _task_intensity_score(tr):

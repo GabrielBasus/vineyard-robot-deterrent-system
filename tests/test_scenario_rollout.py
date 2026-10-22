@@ -465,3 +465,162 @@ def test_restrict_snapshot_to_information(real_state):
     assert np.all(r.habituation.eta == 0.3) and np.array_equal(snap.habituation.eta, eta0)
     assert r.recent_deterrences == [] and r.pending_reactive == []
     assert [tr.get("id") for tr in r.active_tasks] == [tr.get("id") for tr in snap.active_tasks[:1]]
+
+
+# ---------------------------------------------------------------------------
+# Follow-ups (2026-10-22)
+# ---------------------------------------------------------------------------
+def test_one_intervention_without_continuation(real_state):
+    """C_plan (no service protection, no continuation): the candidate's application time
+    comes from its own robot's travel and hold under the engine's motion model, common to
+    every scenario; J_one is the same one-intervention world as with a continuation."""
+    _, _, snap = real_state
+    s, cand = _hotspot(snap)
+    cont = sr.evaluate(s, [cand], n_scenarios=3, seed=5, n_workers=1, one_intervention=True)
+    res = sr.evaluate(s, [cand], n_scenarios=3, seed=5, n_workers=1, one_intervention=True, continuation=False)
+    arr, t_app, row = sr.candidate_application_schedule(s, cand)
+    assert math.isfinite(t_app) and s.t0 < arr <= t_app
+    assert np.all(np.isnan(res.J)) and res.J_one.shape == (2, 3)
+    assert np.array_equal(res.J_one[0], cont.J_one[0])          # no-intervention arm
+    for k in range(3):
+        r = res.per_scenario[1][k]
+        assert (r["candidate_arrival_t"], r["candidate_completed_t"]) == (arr, t_app)
+        assert r["pending_completion"] == {} and r["terminal_summary"] is None
+        # with nothing else near the candidate the continuation applies it at the same time
+        assert cont.per_scenario[1][k]["candidate_completed_t"] == t_app
+        tree = sr._sample_scenario_tree(s, 5, k)
+        J1, q, _ = sr.one_intervention_J(s, tree, row, t_apply=t_app, robot_id=cand.robot_id, return_details=True)
+        assert res.J_one[1, k] == J1 and r["candidate_eta_planner"] == q
+    assert np.array_equal(res.U_one, cont.U_one)
+    par = sr.evaluate(s, [cand], n_scenarios=3, seed=5, n_workers=2, one_intervention=True, continuation=False)
+    assert np.array_equal(par.J_one, res.J_one)
+    with pytest.raises(ValueError):
+        sr.evaluate(s, [cand], n_scenarios=2, seed=5, n_workers=1, continuation=False)
+
+
+def test_application_schedule_finishes_a_hold_in_progress_first(real_state):
+    """Forced-first rule (R12): a robot holding at t0 finishes that hold, then travels."""
+    _, _, snap = real_state
+    s = copy.deepcopy(snap)
+    r0 = s.robots[0]
+    hold = {"id": 999001, "robot_id": r0.rid, "type": "deterring", "x": r0.pose[0], "y": r0.pose[1],
+            "time": s.t0, "origin": "test", "mode": "formation", "score": 0.0, "utility": 0.0, "support": 0,
+            "assigned_primary": r0.rid, "assigned_secondary": None, "state": "active",
+            "started_hold": s.t0 - 5.0, "t_assigned": s.t0 - 10.0}
+    hold["action"] = sr.task_action(hold, deterring_modes=s.deterring_modes,
+                                    default_service_time_s=float(s.cfg.tau_service_s))
+    service = float(sr.task_action_service_time_s(hold, deterring_modes=s.deterring_modes,
+                                                  default_service_time_s=float(s.cfg.tau_service_s)))
+    others = [tr for tr in s.active_tasks if tr.get("assigned_primary") != r0.rid]
+    busy = copy.deepcopy(s)
+    busy.active_tasks = others + [hold]
+    busy.robots[0].loiter_until = s.t0 - 5.0 + service
+    busy.robots[0].goal = (r0.pose[0], r0.pose[1])
+    free = copy.deepcopy(s)
+    free.active_tasks = list(others)
+    free.robots[0].loiter_until = -1.0
+    free.robots[0].goal = None
+    cand = sr.Candidate(r0.rid, r0.pose[0] + 20.0, r0.pose[1], "formation")
+    a_busy, c_busy, _ = sr.candidate_application_schedule(busy, cand)
+    a_free, c_free, _ = sr.candidate_application_schedule(free, cand)
+    assert math.isfinite(c_busy) and math.isfinite(c_free)
+    assert a_busy > a_free and a_busy >= s.t0 - 5.0 + service
+
+
+def test_rollout_depletion_uses_the_live_planner_routine(real_state, monkeypatch):
+    """Plan Section 2 'same state-update routine': every application in a rollout depletes the
+    planner copy with habituation.apply_habituation_update (the function the simulator's
+    _apply_habituation_update and the per-robot fields call) and the planner update model,
+    and recovers it with HabituationField.recover(dt) once per step."""
+    import DeterrentSystem as ds
+    from habituation_stl import habituation as hb
+    assert ds._hab_apply_update is hb.apply_habituation_update is sr._habituation_mod.apply_habituation_update
+    _, _, snap = real_state
+    s, cand = _hotspot(snap)
+    s.cfg.planner_habituation_update_model = "additive_drop"
+    calls = []
+    orig = hb.apply_habituation_update
+
+    def spy(hab, cell, mode, model):
+        calls.append((cell, mode, model))
+        return orig(hab, cell, mode, model)
+
+    monkeypatch.setattr(hb, "apply_habituation_update", spy)
+    r = sr.run_policy(s, cand, n_scenarios=1, seed=3)[0]
+    monkeypatch.undo()
+    ivs = r["interventions"]
+    assert ivs and len(calls) == len(ivs) and all(m == "additive_drop" for _, _, m in calls)
+    manual = s.habituation.copy()
+    dt = float(s.cfg.dt)
+    n = int(round(s.horizon_s / dt))
+    for k in range(1, n + 1):
+        t = s.t0 + k * dt
+        manual.recover(dt)
+        for iv in ivs:
+            if iv["t"] == t:
+                cell, midx, _ = sr._hab_indices(s, iv["x"], iv["y"], iv["mode"])
+                assert iv["eta_planner"] == manual.effectiveness(cell, midx)
+                orig(manual, cell, midx, "additive_drop")
+    assert np.array_equal(r["terminal"]["habituation_eta"], manual.eta)
+
+
+def test_candidate_results_do_not_depend_on_the_batch(real_state):
+    """Per-robot evaluation groups (decision 17) evaluate each robot's candidates in its own
+    call: a candidate's results are identical whether evaluated alone or with others."""
+    _, _, snap = real_state
+    s = copy.deepcopy(snap)
+    s.horizon_s = 60.0
+    r0, r1 = s.robots[0], s.robots[1]
+    c0 = sr.Candidate(r0.rid, r0.pose[0] + 10.0, r0.pose[1], "formation")
+    c1 = sr.Candidate(r1.rid, r1.pose[0] + 10.0, r1.pose[1], "laser")
+    both = sr.evaluate(s, [c0, c1], n_scenarios=2, seed=9, n_workers=1)
+    a = sr.evaluate(s, [c0], n_scenarios=2, seed=9, n_workers=1)
+    b = sr.evaluate(s, [c1], n_scenarios=2, seed=9, n_workers=1)
+    assert np.array_equal(both.J[0], a.J[0]) and np.array_equal(both.J[0], b.J[0])
+    assert np.array_equal(both.J[1], a.J[1]) and np.array_equal(both.J[2], b.J[1])
+
+
+@pytest.fixture(scope="module")
+def disturbed_state():
+    burst = {"start_s": 150.0, "duration_s": 100.0, "factor": 2.0}
+    gen, L = _sim_locals(steps=100, travel_speed_error=0.2, arrival_burst=burst,
+                         mu_step_time_s=200.0, mu_step_factor=1.5)
+    return gen, L
+
+
+def test_oracle_world_includes_disturbances_planner_world_does_not(disturbed_state):
+    """Decision 29 disturbances in the oracle: the truth world's background is the simulator's
+    generated rate (demand step x arrival burst) and truth motion is slower; the planner
+    snapshot keeps the nominal world and speed (it is not told)."""
+    _, L = disturbed_state
+    o = sr.decision_snapshot_from_sim_locals(L, horizon_s=300.0, oracle=True)
+    p = sr.decision_snapshot_from_sim_locals(L, horizon_s=300.0, oracle=False)
+    t0 = float(L["t"])
+    mu = float(L["mu_true"])
+    prof = o.forecast.bg_time_profile
+    vals = []
+    for k in range(0, 301):
+        t = t0 + k
+        v = sr._profile_value(prof, t)
+        assert mu * v == pytest.approx(float(L["_truth_background_rate_at"](t)), rel=1e-12)
+        vals.append(v)
+    assert {1.0, 2.0, 3.0, 1.5} <= set(vals)        # before, burst, burst x step, step
+    assert o.forecast.bg_time_profile_max == pytest.approx(3.0)
+    assert o.motion_speed_factor == pytest.approx(0.8)
+    assert p.motion_speed_factor == 1.0
+    assert p.forecast.bg_time_profile is None
+    # truth motion in an oracle rollout: speed x (1 - travel_speed_error); planner: nominal
+    rid = o.robots[0].rid
+    for snp, fac in ((o, 0.8), (p, 1.0)):
+        sim = sr._Sim(snp, sr._empty_tree(), sr.NOOP, scenario=0, reactive_deadline_s=90.0)
+        x, y = sim.pose[rid]
+        lane = sim._lane_center_for(y)
+        sim.pose[rid] = (x, lane)
+        tx = x + 50.0 if x + 50.0 < snp.W else x - 50.0
+        sim._step_to(rid, (tx, lane))
+        moved = abs(sim.pose[rid][0] - x)
+        assert moved == pytest.approx(float(sim.profiles[rid].speed_mps) * fac * float(snp.cfg.dt), rel=1e-12)
+        # planner ETAs keep the nominal speed in both worlds
+        spin = {"UAV": 8.0, "UGV": 0.0}.get(sim.profiles[rid].type, 0.0)
+        assert sim._eta(rid, (tx, lane)) == pytest.approx(
+            abs(tx - sim.pose[rid][0]) / float(sim.profiles[rid].speed_mps) + spin, rel=1e-12)

@@ -116,6 +116,11 @@ from planner_task_extraction import (  # noqa: E402
 )
 from planner_task_generation import current_busy_deterring_robots  # noqa: E402
 from habituation_stl.habituation import HabituationField  # noqa: E402
+# Plan Section 2 "same state-update routine": every depletion in a rollout calls the
+# routine the live planner state uses (DeterrentSystem._apply_habituation_update and the
+# per-robot fields of robot_information.py delegate to it), through the module attribute
+# so the call is literally the same function object.
+from habituation_stl import habituation as _habituation_mod  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -478,6 +483,9 @@ class RolloutSnapshot:
     # timed-recovery obligations tracked along every rollout:
     # dicts {"id", "cell", "deadline_t", "e_low"}
     obligations: list = field(default_factory=list)
+    # truth motion speed / nominal speed (oracle snapshots: 1 - travel_speed_error, the
+    # decision-29 disturbance the planner is not told); planner ETAs stay nominal
+    motion_speed_factor: float = 1.0
 
     def __getstate__(self):
         state = dict(self.__dict__)
@@ -1181,7 +1189,8 @@ def _application_world_effects(snap: RolloutSnapshot, tr: dict, t: float, *, eta
 
 
 def one_intervention_J(snap: RolloutSnapshot, tree: _ScenarioTree, app_row: Optional[dict],
-                       t_apply: float = math.inf, robot_id: Optional[str] = None) -> float:
+                       t_apply: float = math.inf, robot_id: Optional[str] = None, *,
+                       return_details: bool = False):
     """J_H of the one-intervention counterfactual (Plan Sec. 1 "one-intervention
     counterfactual"; variant C_plan, user decision 8) on one scenario tree.
 
@@ -1197,8 +1206,11 @@ def one_intervention_J(snap: RolloutSnapshot, tree: _ScenarioTree, app_row: Opti
     application (decision 1).  ``app_row=None`` (or t_apply = inf) is the
     no-intervention arm; U_one = J(no intervention) - J(candidate only) therefore
     isolates the candidate's own suppression from any continuation effect.
+    ``return_details`` returns (J, planner q_hat at application, world eta at
+    application); both are nan when the candidate is not applied within H.
     """
     cfg = snap.cfg
+    applied = {"eta_planner": math.nan, "eta_world": math.nan}
     dt = float(cfg.dt)
     t0 = float(snap.t0)
     n_steps = int(round(snap.horizon_s / dt))
@@ -1224,6 +1236,8 @@ def one_intervention_J(snap: RolloutSnapshot, tree: _ScenarioTree, app_row: Opti
         if bool(cfg.enable_habituation) and cell_id is not None and mode_idx is not None:
             eta_apply = hab.effectiveness(cell_id, mode_idx)
             eta_world = eta_apply if world_hab is None else world_hab.effectiveness(cell_id, mode_idx)
+        applied["eta_planner"] = float(eta_apply)
+        applied["eta_world"] = float(eta_world)
         entry, inhib, _p, _m, _fb = _application_world_effects(
             snap, app_row, t, eta_apply=eta_apply, eta_world=eta_world, model=model, source="model_scored",
             hab_label=hab_label, deterring_modes=snap.deterring_modes, tau=tau)
@@ -1246,7 +1260,71 @@ def one_intervention_J(snap: RolloutSnapshot, tree: _ScenarioTree, app_row: Opti
         if apply_now and abs(float(t_apply) - t) < 1e-9:
             _apply(t)
         world.end_step()
+    if return_details:
+        return float(world.J), applied["eta_planner"], applied["eta_world"]
     return float(world.J)
+
+
+def _empty_tree() -> _ScenarioTree:
+    return _ScenarioTree(t=np.zeros(0), x=np.zeros(0), y=np.zeros(0), node=np.zeros(0, np.int64),
+                         parent=np.zeros(0, np.int64), kind=np.zeros(0, np.int64), u_thin=np.zeros(0),
+                         u_det=np.zeros(0), owner=np.zeros(0, np.int64), w_sched=np.zeros(0),
+                         order=np.zeros(0, np.int64), step_start=np.zeros(1, np.int64), jitter_seed=0)
+
+
+def candidate_application_schedule(snap: RolloutSnapshot, candidate: "Candidate"):
+    """Application time of a candidate WITHOUT a continuation rollout (variant C_plan,
+    follow-up 2026-10-22: C_plan has no service protection and no continuation).
+
+    The candidate's own robot executes the candidate first, under the engine's motion
+    model (lane projection, the snapshot's profile speed times motion_speed_factor),
+    from the snapshot state, with the executed forced-first rule (R12): a hold in
+    progress at t0 finishes first, then the robot travels to (x, y), holds for the
+    cue's service time and applies at the end of the hold (the step at which the
+    continuation's motion stage completes it).  No other task is served before it and
+    no other robot acts (one-intervention world), so the schedule is deterministic and
+    common to every scenario.  Returns (start of hold, application time, candidate row);
+    times are inf if the candidate is not applied within the horizon.
+    """
+    rid = str(candidate.robot_id)
+    sim = _Sim(snap, _empty_tree(), candidate, scenario=0, reactive_deadline_s=90.0)
+    held = [tr for tr in sim.active_tasks
+            if not tr.get("_rollout_candidate") and str(tr.get("assigned_primary")) == rid
+            and str(tr.get("state", "")).strip().lower() == "active" and tr.get("started_hold") is not None]
+    sim.active_tasks[:] = held + [tr for tr in sim.active_tasks if tr.get("_rollout_candidate")]
+    sim.rids = [rid]
+    if snap.start_stage == "replan":
+        sim._motion(sim.t0)
+    for k in range(1, sim.n_steps + 1):
+        if math.isfinite(sim.candidate_completed_t):
+            break
+        sim._motion(sim.t0 + k * sim.dt)
+    return float(sim.candidate_arrival_t), float(sim.candidate_completed_t), copy.deepcopy(sim._candidate_row)
+
+
+def one_intervention_only_result(snap: RolloutSnapshot, tree: _ScenarioTree, candidate: "Candidate",
+                                 schedule=None) -> dict:
+    """Per-scenario result of the one-intervention valuation without a continuation
+    (evaluate(..., one_intervention=True, continuation=False)).  The continuation
+    fields are empty / nan: no pending-task completions, obligations or terminal
+    summary are computed (C_plan has no service protection)."""
+    if candidate.is_noop:
+        arr = comp = math.inf
+        row = None
+    else:
+        arr, comp, row = schedule if schedule is not None else candidate_application_schedule(snap, candidate)
+    J1, eta_p, eta_w = one_intervention_J(snap, tree, row, t_apply=comp,
+                                          robot_id=(None if candidate.is_noop else str(candidate.robot_id)),
+                                          return_details=True)
+    nan = math.nan
+    return {
+        "J": nan, "J_bg": nan, "J_exc": nan, "J_sched": nan, "counted_exposure": nan,
+        "pending_completion": {}, "detections": 0, "reactive_completed": 0, "predictive_completed": 0,
+        "patrol_completed": 0, "candidate_completed_t": float(comp), "obligations": {},
+        "candidate_arrival_t": float(arr), "candidate_eta_planner": float(eta_p),
+        "candidate_eta_world": float(eta_w), "terminal_summary": None, "J_one": float(J1),
+        "continuation": False,
+    }
 
 
 class _Sim:
@@ -1467,6 +1545,10 @@ class _Sim:
         if dist < 1.0e-6:
             return
         speed = max(float(self.profiles[rid].speed_mps), 1.0e-6)
+        fac = float(getattr(self.snap, "motion_speed_factor", 1.0))
+        if fac != 1.0:
+            # DeterrentSystem._move_directly_to_point with travel_speed_error (oracle only)
+            speed = speed * fac
         step = speed * self.dt
         nx_, ny_ = (tx, ty) if step >= dist else (x + dx * (step / dist), y + dy * (step / dist))
         self.pose[rid] = (min(max(nx_, 0.0), float(self.cfg.W)), min(max(ny_, 0.0), float(self.cfg.H)))
@@ -2121,10 +2203,13 @@ class _Sim:
             eta_world = eta_apply
             if self.world_hab is not None:
                 eta_world = self.world_hab.effectiveness(cell_id, mode_idx)
-                _ds()._apply_habituation_update(
+                _habituation_mod.apply_habituation_update(
                     self.world_hab, cell_id, mode_idx,
                     self.snap.world_habituation_update_model or c.planner_habituation_update_model)
-            _ds()._apply_habituation_update(self.hab, cell_id, mode_idx, c.planner_habituation_update_model)
+            # planner copy: the live planner's routine with the planner update model
+            # (recovery is HabituationField.recover(dt) once per step, as in the simulator)
+            _habituation_mod.apply_habituation_update(self.hab, cell_id, mode_idx,
+                                                      c.planner_habituation_update_model)
         action_id = int(tr.get("id", -1))
         if tr.get("_rollout_candidate"):
             self.candidate_eta_planner = float(eta_apply)
@@ -2951,6 +3036,7 @@ def _run_task(args):
     key, blob, seed, scenarios, candidate, kw = args
     kw = dict(kw)
     slim = bool(kw.pop("slim", False))
+    continuation = bool(kw.pop("continuation", True))
     ent = _POOL_CACHE.get(key)
     if ent is None:
         _POOL_CACHE.clear()
@@ -2961,9 +3047,15 @@ def _run_task(args):
         _POOL_CACHE[key] = ent
     snap, trees = ent
     out = []
+    sched = None
+    if not continuation and not candidate.is_noop:
+        sched = candidate_application_schedule(snap, candidate)
     for s in scenarios:
         if s not in trees:
             trees[s] = _sample_scenario_tree(snap, seed, s)
+        if not continuation:
+            out.append(one_intervention_only_result(snap, trees[s], candidate, sched))
+            continue
         r = _Sim(snap, trees[s], candidate, scenario=s, **kw).run()
         out.append(_slim_result(r) if slim else r)
     return out
@@ -3096,10 +3188,20 @@ class RolloutPool:
 
 def run_policy(snap: RolloutSnapshot, candidate: Candidate, *, n_scenarios: int = 16, seed: int = 0,
                reactive_deadline_s: float = 90.0, planner_model_advance: str = "per_step",
-               trees: Optional[list] = None, one_intervention: bool = False) -> list:
-    """Simulate one policy (NOOP = pi_0) over all scenarios in this process."""
+               trees: Optional[list] = None, one_intervention: bool = False, continuation: bool = True) -> list:
+    """Simulate one policy (NOOP = pi_0) over all scenarios in this process.
+
+    ``continuation=False`` (needs one_intervention=True; variant C_plan): no
+    continuation rollout, only the one-intervention world per scenario with the
+    candidate's deterministic application schedule (candidate_application_schedule).
+    """
     if trees is None:
         trees = [_sample_scenario_tree(snap, seed, s) for s in range(n_scenarios)]
+    if not continuation:
+        if not one_intervention:
+            raise ValueError("continuation=False needs one_intervention=True")
+        sched = None if candidate.is_noop else candidate_application_schedule(snap, candidate)
+        return [one_intervention_only_result(snap, trees[s], candidate, sched) for s in range(n_scenarios)]
     return [
         _Sim(snap, trees[s], candidate, scenario=s, reactive_deadline_s=reactive_deadline_s,
              planner_model_advance=planner_model_advance, one_intervention=one_intervention).run()
@@ -3138,7 +3240,7 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
              *, n_workers: Optional[int] = None, reactive_deadline_s: float = 90.0,
              planner_model_advance: str = "per_step", pool: Optional["RolloutPool"] = None,
              scenario_chunk: int = 8, deadline: Optional[float] = None, slim: bool = False,
-             one_intervention: bool = False) -> EvaluationResult:
+             one_intervention: bool = False, continuation: bool = True) -> EvaluationResult:
     """Evaluate pi_0 (B5) and every candidate continuation with common random numbers.
 
     Returns per-scenario J_H, pending-task completion times (inf if not
@@ -3147,7 +3249,14 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
     U standard errors are paired across scenarios.  ``deadline`` is an absolute
     ``time.perf_counter()`` value; if it passes first, unfinished rollouts are
     cancelled and :class:`EvaluationTimeout` is raised.
+
+    ``continuation=False`` (with one_intervention=True, variant C_plan) runs no
+    continuation: J, U and the continuation fields are nan / empty and only the
+    one-intervention quantities (J_one, U_one) and the candidate's application
+    schedule are returned.
     """
+    if not continuation and not one_intervention:
+        raise ValueError("continuation=False needs one_intervention=True")
     t_start = time.perf_counter()
     snap = snapshot
     if snap.start_stage not in ("truth", "replan"):
@@ -3159,6 +3268,8 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
     kw = {"reactive_deadline_s": float(reactive_deadline_s), "planner_model_advance": str(planner_model_advance)}
     if one_intervention:
         kw["one_intervention"] = True
+    if not continuation:
+        kw["continuation"] = False
     if slim:
         kw["slim"] = True
     if pool is None and n_workers is None:
@@ -3166,10 +3277,14 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
     if pool is None and n_workers <= 1:
         trees = [_sample_scenario_tree(snap, seed, s) for s in range(n_scenarios)]
         results = []
+        kw_serial = {k: v for k, v in kw.items() if k != "slim"}
         for pol in policies:
             if deadline is not None and time.perf_counter() > float(deadline):
                 raise EvaluationTimeout(time.perf_counter() - t_start)
-            results.append(run_policy(snap, pol, n_scenarios=n_scenarios, seed=seed, trees=trees, **kw))
+            res_pol = run_policy(snap, pol, n_scenarios=n_scenarios, seed=seed, trees=trees, **kw_serial)
+            if slim and continuation:
+                res_pol = [_slim_result(r) for r in res_pol]
+            results.append(res_pol)
     else:
         own = pool is None
         if own:
@@ -3389,6 +3504,33 @@ class StepProfile:
         return self.factor if float(t) >= self.t_switch else 1.0
 
 
+class TruthBackgroundProfile:
+    """Picklable truth background profile with the decision-29 arrival burst.
+
+    m(t) = step(t) * burst(t), the simulator's _truth_background_rate_at / mu_true:
+    step(t) = mu_step_factor for t >= warmup + mu_step_time_s (else 1; no step: 1),
+    burst(t) = factor for start <= t - warmup < start + duration (else 1).
+    """
+
+    def __init__(self, step: Optional[StepProfile], warmup_s: float, burst_start_s: float,
+                 burst_duration_s: float, burst_factor: float):
+        self.step = step
+        self.warmup_s = float(warmup_s)
+        self.burst_start_s = float(burst_start_s)
+        self.burst_duration_s = float(burst_duration_s)
+        self.burst_factor = float(burst_factor)
+
+    def burst(self, t: float) -> float:
+        t_rel = float(t) - self.warmup_s
+        if self.burst_start_s <= t_rel < self.burst_start_s + self.burst_duration_s:
+            return self.burst_factor
+        return 1.0
+
+    def __call__(self, t: float) -> float:
+        base = 1.0 if self.step is None else float(self.step(t))
+        return base * self.burst(t)
+
+
 def _profile_max_over_steps(profile, t0: float, n_steps: int, dt: float) -> float:
     """Exact maximum of m(t) over the step times the scenario tree samples (t0+dt .. t0+n dt)."""
     if profile is None or n_steps <= 0:
@@ -3465,8 +3607,14 @@ def truth_world_cues(L) -> dict:
     return out
 
 
-def planner_forecast_from_sim_locals(L, *, t0: float, horizon_s: float):
+def planner_forecast_from_sim_locals(L, *, t0: float, horizon_s: float, robot_id: Optional[str] = None):
     """The fleet's planner belief of the bird process (no truth state).
+
+    ``robot_id`` (decision 17, per-robot information sets): the belief of that one
+    robot, i.e. its own estimator alone on every node (legacy form: its own mu,
+    trigger-mass and per-cue inhibition grids, which hold only its own detections and
+    interventions and the neighbor relays that reached it).  None (default) is the
+    fleet union described below.
 
     Built only from the robots' estimators:
       consistent: background mu_hat of each node's zone owner times the
@@ -3489,6 +3637,20 @@ def planner_forecast_from_sim_locals(L, *, t0: float, horizon_s: float):
     mode = str(L.get("estimator_mode", "legacy")).strip().lower()
     dt = float(L["dt"])
     n_steps = int(round(float(horizon_s) / dt))
+    if robot_id is not None:
+        if mode == "consistent":
+            # Not decided: which background mu_hat a single robot uses outside its own
+            # zone under the consistent estimator (open question, report).
+            raise NotImplementedError("per-robot planner world is implemented for the legacy estimator only")
+        m = L["robots"][robot_id].m
+        # copies: the snapshot never aliases the live estimator grids
+        chans = {key: (np.array(g, float, copy=True), float(m.inhib_channel_omegas.get(key, m.omega_inhib)))
+                 for key, g in sorted(m.inhib_channels.items())}
+        fc = IntensityForecast(form="legacy", bg_node_rate=np.array(m.mu, float, copy=True), sigma=float(m.sigma),
+                               omega=float(m.omega), legacy_trigger_mass=np.array(m.trigger_mass, float, copy=True),
+                               legacy_inhib_channels=chans, legacy_alpha_in=float(m.alpha_in),
+                               legacy_alpha_inhib=float(m.alpha_inhib))
+        return fc, None
     if mode == "consistent":
         m0 = models[0]
         for m in models[1:]:
@@ -3545,8 +3707,8 @@ def truth_forecast_from_sim_locals(L, *, t0: float, horizon_s: float):
     """The simulator truth as a scenario world (oracle / full observability).
 
     Truth background (DeterrentSystem._coupled_truth_step / run_truth_generation_stage:
-    Poisson(mu w_mean area dt) per step, node by value map), the truth mu step as a
-    time profile, the truth excitation kernel (truth_excitation_sigma/omega_eff), the
+    Poisson(mu w_mean area dt) per step, node by value map), the truth mu step and the
+    decision-29 arrival burst as a time profile, the truth excitation kernel (truth_excitation_sigma/omega_eff), the
     already scheduled truth offspring queue, and the truth suppression store with the
     truth effectiveness at application.
     """
@@ -3559,6 +3721,13 @@ def truth_forecast_from_sim_locals(L, *, t0: float, horizon_s: float):
     prof = None
     if L.get("mu_step_time_s") is not None:
         prof = StepProfile(float(L["warmup_s"]) + float(L["mu_step_time_s"]), float(L["mu_step_factor"]))
+    burst = L.get("arrival_burst")
+    if burst is not None:
+        # Decision 29 disturbance: the truth background is multiplied by the burst factor
+        # inside its window (DeterrentSystem._truth_background_rate_at); the oracle evaluates
+        # the truth, so its world includes it (the planner world does not: it is not told).
+        prof = TruthBackgroundProfile(prof, float(L["warmup_s"]), float(burst["start_s"]),
+                                      float(burst["duration_s"]), float(burst["factor"]))
     dt = float(L["dt"])
     n_steps = int(round(float(horizon_s) / dt))
     tq = list(L["truth_queue"])
@@ -3593,11 +3762,15 @@ def decision_snapshot_from_sim_locals(L: dict, *, horizon_s: float = 300.0, reac
         world_cues = truth_world_cues(L)
         world_hab = L["truth_hab"].copy()
         world_hab_model = str(L["truth_habituation_update_model"])
+        # Decision 29 disturbance: truth motion is slower than nominal (planner ETAs and the
+        # planner's rollouts keep the nominal speed; only the oracle's truth motion slows)
+        speed_factor = 1.0 - float(L.get("travel_speed_error", 0.0) or 0.0)
     else:
         forecast, store = planner_forecast_from_sim_locals(L, t0=t0, horizon_s=horizon_s)
         world_cues = planner_world_cues(L)
         world_hab = None
         world_hab_model = None
+        speed_factor = 1.0
     robots_def = L["robots_def"]
     id_to_cell = L["id_to_cell"]
     robots = []
@@ -3645,7 +3818,7 @@ def decision_snapshot_from_sim_locals(L: dict, *, horizon_s: float = 300.0, reac
         bus_last_intervention_key_t=dict(L["bus"]._last_intervention_key_t), cfg=cfg,
         pending_reactive=pending, planner_weight_grid=w_node_exact, start_stage="replan",
         robot_region_polys=regions, world_suppression=store, world_habituation=world_hab,
-        world_habituation_update_model=world_hab_model,
+        world_habituation_update_model=world_hab_model, motion_speed_factor=float(speed_factor),
     )
     return snap
 
@@ -3690,6 +3863,45 @@ def restrict_snapshot_to_information(snap: RolloutSnapshot, *, effectiveness: Op
         out.active_tasks = [copy.deepcopy(tr) for tr in snap.active_tasks if tr.get("id") in known_task_ids]
     if known_pending_keys is not None:
         out.pending_reactive = [p for p in snap.pending_reactive if tuple(p.key) in known_pending_keys]
+    return out
+
+
+def robot_information_snapshot(L: dict, snap: RolloutSnapshot, robot_id, *, oracle: bool = False) -> RolloutSnapshot:
+    """Decision snapshot evaluated with ONE robot's information set (user decision 17,
+    follow-up 2026-10-22: "info set = the candidate's robot"; planner_hab_mode="per_robot").
+
+    Robot r's information set, as the simulator holds it:
+      * estimator: r's own planner model ``L["robots"][r].m``.  The planner world
+        (non-oracle snapshots) is that model alone on every node
+        (planner_forecast_from_sim_locals(robot_id=r)); it contains r's own detections
+        and interventions and the detections / intervention stamps the original (lossy)
+        legacy relay delivered to r (border radius, debounce, minimum weight, subject to
+        neighbor_delay_s / neighbor_drop_prob).
+      * effectiveness record: r's own HabituationField ``_planner_hab_for_robot(r)``
+        (robot_information.py): r's own completions plus the habituation records r
+        received (complete relay, subject to delay / drop, chronological replay).  It
+        replaces the snapshot's planner effectiveness, which the B5 policy side and the
+        planner world's q_hat * beta both read.
+      * tasks: task state is centralized in the simulator (docs/communication_assumptions.md
+        section 4: active and completed task rows, consumed keys, the TaskGenerator buffer
+        and so the pending reactive tasks are seen by every robot's dispatch immediately),
+        so r knows every task; known_task_ids / known_pending_keys stay None (all).
+      * the B5-facing record of completed actions (recent_deterrences, read by the
+        centralized TaskGenerator's pruning / repeat block) is the centralized record
+        the live B5 reads, and the other robots' policy-side state (poses, goals,
+        estimators used by their B5 generation) is the fleet state the centralized
+        dispatcher sees; both are kept (open question in the report).
+    Oracle snapshots (``oracle=True``) keep the truth world and change only the policy
+    side (r's effectiveness record), so the oracle evaluates exactly the policies the
+    planner evaluated with r's information.
+    """
+    rid = str(robot_id)
+    out = restrict_snapshot_to_information(snap, effectiveness=L["_planner_hab_for_robot"](rid))
+    if not oracle:
+        fc, store = planner_forecast_from_sim_locals(L, t0=float(snap.t0), horizon_s=float(snap.horizon_s),
+                                                     robot_id=rid)
+        out.forecast = fc
+        out.world_suppression = store
     return out
 
 

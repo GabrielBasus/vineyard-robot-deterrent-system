@@ -35,14 +35,17 @@ Decision procedure at a replan time t (Plan Sec. 5, steps 1 to 6):
 Section 6 additions (user decisions 2026-10-21):
 
 * valuation="one_intervention" (decision 8, variant C_plan): same candidates,
-  ceiling, feasibility (service, obligations, floor), gate, fleet argmax and
-  sequential commitment, but U(a) is the one-intervention Eq. 3 counterfactual
-  (scenario_rollout.one_intervention_J): in both arms the world evolves from the
-  snapshot (every past suppression term kept) with NO future intervention of any
-  robot, except that in arm a the candidate's own suppression is applied at its
-  application time.  The continuation rollouts still run: the feasibility
-  conditions need C_j(pi) of the pending tasks, and they give the candidate's
-  application time in each scenario.
+  ceiling, gate, fleet argmax and sequential commitment as D_plan, but U(a) is the
+  one-intervention Eq. 3 counterfactual (scenario_rollout.one_intervention_J): in
+  both arms the world evolves from the snapshot (every past suppression term kept)
+  with NO future intervention of any robot, except that in arm a the candidate's
+  own suppression is applied at its application time.  Follow-up 2026-10-22: C_plan
+  has NO service protection (as D_plan) and runs NO continuation rollout; the
+  candidate's application time comes from scenario_rollout.candidate_application_schedule
+  (its own robot's travel and hold under the engine's motion model from the
+  snapshot, a hold in progress finishing first), identical in every scenario.
+  Service protection, timed recovery and the floor need continuations and are
+  rejected with this valuation.
 * eta_floor (decision 26): reject a candidate whose planner effectiveness q_hat at
   its application time is below the floor (reason "floor").
 * obligation_relaxation (decision 28): "bounded_violation" keeps an obligation that
@@ -59,8 +62,15 @@ Section 6 additions (user decisions 2026-10-21):
   independent of the planner's, with its own Monte Carlo standard errors.
 * ranking (decision 12), deviation travel (decision 13), F0-protected outcomes
   (decision 29) and the timeout rate (decision 16) are logged and summarised.
-* information sets (decision 17): ``info_provider`` is the integration point for
-  per-robot information (see PlanProcedure.__init__); None = instant full sharing.
+* information sets (decision 17, follow-up 2026-10-22 "info set = the candidate's
+  robot"): with an ``info_provider`` (the simulator installs
+  scenario_rollout.robot_information_snapshot when planner_hab_mode="per_robot")
+  every robot r's candidates are generated and evaluated on r's own snapshot
+  (r's estimator world, r's effectiveness record), pi_0 is evaluated per robot on
+  that snapshot, each candidate's feasibility and gate use its own robot's pi_0,
+  the fleet takes the best admissible U across robots, and the committed deviation
+  is added to every robot's snapshot (task state is centralized) before the next
+  round.  None = one shared snapshot (instant full sharing), unchanged.
 """
 from __future__ import annotations
 
@@ -156,6 +166,16 @@ class PlanConfig:
             raise ValueError("plan_oracle_scenarios must be >= 2")
         if self.eta_floor is not None and not (0.0 <= float(self.eta_floor) <= 1.0):
             raise ValueError("plan_eta_floor must lie in [0, 1]")
+        if self.valuation == "one_intervention":
+            # Follow-up 2026-10-22: C_plan has NO service protection and NO continuation; the
+            # constraints below would need continuation rollouts (C_j(pi), obligation
+            # tracking, q_hat after continuation depletions), which C_plan does not run.
+            bad = [name for name, on in (("plan_service_protection", bool(self.service_protection)),
+                                         ("timed recovery", self.timed_recovery),
+                                         ("plan_eta_floor", self.eta_floor is not None)) if on]
+            if bad:
+                raise ValueError("plan_valuation='one_intervention' (C_plan) runs no continuation and "
+                                 "cannot be combined with " + ", ".join(bad))
 
 
 class RolloutEngine:
@@ -168,13 +188,14 @@ class RolloutEngine:
         self.restarts = 0
 
     def evaluate(self, snapshot, candidates, *, n_scenarios, seed, reactive_deadline_s, deadline=None,
-                 one_intervention=False):
+                 one_intervention=False, continuation=True):
         if self.pool is None:
             self.pool = sr.RolloutPool(self.n_workers)
         try:
             return sr.evaluate(snapshot, candidates, n_scenarios=n_scenarios, seed=seed, pool=self.pool,
                                reactive_deadline_s=reactive_deadline_s, deadline=deadline,
-                               scenario_chunk=self.scenario_chunk, slim=True, one_intervention=one_intervention)
+                               scenario_chunk=self.scenario_chunk, slim=True, one_intervention=one_intervention,
+                               continuation=continuation)
         except sr.EvaluationTimeout:
             # Cancelled futures do not stop rollouts already running in the workers; restart
             # the pool so the next decision gets its whole budget (decision 16).
@@ -355,14 +376,17 @@ class PlanProcedure:
     """Runs the decision procedure at every replan of one simulation run."""
 
     def __init__(self, cfg: PlanConfig, engine: Any = None, info_provider: Optional[Callable] = None):
-        """``info_provider`` (decision 17 INTEGRATION POINT): None = instant full sharing
-        (the shared snapshot, unchanged behaviour).  Otherwise a callable
-        ``info_provider(L, snapshot) -> snapshot`` that returns the decision snapshot
-        restricted to the information that reached the robots involved in the
-        decision, normally via ``scenario_rollout.restrict_snapshot_to_information``
-        with the per-robot effectiveness field, received intervention history and
-        known tasks of agent C's planner_hab_mode="per_robot" accessor."""
+        """``info_provider`` (decision 17): None = instant full sharing (one shared
+        snapshot, unchanged behaviour).  Otherwise a callable
+        ``info_provider(L, snapshot, robot_id, oracle=False) -> snapshot`` returning the
+        decision snapshot evaluated with robot ``robot_id``'s information set
+        (scenario_rollout.robot_information_snapshot); with ``oracle=True`` the snapshot
+        is the truth snapshot and only its policy side is restricted."""
         cfg.validate()
+        if info_provider is not None and cfg.timed_recovery:
+            # Not decided: the obligation ledger and the bounded-violation comparison with
+            # pi_0 are fleet-level, while pi_0 is per robot under per-robot information.
+            raise ValueError("per-robot information sets are not defined with timed recovery (open question)")
         self.cfg = cfg
         self.engine = engine if engine is not None else RolloutEngine(cfg.pool_workers, cfg.scenario_chunk)
         self._own_engine = engine is None
@@ -397,7 +421,9 @@ class PlanProcedure:
         return int(ss.generate_state(1)[0] & 0x7FFFFFFF)
 
     def _evaluate(self, snap, cands, *, n_scenarios, seed, deadline):
-        kw = {"one_intervention": True} if self.cfg.valuation == "one_intervention" else {}
+        # C_plan (follow-up 2026-10-22): one-intervention world only, no continuation
+        kw = ({"one_intervention": True, "continuation": False}
+              if self.cfg.valuation == "one_intervention" else {})
         return self.engine.evaluate(snap, cands, n_scenarios=int(n_scenarios), seed=seed,
                                     reactive_deadline_s=float(self.cfg.reactive_deadline_s), deadline=deadline, **kw)
 
@@ -546,9 +572,12 @@ class PlanProcedure:
         # (the simulator calls monitor(L) every step before Stage 3, so the ledger is current)
         snap0 = sr.decision_snapshot_from_sim_locals(L, horizon_s=cfg.horizon_s,
                                                      reactive_deadline_s=cfg.reactive_deadline_s)
-        if self.info_provider is not None:
-            # Decision 17 INTEGRATION POINT: per-robot information sets (agent C accessor).
-            snap0 = self.info_provider(L, snap0)
+        per_robot = self.info_provider is not None
+        robot_snaps = None
+        if per_robot:
+            # Decision 17 (follow-up 2026-10-22): every robot's candidates are generated and
+            # evaluated with that robot's own information set; pi_0 is evaluated per robot.
+            robot_snaps = {rs.rid: self.info_provider(L, snap0, rs.rid) for rs in snap0.robots}
         deadlines = [float(p.deadline_t) for p in snap0.pending_reactive]
         max_deadline = max(deadlines) if deadlines else -math.inf
         assert max_deadline <= t0 + float(cfg.horizon_s) + 1e-9, \
@@ -556,8 +585,20 @@ class PlanProcedure:
         obligations = self.outstanding_obligations(t0) if cfg.timed_recovery else []
         snap0.obligations = [{"id": ob["id"], "cell": ob["cell"], "deadline_t": ob["deadline_t"],
                               "e_low": float(cfg.E_low)} for ob in obligations]
+        if per_robot:
+            for s in robot_snaps.values():
+                s.obligations = list(snap0.obligations)
         ob_ids = [ob["id"] for ob in obligations]
-        gen = sr.generation_details(snap0)
+        if per_robot:
+            # B5's generation at t0 for robot r, run on r's own snapshot (its estimator and
+            # its effectiveness record): r's candidates and r's B5 ranking (decision 12)
+            gen = {}
+            for rs in snap0.robots:
+                ent = sr.generation_details(robot_snaps[rs.rid]).get(rs.rid)
+                if ent is not None:
+                    gen[rs.rid] = ent
+        else:
+            gen = sr.generation_details(snap0)
         cands = self.generate_candidates(snap0, gen)
         forced = self._forced_robots(L["active_tasks"])
         rho = float(cfg.reservation_fraction)
@@ -580,26 +621,61 @@ class PlanProcedure:
         rounds = []
         timed_out = False
         snap_k = snap0
+        snaps_k = robot_snaps
         J_exec = math.nan
         J_exec_se = math.nan
+        J_exec_by_robot = None
         relaxed_ids = []          # "drop": removed from the constraint set
         bounded_ids = []          # "bounded_violation": kept, exceedance minimised
         f0_round0 = None
         bounded = cfg.obligation_relaxation == "bounded_violation"
         while remaining:
+            # evaluation groups: one shared snapshot, or one snapshot per robot (its own pi_0)
+            if per_robot:
+                groups = [(rs.rid, snaps_k[rs.rid], [i for i in remaining if cands[i].robot_id == rs.rid])
+                          for rs in snap0.robots]
+                groups = [g for g in groups if g[2]]
+            else:
+                groups = [(None, snap_k, list(remaining))]
             try:
-                res = self._evaluate(snap_k, [cands[i] for i in remaining], n_scenarios=cfg.n_scenarios,
-                                     seed=dec_seed, deadline=deadline)
+                evals = [self._evaluate(s_g, [cands[i] for i in idx_g], n_scenarios=cfg.n_scenarios,
+                                        seed=dec_seed, deadline=deadline) for _, s_g, idx_g in groups]
             except sr.EvaluationTimeout:
                 timed_out = True
                 break
-            svc, f0 = service_feasibility(res, protect_late=bool(cfg.protect_late_tasks))
-            if f0_round0 is None:
-                f0_round0 = f0_membership(res)
-            sat = obligation_satisfaction(res, ob_ids) if ob_ids else None
-            U_mean, U_se, J_mean, J_se = self._U(res)
+            remaining = [i for _, _, idx_g in groups for i in idx_g]
+            g_of, jl_of = [], []
+            for gi, (_, _, idx_g) in enumerate(groups):
+                for jl in range(len(idx_g)):
+                    g_of.append(gi)
+                    jl_of.append(jl)
             n_pol = len(remaining)
-            eta_app = [_pol_values(res, j + 1, "candidate_eta_planner") for j in range(n_pol)]
+            svc, f0, eta_app = [], [], []
+            sat_g, J0_g = [], []
+            U_mean, U_se, Ja_mean, Ja_se = [], [], [], []
+            f0_now = []
+            for gi, res in enumerate(evals):
+                svc_g, f0_g = service_feasibility(res, protect_late=bool(cfg.protect_late_tasks))
+                svc.extend(svc_g)
+                f0.extend(f0_g)
+                f0_now.append((groups[gi][0], f0_membership(res)))
+                sat_g.append(obligation_satisfaction(res, ob_ids) if ob_ids else None)
+                Um, Us, Jm, Js = self._U(res)
+                U_mean.extend(Um)
+                U_se.extend(Us)
+                Ja_mean.extend(Jm[1:])
+                Ja_se.extend(Js[1:])
+                J0_g.append((float(Jm[0]), float(Js[0])))
+                eta_app.extend(_pol_values(res, jl + 1, "candidate_eta_planner") for jl in range(len(groups[gi][2])))
+            U_mean = np.asarray(U_mean, float)
+            U_se = np.asarray(U_se, float)
+            if f0_round0 is None:
+                f0_round0 = f0_now
+
+            def _sat(j, oid):
+                """(pi_0 of the candidate's group, candidate) per-scenario satisfaction lists."""
+                s_g = sat_g[g_of[j]]
+                return s_g[0][oid], s_g[jl_of[j] + 1][oid]
 
             def _reasons(cons_ids):
                 out = []
@@ -609,8 +685,8 @@ class PlanProcedure:
                         r = "infeasible_service"
                     elif cfg.service_protection and svc[j][1]:
                         r = "infeasible_late"
-                    elif sat is not None and any(
-                            any(s0 and not sa for s0, sa in zip(sat[0][oid], sat[j + 1][oid])) for oid in cons_ids):
+                    elif ob_ids and any(
+                            any(s0 and not sa for s0, sa in zip(*_sat(j, oid))) for oid in cons_ids):
                         r = "infeasible_obligation"
                     elif cfg.eta_floor is not None and any(
                             _finite(v) and float(v) < float(cfg.eta_floor) for v in eta_app[j]):
@@ -624,7 +700,9 @@ class PlanProcedure:
 
             reasons = _reasons([oid for oid in ob_ids if oid not in bounded_ids])
             # obligation relaxation: no feasible policy (pi_0 or candidate) satisfies it in every scenario
-            if sat is not None and not rounds:
+            # (timed recovery runs with the shared snapshot only: one group)
+            if ob_ids and not rounds:
+                sat = sat_g[0]
                 unsat = []
                 for oid in ob_ids:
                     ok0 = all(sat[0][oid])
@@ -641,35 +719,55 @@ class PlanProcedure:
                     # explicit relaxation: dropped from the constraint set from the next round on
                     ob_ids = [oid for oid in ob_ids if oid not in relaxed_ids]
             admissible = [j for j, r in enumerate(reasons) if r is None]
+            feasible_js = [j for j, r in enumerate(reasons) if r in (None, "gate")]
+            top_pool = feasible_js if feasible_js else list(range(n_pol))
+            top_j = max(top_pool, key=lambda j: U_mean[j]) if top_pool else None
+            # pi_0 estimate reported for the round: the top candidate's group (per-robot
+            # information: the top candidate's robot; shared: the one shared pi_0)
+            gref = g_of[top_j] if top_j is not None else 0
+            res_ref = evals[gref]
             rnd = {
                 "round": len(rounds), "n_candidates": n_pol, "cand_indices": [int(i) for i in remaining],
-                "J0_mean": float(J_mean[0]), "J0_se": float(J_se[0]),
-                "J0_cont_mean": float(res.J_mean[0]), "J0_cont_se": float(res.J_se[0]),
-                "F0_sizes": [int(v) for v in f0], "eval_wall_s": float(res.wall_time_s),
+                "J0_mean": J0_g[gref][0], "J0_se": J0_g[gref][1],
+                "J0_cont_mean": float(res_ref.J_mean[0]), "J0_cont_se": float(res_ref.J_se[0]),
+                "F0_sizes": [int(v) for v in f0], "eval_wall_s": float(sum(e.wall_time_s for e in evals)),
                 "chosen": None,
             }
-            tt = terminal_table(res)
-            if tt is not None:
-                rnd["terminal_summary"] = {"fields": list(TERMINAL_FIELDS), "per_policy": tt}
+            if per_robot:
+                rnd["J0_robot"] = groups[gref][0]
+                rnd["per_robot"] = {}
+                for gi, (rid_g, _s, idx_g) in enumerate(groups):
+                    ent = {"cand_indices": [int(i) for i in idx_g], "J0_mean": J0_g[gi][0], "J0_se": J0_g[gi][1],
+                           "J0_cont_mean": float(evals[gi].J_mean[0]), "J0_cont_se": float(evals[gi].J_se[0]),
+                           "eval_wall_s": float(evals[gi].wall_time_s)}
+                    tt = terminal_table(evals[gi])
+                    if tt is not None:
+                        ent["terminal_summary"] = {"fields": list(TERMINAL_FIELDS), "per_policy": tt}
+                    rnd["per_robot"][str(rid_g)] = ent
+            else:
+                tt = terminal_table(evals[0])
+                if tt is not None:
+                    rnd["terminal_summary"] = {"fields": list(TERMINAL_FIELDS), "per_policy": tt}
             if cfg.log_per_scenario:
-                Umat = res.U_one if cfg.valuation == "one_intervention" else res.U
-                rnd["U_per_scenario"] = np.asarray(Umat, float).tolist()
-                rnd["viol_per_scenario"] = per_scenario_service_violations(
-                    res, protect_late=bool(cfg.protect_late_tasks))
+                rows_u, rows_v = [], []
+                for res in evals:
+                    Umat = res.U_one if cfg.valuation == "one_intervention" else res.U
+                    rows_u.extend(np.asarray(Umat, float).tolist())
+                    rows_v.extend(per_scenario_service_violations(res, protect_late=bool(cfg.protect_late_tasks)))
+                rnd["U_per_scenario"] = rows_u
+                rnd["viol_per_scenario"] = rows_v
             for j, i in enumerate(remaining):
                 ev = [v for v in eta_app[j] if _finite(v)]
                 cand_log[i]["rounds"].append({"round": len(rounds), "U_mean": float(U_mean[j]),
-                                              "U_se": float(U_se[j]), "J_mean": float(J_mean[j + 1]),
+                                              "U_se": float(U_se[j]), "J_mean": float(Ja_mean[j]),
                                               "q_hat_app_min": (min(ev) if ev else None),
                                               "q_hat_app_max": (max(ev) if ev else None),
                                               "reason": reasons[j]})
-            feasible_js = [j for j, r in enumerate(reasons) if r in (None, "gate")]
-            top_pool = feasible_js if feasible_js else list(range(n_pol))
-            rnd["top"] = int(remaining[max(top_pool, key=lambda j: U_mean[j])]) if top_pool else None
+            rnd["top"] = int(remaining[top_j]) if top_j is not None else None
             jb = None
             if admissible:
                 if bounded_ids:
-                    exc = obligation_exceedance(res, bounded_ids, float(cfg.E_low))
+                    exc = obligation_exceedance(evals[0], bounded_ids, float(cfg.E_low))
                     # aggregation: mean over scenarios, summed over the kept obligations
                     X = [float(sum(_m(exc[p][oid]) for oid in bounded_ids)) for p in range(n_pol + 1)]
                     rnd["obligation_exceedance"] = {"ids": list(bounded_ids), "X_pi0": X[0],
@@ -684,19 +782,26 @@ class PlanProcedure:
                             reasons[j] = "obligation_exceedance"
                             cand_log[remaining[j]]["rounds"][-1]["reason"] = "obligation_exceedance"
                 else:
+                    # fleet-level argmax (per-robot information: across the robots' own U)
                     jb = max(admissible, key=lambda j: (U_mean[j], -j))
             if jb is None:
                 for j, i in enumerate(remaining):
                     status[i] = reasons[j]
-                J_exec, J_exec_se = float(J_mean[0]), float(J_se[0])
+                if per_robot:
+                    # no fleet estimate of the executed policy: each robot's own pi_0 estimate
+                    J_exec, J_exec_se = math.nan, math.nan
+                    J_exec_by_robot = {str(groups[gi][0]): J0_g[gi][0] for gi in range(len(groups))}
+                else:
+                    J_exec, J_exec_se = J0_g[0]
                 rounds.append(rnd)
                 break
             ib = remaining[jb]
             c = cands[ib]
+            res_b, jlb = evals[g_of[jb]], jl_of[jb]
             row = sr.forced_task_row(c, t0=t0, task_id=self._next_dev_id(), deterring_modes=L["deterring_modes"],
                                      tau_service_s=float(L["tau_service_s"]))
-            arr = [v - t0 for v in _pol_values(res, jb + 1, "candidate_arrival_t") if _finite(v)]
-            comp = [v for v in _pol_values(res, jb + 1, "candidate_completed_t") if _finite(v)]
+            arr = [v - t0 for v in _pol_values(res_b, jlb + 1, "candidate_arrival_t") if _finite(v)]
+            comp = [v for v in _pol_values(res_b, jlb + 1, "candidate_completed_t") if _finite(v)]
             qa = [v for v in eta_app[jb] if _finite(v)]
             choice = (gen.get(c.robot_id) or {}).get("choice")
             same = bool(choice is not None and str(choice.get("type")) == "deterring"
@@ -720,7 +825,11 @@ class PlanProcedure:
             rnd["chosen"] = int(ib)
             rnd["chosen_U_mean"] = float(U_mean[jb])
             rnd["chosen_U_se"] = float(U_se[jb])
-            J_exec, J_exec_se = float(J_mean[jb + 1]), float(J_se[jb + 1])
+            if per_robot:
+                J_exec, J_exec_se = math.nan, math.nan
+                J_exec_by_robot = {str(c.robot_id): float(Ja_mean[jb])}
+            else:
+                J_exec, J_exec_se = float(Ja_mean[jb]), float(Ja_se[jb])
             rounds.append(rnd)
             for j, i in enumerate(remaining):
                 if i != ib and cands[i].robot_id == c.robot_id and reasons[j] is None:
@@ -728,6 +837,10 @@ class PlanProcedure:
                 elif i != ib and cands[i].robot_id == c.robot_id:
                     status[i] = reasons[j]
             snap_k = dataclasses.replace(snap_k, active_tasks=list(snap_k.active_tasks) + [copy.deepcopy(row)])
+            if per_robot:
+                # task state is centralized: the commitment enters every robot's information
+                snaps_k = {rid: dataclasses.replace(s, active_tasks=list(s.active_tasks) + [copy.deepcopy(row)])
+                           for rid, s in snaps_k.items()}
             remaining = [i for i in remaining if cands[i].robot_id != c.robot_id]
         for i in remaining:
             if status[i] is None:
@@ -750,9 +863,13 @@ class PlanProcedure:
                     ob["bounded"] = True
         f0_list = []
         if f0_round0 is not None:
-            for k, v in f0_round0.items():
-                f0_list.append({"key": k, "deadline_t": v["deadline_t"], "n_in_F0": int(v["n_in_F0"]),
-                                "n_scenarios": int(cfg.n_scenarios)})
+            for rid_g, memb in f0_round0:
+                for k, v in memb.items():
+                    ent = {"key": k, "deadline_t": v["deadline_t"], "n_in_F0": int(v["n_in_F0"]),
+                           "n_scenarios": int(cfg.n_scenarios)}
+                    if per_robot:
+                        ent["robot"] = str(rid_g)     # protected under that robot's pi_0
+                    f0_list.append(ent)
         rec = {
             "decision": idx, "t": t0, "seed": dec_seed, "n_candidates": len(cands),
             "valuation": cfg.valuation,
@@ -768,6 +885,9 @@ class PlanProcedure:
             "f0_protected": f0_list, "service_protection": bool(cfg.service_protection),
             "oracle": None,
         }
+        if per_robot:
+            rec["information_sets"] = "per_robot"
+            rec["J_hat_executed_by_robot"] = J_exec_by_robot
         # ---------------- oracle evaluation (diagnostic; not part of the decision budget)
         if rounds and float(self._oracle_rng.random()) < float(cfg.oracle_fraction):
             rec["oracle"] = self._oracle(L, cands, cand_log, rounds, commitments, idx)
@@ -775,21 +895,47 @@ class PlanProcedure:
         return [copy.deepcopy(row) for _, row, _ in commitments]
 
     def _oracle(self, L, cands, cand_log, rounds, commitments, idx):
-        """Truth-snapshot evaluation with plan_oracle_scenarios independent scenarios (decision 31)."""
+        """Truth-snapshot evaluation with plan_oracle_scenarios independent scenarios (decision 31).
+
+        Per-robot information: each candidate's policies are the ones its robot evaluated,
+        so the oracle snapshot's policy side is that robot's (world = truth)."""
         cfg = self.cfg
         w0 = time.perf_counter()
         oseed = self._oracle_seed(idx)
         n_o = int(cfg.oracle_scenarios)
         base = sr.decision_snapshot_from_sim_locals(L, horizon_s=cfg.horizon_s,
                                                     reactive_deadline_s=cfg.reactive_deadline_s, oracle=True)
+        bases = {}
+
+        def base_for(rid):
+            if self.info_provider is None:
+                return base
+            if rid not in bases:
+                bases[rid] = self.info_provider(L, base, rid, oracle=True)
+            return bases[rid]
+
         out = []
         all_round0 = None
         if cfg.oracle_all_candidates and rounds and rounds[0].get("cand_indices"):
             idxs = list(rounds[0]["cand_indices"])
-            resA = self._evaluate(base, [cands[i] for i in idxs], n_scenarios=n_o, seed=oseed, deadline=None)
-            UA, UA_se, _, _ = self._U(resA)
-            U_plan = [next(e["U_mean"] for e in cand_log[i]["rounds"] if e["round"] == 0) for i in idxs]
-            all_round0 = {"cand_indices": idxs, "U_oracle": UA.tolist(), "U_oracle_se": UA_se.tolist(),
+            if self.info_provider is None:
+                groups = [(None, idxs)]
+            else:
+                order = []
+                for i in idxs:
+                    if cands[i].robot_id not in order:
+                        order.append(cands[i].robot_id)
+                groups = [(rid, [i for i in idxs if cands[i].robot_id == rid]) for rid in order]
+            UA, UA_se, idx_o = [], [], []
+            for rid, idx_g in groups:
+                resA = self._evaluate(base_for(rid), [cands[i] for i in idx_g], n_scenarios=n_o, seed=oseed,
+                                      deadline=None)
+                u, u_se, _, _ = self._U(resA)
+                UA.extend(np.asarray(u, float).tolist())
+                UA_se.extend(np.asarray(u_se, float).tolist())
+                idx_o.extend(idx_g)
+            U_plan = [next(e["U_mean"] for e in cand_log[i]["rounds"] if e["round"] == 0) for i in idx_o]
+            all_round0 = {"cand_indices": idx_o, "U_oracle": UA, "U_oracle_se": UA_se,
                           "U_planner": U_plan,
                           # decision 12: rank agreement planner U vs oracle U over all round-0 candidates
                           "kendall_tau": kendall_tau_b(U_plan, UA)}
@@ -797,7 +943,8 @@ class PlanProcedure:
             top = rnd.get("top")
             if top is None:
                 continue
-            snap = dataclasses.replace(base, active_tasks=list(base.active_tasks)
+            b = base_for(cands[top].robot_id)
+            snap = dataclasses.replace(b, active_tasks=list(b.active_tasks)
                                        + [copy.deepcopy(row) for _, row, _ in commitments[:k]])
             res = self._evaluate(snap, [cands[top]], n_scenarios=n_o, seed=oseed, deadline=None)
             U_o, U_o_se, J_o, J_o_se = self._U(res)
@@ -933,6 +1080,9 @@ class PlanProcedure:
                     prot_all[k] = f.get("met")
         term0 = [row for r in recs for rnd in r["rounds"][:1] if rnd.get("terminal_summary")
                  for row in rnd["terminal_summary"]["per_policy"][0]]
+        # per-robot information sets: every robot's own pi_0 terminal rows
+        term0 += [row for r in recs for rnd in r["rounds"][:1] for ent in (rnd.get("per_robot") or {}).values()
+                  if ent.get("terminal_summary") for row in ent["terminal_summary"]["per_policy"][0]]
         n_dec = len(recs)
         n_to = int(sum(1 for r in recs if r["timed_out"]))
         out = {
