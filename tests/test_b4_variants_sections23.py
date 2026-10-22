@@ -78,7 +78,11 @@ def test_variant_A_bit_for_bit_with_new_flags_at_defaults():
     )
     m = _run(params)
     diffs = [k for k, v in ref["metrics"].items()
-             if k not in _RUNTIME_KEYS and not _same(v, m.get(k))]
+             if k not in _RUNTIME_KEYS and not k.startswith("selected_calibration_")
+             and not _same(v, m.get(k))]
+    # selected_calibration_* echo the calibration record read from disk (the untracked
+    # ranking CSV when present, else the tracked manifest JSON); the two parse to values
+    # differing in the last ulp, so they are checkout metadata, not simulation behavior.
     assert diffs == []
 
 

@@ -59,6 +59,9 @@ def _b5c_params(t_end=300.0, **over):
     from experiments.run_plan_completion import build_params
     p = build_params("B5_c", True, 1e-4, float(t_end))
     p["seed"] = 200
+    # The shared-mode references were recorded at 32c83b9, before PLAN_ENV gained
+    # stl_forecast_correction=True (decision 1); pin it so the comparison isolates the wiring.
+    p["stl_forecast_correction"] = False
     p.update(over)
     return p
 
@@ -240,6 +243,10 @@ def _cmp_ref(name, metrics):
     ref = json.loads(SHARED_REF.read_text())[name]["metrics"]
     diffs = []
     for k, v in ref.items():
+        # selected_calibration_* echo the on-disk calibration record (untracked ranking CSV
+        # or tracked manifest JSON, last-ulp different): checkout metadata, not behavior.
+        if k.startswith("selected_calibration_"):
+            continue
         got = metrics.get(k)
         if v is None:
             if not (isinstance(got, float) and math.isnan(got)):
