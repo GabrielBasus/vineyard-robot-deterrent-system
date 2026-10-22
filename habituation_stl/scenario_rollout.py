@@ -1109,10 +1109,156 @@ def _sim_state_copy(snap):
     return pickle.loads(ent[1])
 
 
+def _world_process_events(world: "_World", tree: _ScenarioTree, accepted: np.ndarray, step_k: int, t_k: float):
+    """Truth stage of one step on a scenario tree: existence, thinning, J accumulation.
+
+    Returns the ids of the accepted events (the caller handles detections).
+    """
+    lo, hi = tree.step_start[step_k - 1], tree.step_start[step_k]
+    ids = tree.order[lo:hi]
+    if ids.size == 0:
+        return ids
+    par = tree.parent[ids]
+    exists = (par < 0) | accepted[np.maximum(par, 0)]
+    ids = ids[exists]
+    if ids.size == 0:
+        return ids
+    p_keep = world.accept_probs(tree, ids, t_k)
+    sched = tree.kind[ids] == 2
+    if sched.any():
+        world.add_scheduled_expectation(tree, ids[sched], p_keep[sched])
+    acc = tree.u_thin[ids] <= p_keep
+    acc_ids = ids[acc]
+    accepted[acc_ids] = True
+    world.add_accepted(tree, acc_ids, t_k)
+    return acc_ids
+
+
+def _hab_indices(snap: RolloutSnapshot, x: float, y: float, mode_label: str):
+    """(cell id, habituation mode index, habituation label) of an application (simulator rule)."""
+    c = snap.cfg
+    hab_label = (str(c.direct_detection_habituation_mode or "direct_detection")
+                 if mode_label == "direct_detection" else mode_label)
+    mode_idx = snap.mode_to_id.get(hab_label)
+    cell_id = None
+    for cid, poly in enumerate(snap.hab_cell_polys):
+        if poly and point_in_polygon(float(x), float(y), poly):
+            cell_id = cid
+            break
+    return cell_id, mode_idx, hab_label
+
+
+def _application_world_effects(snap: RolloutSnapshot, tr: dict, t: float, *, eta_apply: float, eta_world: float,
+                               model, source: str, hab_label: str, deterring_modes: dict, tau: float):
+    """World-side effects of one completed deterrence (DeterrentSystem._complete_deterring_task).
+
+    Returns (world store entry, legacy inhibition args (x, y, mode, weight, sigma, omega),
+    action params, mode label, feedback (eff_beta, fb_sigma, fb_omega)).  With
+    stl_forecast_correction the legacy planner-world inhibition and the model feedback
+    use q_hat * beta (Plan Sec. 2, user decision 1: q x beta everywhere); the
+    consistent-form world entry carries eta (planner q_hat, or the truth eta in
+    oracle snapshots) times the world cue beta.
+    """
+    c = snap.cfg
+    spec = task_action(tr, deterring_modes=deterring_modes, default_service_time_s=tau)
+    mode_label = str(spec.name or "direct_detection")
+    params = dict(spec.params)
+    wc = snap.world_cues.get(mode_label)
+    if wc is None:
+        wc = snap.world_cues.get("direct_detection")
+    entry = {
+        "x": float(tr["x"]), "y": float(tr["y"]), "t": float(t), "mode": mode_label,
+        "source": source, "action_id": int(tr.get("id", -1)),
+        "beta": float(wc.beta), "sigma": float(wc.sigma), "omega": float(wc.omega),
+        "eta": float(eta_world), "habituation_mode": hab_label,
+    }
+    fb_beta = float(params.get("beta", 1.0))
+    fb_omega = float(params.get("omega", model.omega_inhib)) * float(c.model_feedback_omega_scale)
+    fb_sigma = float(params.get("sigma", model.sigma)) * float(c.model_feedback_sigma_scale)
+    eff_beta = float(eta_apply) * fb_beta if bool(c.stl_forecast_correction) else fb_beta
+    inhib = (float(tr["x"]), float(tr["y"]), mode_label, eff_beta, fb_sigma, fb_omega)
+    return entry, inhib, params, mode_label, (eff_beta, fb_sigma, fb_omega)
+
+
+def one_intervention_J(snap: RolloutSnapshot, tree: _ScenarioTree, app_row: Optional[dict],
+                       t_apply: float = math.inf, robot_id: Optional[str] = None) -> float:
+    """J_H of the one-intervention counterfactual (Plan Sec. 1 "one-intervention
+    counterfactual"; variant C_plan, user decision 8) on one scenario tree.
+
+    The world starts from the snapshot's world state (forecast background,
+    excitation state and every PAST suppression term) and evolves over the same
+    horizon, region and scenario tree as the continuation rollouts, with NO future
+    intervention of any robot: no B5 continuation, no pending task service, no
+    committed deviation.  Only ``app_row`` (the candidate) is applied, at
+    ``t_apply`` (the candidate's application time in the same scenario of its
+    continuation rollout, i.e. the motion-stage completion step), with the
+    effectiveness the planner copy reaches at t_apply by recovery alone (no other
+    application depletes it in this world) and q_hat * beta as in every other
+    application (decision 1).  ``app_row=None`` (or t_apply = inf) is the
+    no-intervention arm; U_one = J(no intervention) - J(candidate only) therefore
+    isolates the candidate's own suppression from any continuation effect.
+    """
+    cfg = snap.cfg
+    dt = float(cfg.dt)
+    t0 = float(snap.t0)
+    n_steps = int(round(snap.horizon_s / dt))
+    store = list(snap.world_suppression) if snap.world_suppression is not None else list(snap.recent_deterrences)
+    world = _World(snap, store)
+    hab = snap.habituation.copy()
+    world_hab = None if snap.world_habituation is None else snap.world_habituation.copy()
+    accepted = np.zeros(tree.t.size, bool)
+    apply_now = app_row is not None and math.isfinite(float(t_apply))
+    model = None
+    if apply_now:
+        rs = next((r for r in snap.robots if r.rid == str(robot_id)), None)
+        if rs is None:
+            raise KeyError(f"robot {robot_id!r} not in snapshot")
+        model = rs.planner.m
+    tau = float(cfg.tau_service_s)
+
+    def _apply(t):
+        spec = task_action(app_row, deterring_modes=snap.deterring_modes, default_service_time_s=tau)
+        mode_label = str(spec.name or "direct_detection")
+        cell_id, mode_idx, hab_label = _hab_indices(snap, app_row["x"], app_row["y"], mode_label)
+        eta_apply = eta_world = 1.0
+        if bool(cfg.enable_habituation) and cell_id is not None and mode_idx is not None:
+            eta_apply = hab.effectiveness(cell_id, mode_idx)
+            eta_world = eta_apply if world_hab is None else world_hab.effectiveness(cell_id, mode_idx)
+        entry, inhib, _p, _m, _fb = _application_world_effects(
+            snap, app_row, t, eta_apply=eta_apply, eta_world=eta_world, model=model, source="model_scored",
+            hab_label=hab_label, deterring_modes=snap.deterring_modes, tau=tau)
+        store.append(entry)
+        world.on_deterrence_added()
+        world.add_legacy_inhibition(*inhib)
+
+    if snap.start_stage == "replan":
+        if apply_now and abs(float(t_apply) - t0) < 1e-9:
+            _apply(t0)
+        world.end_step()
+    for k in range(1, n_steps + 1):
+        t = t0 + k * dt
+        if bool(cfg.enable_habituation):
+            hab.recover(dt)
+            if world_hab is not None:
+                world_hab.recover(dt)
+        world.begin_step(t)
+        _world_process_events(world, tree, accepted, k, t)
+        if apply_now and abs(float(t_apply) - t) < 1e-9:
+            _apply(t)
+        world.end_step()
+    return float(world.J)
+
+
 class _Sim:
     def __init__(self, snap: RolloutSnapshot, tree: _ScenarioTree, candidate: Candidate,
-                 *, scenario: int, reactive_deadline_s: float, planner_model_advance: str = "per_step"):
+                 *, scenario: int, reactive_deadline_s: float, planner_model_advance: str = "per_step",
+                 one_intervention: bool = False):
         self.snap = snap
+        self.one_intervention = bool(one_intervention)
+        self.candidate_arrival_t = math.inf    # start of the candidate's application hold
+        self.candidate_eta_planner = math.nan  # planner q_hat of the candidate at application
+        self.candidate_eta_world = math.nan
+        self._candidate_row = None
         self.cfg = cfg = snap.cfg
         self.tree = tree
         self.scenario = scenario
@@ -1185,10 +1331,13 @@ class _Sim:
         self.forced_completed = {}    # id of a forced-first task -> completion time
         self.gen_log = None           # optional list: (t, rid, preventive candidates) per replan
         self.seed_log = None          # optional list: (t, rid, registered preventive seeds) per replan
+        self.mode_score_log = None    # optional list: (rid, x, y, mode, B5 generation score) per seed and cue
+        self.choice_log = None        # optional dict: rid -> B5's generated predictive row (before jitter)
         # timed-recovery obligations: cell node masks and first satisfaction times
         self.obligations = list(getattr(snap, "obligations", None) or [])
         self.obl_sat = {}
         self.obl_min_e = {}
+        self.obl_e_deadline = {}
         if self.obligations:
             XX, YY = np.meshgrid(snap.xs, snap.ys, indexing="xy")
             owner = np.full(XX.shape, -1, np.int64)
@@ -1201,6 +1350,7 @@ class _Sim:
             for ob in self.obligations:
                 self.obl_sat[ob["id"]] = math.inf
                 self.obl_min_e[ob["id"]] = math.inf
+                self.obl_e_deadline[ob["id"]] = math.nan
         if not candidate.is_noop:
             self._inject_candidate(candidate)
 
@@ -1465,27 +1615,14 @@ class _Sim:
         row["action"] = task_action(row, deterring_modes=self.deterring_modes, default_service_time_s=self.tau)
         self.active_tasks.append(row)
         self.candidate_task_id = -1
+        self._candidate_row = copy.deepcopy(row)
 
     # ------------------------------------------------------- truth stage
     def _process_events(self, step_k, t_k):
         tree = self.tree
-        lo, hi = tree.step_start[step_k - 1], tree.step_start[step_k]
-        ids = tree.order[lo:hi]
-        if ids.size == 0:
+        acc_ids = _world_process_events(self.world, tree, self.accepted, step_k, t_k)
+        if acc_ids.size == 0:
             return
-        par = tree.parent[ids]
-        exists = (par < 0) | self.accepted[np.maximum(par, 0)]
-        ids = ids[exists]
-        if ids.size == 0:
-            return
-        p_keep = self.world.accept_probs(tree, ids, t_k)
-        sched = tree.kind[ids] == 2
-        if sched.any():
-            self.world.add_scheduled_expectation(tree, ids[sched], p_keep[sched])
-        acc = tree.u_thin[ids] <= p_keep
-        acc_ids = ids[acc]
-        self.accepted[acc_ids] = True
-        self.world.add_accepted(tree, acc_ids, t_k)
         # detections (zone owner within range, then detection uniform)
         own = tree.owner[acc_ids]
         cand = acc_ids[own >= 0]
@@ -1873,6 +2010,8 @@ class _Sim:
     # ------------------------------------------------------- motion stage
     def _start_hold(self, rid, tr, t):
         tr["started_hold"] = float(t)
+        if tr.get("_rollout_candidate"):
+            self.candidate_arrival_t = float(t)
         self.loiter_until[rid] = float(t) + self._service_s(tr)
 
     def _motion(self, t):
@@ -1974,18 +2113,7 @@ class _Sim:
             self.predictive_completed += 1
         spec = task_action(tr, deterring_modes=self.deterring_modes, default_service_time_s=self.tau)
         mode_label = str(spec.name or "direct_detection")
-        params = dict(spec.params)
-        wc = self.snap.world_cues.get(mode_label)
-        if wc is None:
-            wc = self.snap.world_cues.get("direct_detection")
-        hab_label = (str(c.direct_detection_habituation_mode or "direct_detection")
-                     if mode_label == "direct_detection" else mode_label)
-        mode_idx = self.snap.mode_to_id.get(hab_label)
-        cell_id = None
-        for cid, poly in enumerate(self.snap.hab_cell_polys):
-            if poly and point_in_polygon(float(tr["x"]), float(tr["y"]), poly):
-                cell_id = cid
-                break
+        cell_id, mode_idx, hab_label = _hab_indices(self.snap, tr["x"], tr["y"], mode_label)
         eta_apply = 1.0
         eta_world = 1.0
         if bool(c.enable_habituation) and cell_id is not None and mode_idx is not None:
@@ -1998,12 +2126,14 @@ class _Sim:
                     self.snap.world_habituation_update_model or c.planner_habituation_update_model)
             _ds()._apply_habituation_update(self.hab, cell_id, mode_idx, c.planner_habituation_update_model)
         action_id = int(tr.get("id", -1))
-        entry = {
-            "x": float(tr["x"]), "y": float(tr["y"]), "t": float(t), "mode": mode_label,
-            "source": self._deterring_source(tr), "action_id": action_id,
-            "beta": float(wc.beta), "sigma": float(wc.sigma), "omega": float(wc.omega),
-            "eta": float(eta_world), "habituation_mode": hab_label,
-        }
+        if tr.get("_rollout_candidate"):
+            self.candidate_eta_planner = float(eta_apply)
+            self.candidate_eta_world = float(eta_world)
+        m = self.robots[rid].m
+        entry, inhib, params, _ml, (eff_beta, fb_sigma, fb_omega) = _application_world_effects(
+            self.snap, tr, t, eta_apply=eta_apply, eta_world=eta_world, model=m,
+            source=self._deterring_source(tr), hab_label=hab_label, deterring_modes=self.deterring_modes,
+            tau=self.tau)
         self.recent_deterrences.append(entry)
         if self.world_store is not self.recent_deterrences:
             self.world_store.append(dict(entry))
@@ -2013,12 +2143,7 @@ class _Sim:
             "source": self._deterring_source(tr), "eta": float(eta_world), "eta_planner": float(eta_apply),
             "candidate": bool(tr.get("_rollout_candidate", False)), "forced": bool(_is_forced(tr)),
         })
-        m = self.robots[rid].m
-        fb_beta = float(params.get("beta", 1.0))
-        fb_omega = float(params.get("omega", m.omega_inhib)) * float(c.model_feedback_omega_scale)
-        fb_sigma = float(params.get("sigma", m.sigma)) * float(c.model_feedback_sigma_scale)
-        eff_beta = float(eta_apply) * fb_beta if bool(c.stl_forecast_correction) else fb_beta
-        self.world.add_legacy_inhibition(float(tr["x"]), float(tr["y"]), mode_label, eff_beta, fb_sigma, fb_omega)
+        self.world.add_legacy_inhibition(*inhib)
         if bool(c.enable_intervention_feedback) and self.consistent:
             # DeterrentSystem.py:7122-7147: planner parameters, amplitude q_hat * beta,
             # footprint broadcast to the executing robot and every affected robot.
@@ -2109,6 +2234,7 @@ class _Sim:
             oid = ob["id"]
             if e < self.obl_min_e[oid]:
                 self.obl_min_e[oid] = e
+            self.obl_e_deadline[oid] = e     # last tracked step t <= deadline: e_z at the deadline
             if e <= float(ob["e_low"]) and not math.isfinite(self.obl_sat[oid]):
                 self.obl_sat[oid] = float(t)
 
@@ -2175,7 +2301,44 @@ class _Sim:
             if self.model_advance == "per_step":
                 self._advance_models(t)
             self.world.end_step()
+        self.J_one = None
+        if self.one_intervention:
+            # one-intervention counterfactual (variant C_plan) on the same tree: the
+            # candidate's suppression alone, at its application time in this scenario
+            self.J_one = one_intervention_J(
+                self.snap, self.tree, self._candidate_row,
+                t_apply=(self.candidate_completed_t if self._candidate_row is not None else math.inf),
+                robot_id=(None if self.candidate.is_noop else str(self.candidate.robot_id)))
         return self._result()
+
+    def _terminal_summary(self, t_end, pend, new):
+        """Per-scenario terminal state at t + H (user decision 30; logged, no terminal cost).
+
+        unfinished_by_stream counts the active task rows at t + H by the stream
+        definition of decision 13: reactive (direct detection), predictive (B5
+        predictive deterrence and patrols) and deviation (forced-first tasks:
+        the evaluated candidate and committed deviations).  reactive_uncompleted
+        counts the reactive work items (pending at t plus created within H) with
+        no completion by t + H (queued, active, or dropped); their completion
+        time is +inf in every comparison.  robots_busy counts robots with at
+        least one active assigned task at t + H (a robot holding at a target
+        still has that task active).
+        """
+        ds = _ds()
+        by = {"reactive": 0, "predictive": 0, "deviation": 0}
+        busy = set()
+        for tr in self.active_tasks:
+            if str(tr.get("state", "")) != "active":
+                continue
+            s = "deviation" if _is_forced(tr) else ds._task_stream(tr)
+            by[s] = by.get(s, 0) + 1
+            rid = tr.get("assigned_primary")
+            if rid:
+                busy.add(str(rid))
+        unc = sum(1 for v in pend.values() if not math.isfinite(float(v["completed_t"]))) +             sum(1 for v in new if not math.isfinite(float(v["completed_t"])))
+        return {"unfinished_by_stream": by, "reactive_uncompleted": int(unc),
+                "residual_exposure_rate": float(self.world.residual_rate(t_end)),
+                "robots_busy": int(len(busy)), "robots_busy_ids": sorted(busy)}
 
     def _result(self):
         t_end = self.t0 + self.n_steps * self.dt
@@ -2218,9 +2381,15 @@ class _Sim:
             "patrol_completed": int(self.patrol_completed),
             "candidate_completed_t": float(self.candidate_completed_t),
             "forced_completed": dict(self.forced_completed),
-            "obligations": {oid: {"satisfied_t": float(self.obl_sat[oid]), "min_e": float(self.obl_min_e[oid])}
+            "obligations": {oid: {"satisfied_t": float(self.obl_sat[oid]), "min_e": float(self.obl_min_e[oid]),
+                                  "e_deadline": float(self.obl_e_deadline[oid])}
                             for oid in self.obl_sat},
             "terminal": terminal,
+            "terminal_summary": self._terminal_summary(t_end, pend, new),
+            "candidate_arrival_t": float(self.candidate_arrival_t),
+            "candidate_eta_planner": float(self.candidate_eta_planner),
+            "candidate_eta_world": float(self.candidate_eta_world),
+            "J_one": (None if self.J_one is None else float(self.J_one)),
         }
 
 
@@ -2559,6 +2728,8 @@ def _b5_periodic_patrolling(sim: _Sim, now_t: float):
                 best = None
                 for mode in modes:
                     mm = _det_metrics(dx_, dy_, mode)
+                    if sim.mode_score_log is not None:
+                        sim.mode_score_log.append((rid, float(dx_), float(dy_), str(mode), float(mm["score"])))
                     p_ev = float(1.0 - math.exp(-max(_patch_lam(dx_, dy_, mm["sigma_u"]), 0.0)))
                     if best is None or mm["utility"] > best[1]["utility"]:
                         best = (mode, mm, p_ev)
@@ -2712,6 +2883,10 @@ def _b5_periodic_patrolling(sim: _Sim, now_t: float):
                 }
                 added = tg._add(tg._apply_predictive_lead_time_fields(row, replan_interval_s=replan_s,
                                                                        forecast_horizon_s=horizon_s))
+                if sim.choice_log is not None:
+                    sim.choice_log[rid] = {"type": ttype, "x": float(best["x"]), "y": float(best["y"]),
+                                           "mode": best.get("mode"), "origin": str(best.get("origin", "")),
+                                           "score": float(best["score"]), "added": bool(added)}
                 if ttype == "deterring" and added:
                     ck = best.get("candidate_key", best.get("cluster_key"))
                     if ck is not None:
@@ -2811,6 +2986,13 @@ def _slim_result(r: dict) -> dict:
         "predictive_completed": r["predictive_completed"], "patrol_completed": r["patrol_completed"],
         "candidate_completed_t": r["candidate_completed_t"],
         "obligations": r["obligations"],
+        # decisions 26, 13, 30, 8: candidate q_hat and arrival at application, terminal summary,
+        # one-intervention J (None unless requested)
+        "candidate_arrival_t": r["candidate_arrival_t"],
+        "candidate_eta_planner": r["candidate_eta_planner"],
+        "candidate_eta_world": r["candidate_eta_world"],
+        "terminal_summary": r["terminal_summary"],
+        "J_one": r["J_one"],
     }
 
 
@@ -2914,13 +3096,13 @@ class RolloutPool:
 
 def run_policy(snap: RolloutSnapshot, candidate: Candidate, *, n_scenarios: int = 16, seed: int = 0,
                reactive_deadline_s: float = 90.0, planner_model_advance: str = "per_step",
-               trees: Optional[list] = None) -> list:
+               trees: Optional[list] = None, one_intervention: bool = False) -> list:
     """Simulate one policy (NOOP = pi_0) over all scenarios in this process."""
     if trees is None:
         trees = [_sample_scenario_tree(snap, seed, s) for s in range(n_scenarios)]
     return [
         _Sim(snap, trees[s], candidate, scenario=s, reactive_deadline_s=reactive_deadline_s,
-             planner_model_advance=planner_model_advance).run()
+             planner_model_advance=planner_model_advance, one_intervention=one_intervention).run()
         for s in range(n_scenarios)
     ]
 
@@ -2937,6 +3119,11 @@ class EvaluationResult:
     U_se: np.ndarray
     wall_time_s: float
     n_scenarios: int
+    # one-intervention counterfactual (evaluate(..., one_intervention=True)); else None
+    J_one: Optional[np.ndarray] = None
+    U_one: Optional[np.ndarray] = None
+    U_one_mean: Optional[np.ndarray] = None
+    U_one_se: Optional[np.ndarray] = None
 
 
 class EvaluationTimeout(RuntimeError):
@@ -2950,7 +3137,8 @@ class EvaluationTimeout(RuntimeError):
 def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scenarios: int = 16, seed: int = 0,
              *, n_workers: Optional[int] = None, reactive_deadline_s: float = 90.0,
              planner_model_advance: str = "per_step", pool: Optional["RolloutPool"] = None,
-             scenario_chunk: int = 8, deadline: Optional[float] = None, slim: bool = False) -> EvaluationResult:
+             scenario_chunk: int = 8, deadline: Optional[float] = None, slim: bool = False,
+             one_intervention: bool = False) -> EvaluationResult:
     """Evaluate pi_0 (B5) and every candidate continuation with common random numbers.
 
     Returns per-scenario J_H, pending-task completion times (inf if not
@@ -2969,6 +3157,8 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
             p.deadline_t = p.created_t + float(reactive_deadline_s)
     policies = [NOOP] + list(candidates)
     kw = {"reactive_deadline_s": float(reactive_deadline_s), "planner_model_advance": str(planner_model_advance)}
+    if one_intervention:
+        kw["one_intervention"] = True
     if slim:
         kw["slim"] = True
     if pool is None and n_workers is None:
@@ -3044,9 +3234,16 @@ def evaluate(snapshot: RolloutSnapshot, candidates: Sequence[Candidate], n_scena
     U = J[0][None, :] - J[1:]
     U_mean = U.mean(axis=1) if U.size else np.zeros(0)
     U_se = (U.std(axis=1, ddof=1) / sq) if (U.size and n_scenarios > 1) else np.zeros(U.shape[0])
+    one = {}
+    if one_intervention:
+        J1 = np.array([[r["J_one"] for r in res] for res in results], float)
+        U1 = J1[0][None, :] - J1[1:]
+        one = {"J_one": J1, "U_one": U1,
+               "U_one_mean": U1.mean(axis=1) if U1.size else np.zeros(0),
+               "U_one_se": (U1.std(axis=1, ddof=1) / sq) if (U1.size and n_scenarios > 1) else np.zeros(U1.shape[0])}
     return EvaluationResult(policies=policies, per_scenario=results, J=J, J_mean=J_mean, J_se=J_se,
                             U=U, U_mean=U_mean, U_se=U_se, wall_time_s=time.perf_counter() - t_start,
-                            n_scenarios=n_scenarios)
+                            n_scenarios=n_scenarios, **one)
 
 
 # ---------------------------------------------------------------------------
@@ -3451,6 +3648,73 @@ def decision_snapshot_from_sim_locals(L: dict, *, horizon_s: float = 300.0, reac
         world_habituation_update_model=world_hab_model,
     )
     return snap
+
+
+def restrict_snapshot_to_information(snap: RolloutSnapshot, *, effectiveness: Optional[HabituationField] = None,
+                                     received_interventions: Optional[list] = None,
+                                     known_task_ids: Optional[set] = None,
+                                     known_pending_keys: Optional[set] = None) -> RolloutSnapshot:
+    """Decision snapshot restricted to the information that reached the decision's robots
+    (user decision 17: per-robot information sets; instant full sharing is the default).
+
+    INTEGRATION POINT (agent C, planner_hab_mode="per_robot"): the caller passes, for
+    the robots involved in a decision,
+      effectiveness           the planner effectiveness field reconstructed by those
+                              robots from the interventions they received
+                              (HabituationField; replaces snap.habituation, which the
+                              policy and the planner world both read);
+      received_interventions  the intervention records those robots received (dicts
+                              with at least x, y, t, mode, action_id); they replace the
+                              B5-facing recent_deterrences, and in the consistent form
+                              the world suppression store keeps only the received
+                              action ids;
+      known_task_ids          ids of the active task rows those robots know;
+      known_pending_keys      buffer keys of the pending reactive tasks they know.
+    Any argument left None keeps the shared (full-information) value, so calling this
+    with every argument None returns an equivalent copy: shared mode is unchanged.
+    The legacy forecast world (per-owner robot estimator grids) is left as built by
+    planner_forecast_from_sim_locals.
+    """
+    out = copy.copy(snap)
+    out.__dict__.pop("_sim_template", None)
+    if effectiveness is not None:
+        out.habituation = effectiveness.copy()
+    if received_interventions is not None:
+        keep = ("x", "y", "t", "mode", "source", "action_id", "habituation_mode")
+        out.recent_deterrences = [{k: e[k] for k in keep if k in e} for e in received_interventions]
+        if snap.world_suppression is not None:
+            ids = {e.get("action_id") for e in received_interventions if e.get("action_id") is not None}
+            out.world_suppression = [dict(e) for e in snap.world_suppression
+                                     if e.get("action_id") is None or e.get("action_id") in ids]
+    if known_task_ids is not None:
+        out.active_tasks = [copy.deepcopy(tr) for tr in snap.active_tasks if tr.get("id") in known_task_ids]
+    if known_pending_keys is not None:
+        out.pending_reactive = [p for p in snap.pending_reactive if tuple(p.key) in known_pending_keys]
+    return out
+
+
+def generation_details(snap: RolloutSnapshot) -> dict:
+    """B5's generation at t0 per robot: seeds, cue modes, the B5 generation score of
+    every (seed, cue) pair (TaskGenerator._det_metrics score, the quantity B5 ranks
+    by) and B5's own generated predictive row (type, x, y, mode, before patrol
+    jitter; None when B5 generates nothing for the robot at t0, e.g. cooldown).
+    Nothing of the snapshot is mutated."""
+    tree = _ScenarioTree(t=np.zeros(0), x=np.zeros(0), y=np.zeros(0), node=np.zeros(0, np.int64),
+                         parent=np.zeros(0, np.int64), kind=np.zeros(0, np.int64), u_thin=np.zeros(0),
+                         u_det=np.zeros(0), owner=np.zeros(0, np.int64), w_sched=np.zeros(0),
+                         order=np.zeros(0, np.int64), step_start=np.zeros(1, np.int64), jitter_seed=0)
+    sim = _Sim(snap, tree, NOOP, scenario=0, reactive_deadline_s=90.0)
+    sim.seed_log = []
+    sim.mode_score_log = []
+    sim.choice_log = {}
+    _b5_periodic_patrolling(sim, float(snap.t0))
+    out = {}
+    for (_t, rid, seeds, modes) in sim.seed_log:
+        out[rid] = {"seeds": seeds, "modes": modes, "scores": {}, "choice": sim.choice_log.get(rid)}
+    for (rid, x, y, mode, sc) in sim.mode_score_log:
+        out.setdefault(rid, {"seeds": [], "modes": [], "scores": {}, "choice": sim.choice_log.get(rid)})
+        out[rid]["scores"][(x, y, mode)] = sc
+    return out
 
 
 def generation_seeds(snap: RolloutSnapshot) -> dict:

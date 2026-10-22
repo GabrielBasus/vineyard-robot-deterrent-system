@@ -381,3 +381,87 @@ def test_agreement_with_real_b5_windows():
     # each real window is one draw from the predicted distribution: z ~ N(0, 1)
     assert np.all(np.abs(z_J) < 4.0)
     assert abs(z_J.mean()) < 4.0 / math.sqrt(z_J.size) + 0.5
+
+
+# ---------------------------------------------------------------------------
+# Section 6 decisions (2026-10-21)
+# ---------------------------------------------------------------------------
+def _hotspot(snap):
+    s = copy.deepcopy(snap)
+    r0 = s.robots[0]
+    hx, hy = r0.pose[0] + 15.0, r0.pose[1]
+    rng = np.random.default_rng(0)
+    pts = np.column_stack([hx + rng.normal(0, 10, 60), hy + rng.normal(0, 10, 60), np.full(60, s.t0 - 5.0)])
+    s.forecast.excitation_terms = pts
+    return s, sr.Candidate(r0.rid, hx, hy, "formation")
+
+
+def test_one_intervention_counterfactual_isolates_the_candidate(real_state):
+    """Decision 8: arm 0 is the world with no future intervention, arm a adds only the
+    candidate's suppression at its application time; neither depends on the B5
+    continuation (removing every task leaves arm 0 unchanged)."""
+    _, _, snap = real_state
+    s, cand = _hotspot(snap)
+    res = sr.evaluate(s, [cand], n_scenarios=3, seed=5, n_workers=1, one_intervention=True)
+    assert res.J_one.shape == (2, 3)
+    assert np.array_equal(res.U_one, res.J_one[0][None, :] - res.J_one[1:])
+    bare = copy.deepcopy(s)
+    bare.active_tasks = []
+    bare.pending_reactive = []
+    row = sr._Sim(s, sr._sample_scenario_tree(s, 5, 0), cand, scenario=0, reactive_deadline_s=90.0)._candidate_row
+    for k in range(3):
+        tree = sr._sample_scenario_tree(s, 5, k)
+        assert res.J_one[0, k] == sr.one_intervention_J(s, tree, None)
+        assert res.J_one[0, k] == sr.one_intervention_J(bare, tree, None)
+        t_a = res.per_scenario[1][k]["candidate_completed_t"]
+        assert math.isfinite(t_a)
+        assert res.J_one[1, k] == sr.one_intervention_J(s, tree, row, t_apply=t_a, robot_id=cand.robot_id)
+        assert res.U_one[0, k] > 0.0
+    assert np.all(res.U_one_mean > 0)
+
+
+def test_terminal_summary_per_scenario(real_state):
+    """Decision 30: unfinished tasks by stream, uncompleted reactive work, residual rate, busy robots."""
+    _, _, snap = real_state
+    r = sr.run_policy(snap, sr.NOOP, n_scenarios=1, seed=2)[0]
+    ts = r["terminal_summary"]
+    assert set(ts["unfinished_by_stream"]) >= {"reactive", "predictive", "deviation"}
+    assert sum(ts["unfinished_by_stream"].values()) == len(r["terminal"]["unfinished_tasks"])
+    unc = sum(1 for v in r["pending_completion"].values() if math.isinf(v["completed_t"])) + \
+        sum(1 for v in r["new_reactive"] if math.isinf(v["completed_t"]))
+    assert ts["reactive_uncompleted"] == unc
+    assert ts["residual_exposure_rate"] == r["terminal"]["residual_exposure_rate"]
+    busy = {u["assigned"] for u in r["terminal"]["unfinished_tasks"] if u["assigned"]}
+    assert ts["robots_busy"] == len(busy) <= len(snap.robots)
+    slim = sr._slim_result(r)
+    for k in ("terminal_summary", "candidate_arrival_t", "candidate_eta_planner", "J_one"):
+        assert k in slim
+
+
+def test_candidate_arrival_and_q_hat_at_application_recorded(real_state):
+    """Decisions 13 and 26: the candidate's arrival (hold start) and planner q_hat at application."""
+    _, _, snap = real_state
+    r0 = snap.robots[0]
+    r = sr.run_policy(snap, sr.Candidate(r0.rid, r0.pose[0], r0.pose[1], "formation"), n_scenarios=1, seed=0)[0]
+    iv = next(iv for iv in r["interventions"] if iv["candidate"])
+    assert r["candidate_eta_planner"] == iv["eta_planner"]
+    assert snap.t0 < r["candidate_arrival_t"] <= r["candidate_completed_t"]
+
+
+def test_restrict_snapshot_to_information(real_state):
+    """Decision 17: with no restriction the snapshot is equivalent (shared mode unchanged);
+    each restriction replaces only its part."""
+    _, _, snap = real_state
+    same = sr.restrict_snapshot_to_information(snap)
+    a = sr.run_policy(snap, sr.NOOP, n_scenarios=2, seed=4)
+    b = sr.run_policy(same, sr.NOOP, n_scenarios=2, seed=4)
+    assert [r["J"] for r in a] == [r["J"] for r in b]
+    eff = snap.habituation.copy()
+    eff.eta[:] = 0.3
+    eta0 = snap.habituation.eta.copy()
+    ids = {tr.get("id") for tr in snap.active_tasks[:1]}
+    r = sr.restrict_snapshot_to_information(snap, effectiveness=eff, received_interventions=[],
+                                            known_task_ids=ids, known_pending_keys=set())
+    assert np.all(r.habituation.eta == 0.3) and np.array_equal(snap.habituation.eta, eta0)
+    assert r.recent_deterrences == [] and r.pending_reactive == []
+    assert [tr.get("id") for tr in r.active_tasks] == [tr.get("id") for tr in snap.active_tasks[:1]]
