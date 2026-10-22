@@ -1,4 +1,5 @@
 import bisect
+import copy
 import math
 import os
 import random
@@ -14,6 +15,8 @@ from matplotlib.collections import LineCollection
 from matplotlib.patches import Polygon as MplPolygon
 
 from habituation_stl.habituation import HabituationField
+from habituation_stl.habituation import apply_habituation_update as _hab_apply_update
+from habituation_stl.habituation import canonical_habituation_update_model as _hab_canonical_update_model
 from habituation_stl.mission_spec import SpecParams
 from habituation_stl.signals import RobotMonitor
 from habituation_stl.task_value import Dynamics
@@ -108,41 +111,21 @@ from action_schema import (
     task_action_service_time_s,
 )
 from tracking_export import export_named_tracking_state
+from planner_committed_schedule import emulate_robot_schedule
 
 
 def _canonical_habituation_update_model(model_name: str | None) -> str:
     """Normalize the habituation update model used after a deterrence action."""
-    key = str(model_name or "multiplicative").strip().lower().replace("-", "_")
-    if key in {"", "multiplicative", "provided", "proposal", "proposal_multiplicative"}:
-        return "multiplicative"
-    if key in {"additive", "additive_drop", "linear", "linear_drop"}:
-        return "additive_drop"
-    raise ValueError(
-        "habituation update model must be one of: multiplicative, additive_drop; "
-        f"got {model_name!r}"
-    )
+    return _hab_canonical_update_model(model_name)
 
 
 def _apply_habituation_update(hab, cell_id, mode_idx, update_model: str | None) -> None:
-    """Apply one deterrence cue update using the selected habituation state model."""
-    if hab is None:
-        return
-    c = int(cell_id)
-    m = int(mode_idx)
-    model = _canonical_habituation_update_model(update_model)
-    if model == "multiplicative":
-        hab.apply(c, m)
-        return
+    """Apply one deterrence cue update using the selected habituation state model.
 
-    kappa_m = float(hab.kappa[m])
-    hab.eta[c, m] = max(0.0, float(hab.eta[c, m]) - kappa_m)
-    gamma = float(getattr(hab, "gamma", 0.0))
-    if gamma <= 0.0:
-        return
-    for other_mode in range(int(hab.n_modes)):
-        if other_mode == m:
-            continue
-        hab.eta[c, other_mode] = max(0.0, float(hab.eta[c, other_mode]) - gamma * kappa_m)
+    Delegates to habituation_stl.habituation.apply_habituation_update, the single
+    routine also used by the planner's copied forecasts (Plan Section 2).
+    """
+    _hab_apply_update(hab, cell_id, mode_idx, update_model)
 
 
 # ============================================================================
@@ -1352,8 +1335,16 @@ def _select_dispatch_policy_task(
     global_reactive_count: int = 0,
     reactive_override_target: str = "most_overdue",
     reactive_priority_key: str = "support_first",
+    reservation_mode: str = "floor",
 ) -> tuple[dict | None, bool]:
     """Select one task from the candidate pool under the configured dispatch policy.
+
+    reservation_mode (dispatch_policy "res" only): "floor" (default, historical)
+      serves predictive work first while predictive_share < rho, and serves
+      predictive work after reactive work at any share. "ceiling" (Plan Sec. 4,
+      decision 7) never prioritises predictive work for the reservation: reactive
+      work first, predictive work only while predictive_share < rho, otherwise
+      nothing. Urgent-reactive overrides and every other rule are unchanged.
 
     Diagnostic knobs (defaults reproduce the original behavior exactly):
       reactive_override_target: "most_overdue" picks the urgent reactive task with
@@ -1543,6 +1534,31 @@ def _select_dispatch_policy_task(
         fleet_size=int(fleet_size),
         global_reactive_count=int(global_reactive_count),
     )
+
+    if str(reservation_mode) == "ceiling":
+        if dispatch_policy != "res":
+            raise ValueError("reservation_mode='ceiling' is defined for dispatch_policy='res' only")
+        if reactive_tasks:
+            return max(
+                reactive_tasks,
+                key=lambda task: reactive_key_fn(task, eta_s=float(eta_seconds_fn(task))),
+            ), False
+        if predictive_tasks and float(predictive_share) < float(effective_reservation_fraction):
+            return _select_predictive_task_for_policy(
+                predictive_tasks,
+                predictive_selection_policy=predictive_selection_policy,
+                rng=rng,
+                now_t=float(now_t),
+                reactive_pressure=float(reactive_pressure),
+                predictive_confidence_source=predictive_confidence_source,
+                predictive_confidence_power=float(predictive_confidence_power),
+                predictive_deadline_weight=float(predictive_deadline_weight),
+                predictive_eta_penalty_weight=float(predictive_eta_penalty_weight),
+                predictive_time_score_deadline_scale_s=float(predictive_time_score_deadline_scale_s),
+                predictive_time_score_reactive_pressure_weight=float(predictive_time_score_reactive_pressure_weight),
+                predictive_time_score_infeasible_penalty=float(predictive_time_score_infeasible_penalty),
+            ), False
+        return None, False
 
     predictive_claim_tasks = list(predictive_tasks)
     if dispatch_policy in {"res-feasible", "res-idle-feasible", "res-idle-feasible-confidence"}:
@@ -2357,6 +2373,27 @@ def run_simulation_frames_persistent(
     # Plan Section 3 ("value future cue use"): carry cue depletion and recovery
     # through the continuation rollout (Dynamics.rollout_cue_dynamics).
     stl_rollout_cue_dynamics=False,
+    # Plan Section 2 (variant B, decision 5). Defaults keep variant A/B4 bit-for-bit.
+    # stl_committed_schedule: the pending-intervention timeline used for q_hat holds
+    #   every committed deterrence application of every robot (reactive direct
+    #   detections mapped to the cue the simulator depletes for them,
+    #   direct_detection_habituation_mode), timed by each robot's committed schedule
+    #   (_stl_committed_schedules: emulation of the robot's own dispatch rule).
+    stl_committed_schedule=False,
+    # stl_queue_aware_lead: delta_a = remaining time on the robot's current task and
+    #   committed queue + travel from where the queue ends + hold (needs the schedule).
+    stl_queue_aware_lead=False,
+    # stl_forecast_planner_update_model: copied forecasts apply depletions with the
+    #   live planner's routine and planner_habituation_update_model.
+    stl_forecast_planner_update_model=False,
+    # Plan Section 3 diagnostic: JSONL of the clause/time/cell determining each
+    # candidate's robustness score on a sampled fraction of decisions.
+    stl_binding_log_path=None,
+    stl_binding_log_fraction=0.0,
+    # Reservation rule of the "res" dispatch: "floor" (historical: a robot below the
+    # predictive share rho serves predictive work first) or "ceiling" (decision 7:
+    # reactive work keeps priority; predictive work only while share < rho).
+    reservation_mode="floor",
     stl_service_protection=False,   # Plan §4E: reject if a feasible reactive task is delayed
     stl_strict_admission=False,     # Plan §4: drop predictive candidates with U(a) <= gate
     reactive_service_deadline_s=90.0,  # Plan §6 service metrics: reactive deadline after detection (s)
@@ -4564,6 +4601,33 @@ def run_simulation_frames_persistent(
         shadow_overrides=tuple(sorted(dict(stl_shadow_overrides or {}).items())),
         rollout_cue_dynamics=bool(stl_rollout_cue_dynamics),
         kernel_self=float(stl_kernel_self),
+        hab_update_model=(
+            _canonical_habituation_update_model(planner_habituation_update_model)
+            if bool(stl_forecast_planner_update_model) else ""
+        ),
+        feedback_sigma_scale=float(model_feedback_sigma_scale),
+        feedback_omega_scale=float(model_feedback_omega_scale),
+        eq3_dt_s=float(dt),
+    )
+    reservation_mode = str(reservation_mode or "floor").strip().lower()
+    if reservation_mode not in {"floor", "ceiling"}:
+        raise ValueError(f"reservation_mode must be 'floor' or 'ceiling', got {reservation_mode!r}")
+    if reservation_mode == "ceiling" and str(dispatch_policy) != "res":
+        raise ValueError("reservation_mode='ceiling' is defined for dispatch_policy='res' only")
+    if bool(stl_queue_aware_lead) and not bool(stl_committed_schedule):
+        raise ValueError("stl_queue_aware_lead needs stl_committed_schedule=True")
+    if bool(stl_committed_schedule):
+        # The schedule emulation reproduces the Stage 4 loop of these settings only.
+        if (str(dispatch_policy) == "unc" or not bool(preempt_deterring_goals)
+                or bool(preempt_predictive_with_reactive) or float(goal_switch_margin_s) > 0.0
+                or str(motion_orchestration_mode) != "local" or str(motion_planning_mode) == "graph"):
+            raise ValueError(
+                "stl_committed_schedule emulates the non-'unc' dispatch loop with "
+                "preempt_deterring_goals=True, preempt_predictive_with_reactive=False, "
+                "goal_switch_margin_s=0, local lane-projection motion"
+            )
+    taskgen.configure_binding_log(
+        stl_binding_log_path, float(stl_binding_log_fraction), int(seed if seed is not None else 0)
     )
     last_service_t_by_cell = {cell_id: 0.0 for cell_id in range(len(cells))}
     eta_at_apply_samples = []
@@ -4705,6 +4769,12 @@ def run_simulation_frames_persistent(
         every robot receives the same merged list.
         """
         ids = set(str(r) for r in (robot_ids if robot_ids is not None else robots.keys()))
+        if bool(stl_committed_schedule):
+            # Plan Section 2 (decision 5): every committed application, reactive
+            # direct detections included (mapped to the cue the simulator depletes
+            # for them), timed by each robot's committed schedule.
+            sched_events = list(_stl_committed_schedules(now_t)["events"])
+            return {str(r): list(sched_events) for r in ids}
         all_events: list = []
         for task in list(active_tasks):
             if str(task.get("type", "")).strip().lower() != "deterring":
@@ -4739,6 +4809,82 @@ def run_simulation_frames_persistent(
             all_events.append((float(rel_t), int(cell_id), int(mode_id)))
         all_events.sort(key=lambda e: e[0])
         return {str(r): list(all_events) for r in ids}
+
+    _stl_schedule_cache = {"t": None, "value": None}
+
+    def _stl_committed_schedules(now_t):
+        """Committed schedule of every active robot at the decision time (Plan Section 2).
+
+        Emulates each robot's own dispatch loop on its committed (assigned, active)
+        tasks with planner_committed_schedule.emulate_robot_schedule. Returns
+          {"events": [(rel_completion_s, cell_id, hab_mode_id), ...] sorted, fleet-wide,
+           "queue": {rid: {"free_rel_s", "x", "y"}}}
+        where queue x, y are None for a robot with no committed task (its candidate
+        lead then keeps the historical travel estimate from its pose).
+        """
+        cache_key = (float(now_t), tuple(
+            (id(tr), tr.get("assigned_primary"), tr.get("started_hold")) for tr in active_tasks))
+        if _stl_schedule_cache["t"] == cache_key:
+            return _stl_schedule_cache["value"]
+        events = []
+        queue = {}
+        for rid in _active_robot_ids():
+            tasks_r = _active_tasks_for_robot(rid)
+            if not tasks_r:
+                queue[str(rid)] = {"free_rel_s": 0.0, "x": None, "y": None}
+                continue
+            prof = profiles.get(rid) if profiles is not None else None
+            speed = float(prof.speed_mps) if prof is not None else 1.0
+            spin = float({"UAV": 8.0, "UGV": 0.0}.get(prof.type, 0.0)) if prof is not None else 0.0
+            tracker = getattr(robots[rid], "dispatch_time_tracker", None)
+            tracker_copy = copy.deepcopy(tracker) if tracker is not None else None
+            emu_rng = np.random.default_rng(0)
+
+            def _select(tasks, t_e, eta_fn, share, idle, _rid=rid, _rng=emu_rng):
+                return _select_policy_task_for_robot(
+                    _rid, t_e, tasks=tasks, eta_seconds_fn=eta_fn,
+                    predictive_share=share, robot_is_idle=idle, rng=_rng,
+                )
+
+            res = emulate_robot_schedule(
+                now_t=float(now_t), dt=float(dt), horizon_s=float(stl_spec_params.horizon),
+                pose=tuple(pose[rid]), speed_mps=speed, spin_s=spin,
+                arrival_radius_m=float(arrival_radius_m),
+                loiter_until=float(loiter_until.get(rid, -1.0)),
+                goal_xy=goal.get(rid), tasks=tasks_r,
+                service_s_fn=lambda tr: float(task_action_service_time_s(
+                    tr, deterring_modes=deterring_modes, default_service_time_s=float(tau_service_s))),
+                is_deterring_fn=lambda tr: task_action_kind(
+                    tr, deterring_modes, float(tau_service_s)) == "deterring",
+                stream_fn=_task_stream, select_fn=_select, tracker=tracker_copy,
+            )
+            for tr, t_c in res["completions"]:
+                if task_action_kind(tr, deterring_modes, float(tau_service_s)) != "deterring":
+                    continue
+                cell_id = _cell_id_for_xy(float(tr.get("x", 0.0)), float(tr.get("y", 0.0)))
+                if cell_id is None:
+                    continue
+                hab_label = _habituation_mode_label(
+                    task_action_name(tr, deterring_modes, float(tau_service_s)))
+                mode_id = _mode_id_for_label(hab_label)
+                if mode_id is None:
+                    continue
+                events.append((float(t_c) - float(now_t), int(cell_id), int(mode_id)))
+            queue[str(rid)] = {
+                "free_rel_s": float(res["free_t"]) - float(now_t),
+                "x": float(res["free_xy"][0]), "y": float(res["free_xy"][1]),
+            }
+        events.sort(key=lambda e: e[0])
+        value = {"events": events, "queue": queue}
+        _stl_schedule_cache["t"] = cache_key
+        _stl_schedule_cache["value"] = value
+        return value
+
+    def _stl_robot_queue_by_robot(now_t):
+        """Per-robot queue state for the queue-aware lead, or None when disabled."""
+        if not bool(stl_queue_aware_lead):
+            return None
+        return dict(_stl_committed_schedules(now_t)["queue"])
 
     def _stl_reactive_tasks(now_t):
         """Collect pending reactive tasks with relative deadlines for Plan §4E service protection.
@@ -5450,6 +5596,7 @@ def run_simulation_frames_persistent(
             stl_cell_polys=cells,
             stl_local_cell_ids_by_robot=_local_cell_ids_by_robot(planning_robots.keys()),
             stl_pending_events_by_robot=_stl_pending_events_by_robot(now_t, planning_robots.keys()),
+            stl_robot_queue_by_robot=_stl_robot_queue_by_robot(now_t),
             stl_reactive_tasks=_stl_reactive_tasks(now_t),
             min_hotspot_score=float(min_hotspot_score),
             patrol_cost_weight=float(patrol_cost_weight),
@@ -5587,6 +5734,7 @@ def run_simulation_frames_persistent(
                 "stl_cell_polys": cells,
                 "stl_local_cell_ids_by_robot": _local_cell_ids_by_robot(_active_robot_ids()),
                 "stl_pending_events_by_robot": _stl_pending_events_by_robot(now_t, _active_robot_ids()),
+                "stl_robot_queue_by_robot": _stl_robot_queue_by_robot(now_t),
                 "stl_reactive_tasks": _stl_reactive_tasks(now_t),
                 "min_hotspot_score": float(min_hotspot_score),
                 "patrol_cost_weight": float(patrol_cost_weight),
@@ -6900,20 +7048,31 @@ def run_simulation_frames_persistent(
             predictive_expired_total += int(expired_count)
         return int(expired_count)
 
-    def _select_policy_task_for_robot(rid, now_t):
-        """Select the best dispatch candidate for one robot under the active policy."""
-        assigned_tasks = _active_tasks_for_robot(rid)
+    def _select_policy_task_for_robot(rid, now_t, *, tasks=None, eta_seconds_fn=None,
+                                      predictive_share=None, robot_is_idle=None, rng=None):
+        """Select the best dispatch candidate for one robot under the active policy.
+
+        The keyword overrides (default None = live state) let the committed-schedule
+        emulation (_stl_committed_schedules) apply the same rule to a predicted state.
+        """
+        assigned_tasks = _active_tasks_for_robot(rid) if tasks is None else list(tasks)
         if not assigned_tasks:
             return None, False
-        robot_is_idle = bool(goal.get(rid) is None) and float(loiter_until.get(rid, 0.0)) <= float(now_t)
+        if robot_is_idle is None:
+            robot_is_idle = bool(goal.get(rid) is None) and float(loiter_until.get(rid, 0.0)) <= float(now_t)
         # Global reactive queue depth used by res-queue policy for fleet-level pressure.
         n_global_reactive = sum(
             1 for tr in active_tasks if _task_stream(tr) == "reactive"
         )
+        if eta_seconds_fn is None:
+            eta_seconds_fn = lambda task_row: _task_eta_seconds_for_robot(rid, task_row)
         return _select_dispatch_policy_task(
             assigned_tasks,
+            reservation_mode=str(reservation_mode),
             dispatch_policy=str(dispatch_policy),
-            predictive_share=float(robots[rid].predictive_share(now_t)),
+            predictive_share=float(
+                robots[rid].predictive_share(now_t) if predictive_share is None else predictive_share
+            ),
             reservation_fraction=float(reservation_fraction),
             reactive_override_slack_s=float(reactive_override_slack_s),
             reservation_softening_alpha=float(reservation_softening_alpha),
@@ -6921,8 +7080,8 @@ def run_simulation_frames_persistent(
             reservation_age_gate=float(reservation_age_gate),
             predictive_selection_policy=str(predictive_selection_policy),
             now_t=float(now_t),
-            eta_seconds_fn=lambda task_row: _task_eta_seconds_for_robot(rid, task_row),
-            rng=policy_rng,
+            eta_seconds_fn=eta_seconds_fn,
+            rng=(policy_rng if rng is None else rng),
             predictive_slack_min_s=float(predictive_slack_min_s),
             reactive_pressure_max_for_predictive=float(reactive_pressure_max_for_predictive),
             predictive_confidence_min=float(predictive_confidence_min),

@@ -54,6 +54,13 @@ class TaskGenerator:
         self.stl_eval_runtime_s: list[float] = []
         # One row per STL/rollout valuation: (t, robot, cell, mode, U, U_shadow, gap, eta_now).
         self.stl_eval_log: list[tuple] = []
+        # Plan Section 3 diagnostic: per-candidate binding (clause, time, cell)
+        # records on a sampled fraction of decisions, appended to a JSONL file.
+        # Disabled (None / 0.0) by default; sampling uses its own rng only.
+        self._binding_log_path: str | None = None
+        self._binding_log_fraction = 0.0
+        self._binding_log_rng = None
+        self.binding_log_decisions_sampled = 0
         self.diag_counts = {
             "model_deterring_candidates_total": 0,
             "model_deterring_rejected_cooldown": 0,
@@ -98,6 +105,21 @@ class TaskGenerator:
             "model_deterring_deltaJ_per_cost_samples": 0,
             "deduped_task_total": 0,
         }
+
+    def configure_binding_log(self, path: str | None, fraction: float, seed: int) -> None:
+        """Enable the Plan Section 3 binding log.
+
+        Each call of periodic_patrolling is one decision; it is sampled with
+        probability `fraction` from a dedicated numpy stream seeded by
+        (seed, 0x53544C42), so sampling never touches simulator randomness.
+        Every STL-robustness candidate of a sampled decision is logged.
+        """
+        frac = float(fraction)
+        if not (0.0 <= frac <= 1.0):
+            raise ValueError("stl_binding_log_fraction must lie in [0, 1]")
+        self._binding_log_path = None if not path else str(path)
+        self._binding_log_fraction = frac
+        self._binding_log_rng = np.random.default_rng([int(seed), 0x53544C42])
 
     def _diag_increment(self, key: str, amount=1):
         """Increment an internal task-generation diagnostic counter."""
@@ -570,7 +592,8 @@ class TaskGenerator:
                              stl_reactive_tasks: list | None = None,
                              stl_last_service_t_by_cell: Mapping[int, float] | None = None,
                              stl_mode_to_id: Mapping[str, int] | None = None,
-                             stl_cell_id_for_xy_fn: Callable[[float, float], int | None] | None = None):
+                             stl_cell_id_for_xy_fn: Callable[[float, float], int | None] | None = None,
+                             stl_robot_queue_by_robot: Mapping[str, Mapping[str, Any]] | None = None):
         """
         Build patrolling-from-hotspots tasks for each robot at 'now_t'.
         Optionally keep a small deterring window if you also want clustered deterring here.
@@ -650,6 +673,16 @@ class TaskGenerator:
             "eta_scaled_deltaj",
             "eta_scaled_delta_j",
         }
+
+        binding_log_records: list[dict] | None = None
+        if (
+            self._binding_log_path
+            and self._binding_log_fraction > 0.0
+            and self._binding_log_rng is not None
+            and float(self._binding_log_rng.random()) < self._binding_log_fraction
+        ):
+            binding_log_records = []
+            self.binding_log_decisions_sampled += 1
 
         for rid, rob in robots.items():
             # ----------------------------------------------------------------
@@ -1027,7 +1060,7 @@ class TaskGenerator:
                         "origin": "model_scored",
                         "mode": mode,
                     }
-                    completion_lead_s = _eta_seconds(x, y) + max(
+                    hold_s = max(
                         float(
                             task_action_service_time_s(
                                 task_stub,
@@ -1037,6 +1070,31 @@ class TaskGenerator:
                         ),
                         0.0,
                     )
+                    queue_state = (
+                        None if stl_robot_queue_by_robot is None
+                        else stl_robot_queue_by_robot.get(str(rid))
+                    )
+                    if queue_state is not None and queue_state.get("x") is not None:
+                        # Plan Section 2 queue-aware lead (stl_queue_aware_lead): the robot
+                        # first finishes its current task and committed queue (free after
+                        # free_rel_s at (x, y)), then travels to the candidate and holds.
+                        if callable(travel_time_fn):
+                            raise NotImplementedError(
+                                "stl_queue_aware_lead is implemented for lane/straight-line travel "
+                                "estimates only (no graph travel_time_fn)"
+                            )
+                        fx, fy = float(queue_state["x"]), float(queue_state["y"])
+                        speed = 1.0
+                        spin = 0.0
+                        if profiles is not None and rid in profiles:
+                            prof = profiles[rid]
+                            speed = max(float(prof.speed_mps), 1e-6)
+                            if spinup_by_type is not None:
+                                spin = float(spinup_by_type.get(prof.type, 0.0))
+                        travel_s = float(math.hypot(x - fx, y - fy) / max(speed, 1e-6) + spin)
+                        completion_lead_s = float(queue_state["free_rel_s"]) + travel_s + hold_s
+                    else:
+                        completion_lead_s = _eta_seconds(x, y) + hold_s
                     target_cell_id = None
                     if callable(stl_cell_id_for_xy_fn):
                         target_cell_id = stl_cell_id_for_xy_fn(float(x), float(y))
@@ -1066,6 +1124,13 @@ class TaskGenerator:
                             iter((stl_pending_events_by_robot or {}).values()), []
                         ),
                         reactive_tasks=stl_reactive_tasks,
+                        cue_sigma=sigma_u,
+                        cue_omega=omega_u,
+                        binding_log_fn=(
+                            None if binding_log_records is None
+                            else (lambda rec, _rid=str(rid): binding_log_records.append(
+                                {"t": float(now_t), "robot": _rid, **rec}))
+                        ),
                     )
                     self.stl_eval_runtime_s.append(time.perf_counter() - _stl_t0)
                     if stl_summary.get("stl_available", False):
@@ -1812,6 +1877,12 @@ class TaskGenerator:
                     'origin': 'fallback',
                     'score': 0.0
                 }, replan_interval_s=float(replan_interval_s or 0.0), forecast_horizon_s=float(horizon_s)))
+
+        if binding_log_records:
+            import json as _json
+            with open(self._binding_log_path, "a", encoding="utf-8") as fh:
+                for rec in binding_log_records:
+                    fh.write(_json.dumps(rec) + "\n")
 
     # -------- utilities --------
     def rows(self):

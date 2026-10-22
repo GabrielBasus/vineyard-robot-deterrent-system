@@ -1,5 +1,84 @@
 # Section 3.2: STL Masking Diagnosis
 
+## Production specification as executed (variants A and B, B4 pipeline)
+
+This section states exactly what the production planner evaluates for every
+predictive candidate (Plan Section 3: "specify the mask, its numerical convention,
+and the aggregation tree explicitly"). Code: `habituation_stl/mission_spec.py`
+(`build_clauses`, `build_spec`), `habituation_stl/stl.py` (`And`, `Always`,
+`_softmin`), `habituation_stl/task_value.py` (`_nominal_signals`,
+`_build_wa_signals`, `counterfactual_value`), `planner_task_estimation.py`
+(`estimate_stl_counterfactual_value`).
+
+### Production parameters (paper configuration, ladder `B4_res_stl_full_multicue`)
+
+| Quantity | Value |
+|---|---|
+| clauses | `exp`, `cov`, `hab` (clause weights all 1.0, so no `Scale` node) |
+| E* | 5.0 (value-weighted exposure rate, units of `cell_exposure_rate`) |
+| T_cov | 1200 s |
+| eta_min | 0.4 |
+| horizon H | 300 s |
+| monitor step Delta_m | 30 s, so the time grid is s_k = 30 k, k = 0..10 (11 samples, both ends included) |
+| aggregation | smooth, theta = 12 (`stl_smooth=True`, `stl_theta=12`) |
+| query time | robustness at index 0 (t = decision time) |
+
+### Mask (which entries enter each soft-min)
+
+* **Cells Z_r** for robot r: its STL local cells (`_local_cell_ids_for_robot`: the
+  robot's own partition cell plus the partition cells of its current neighbours; all
+  cells under the centralized topology; all cells if the robot has none), plus the
+  candidate's target cell, deduplicated and sorted. With 4 robots on the paper field
+  every robot's neighbours usually cover all 4 cells, so |Z_r| = 4.
+* **No entry is masked out.** Every clause has exactly |Z_r| x 11 arguments in its
+  nested soft-min (cells x time samples), for both the nominal and the with-action trace.
+* **hab clause, inactive entries.** A cell without an action in the trace carries the
+  constant signal eta_z(s) = 1.0 ("vacuously satisfied"), predicate value
+  (1 - 0.4)/0.6 = 1. These inactive entries are NOT removed: they remain soft-min
+  arguments. Only the target cell's entries after the completion lead carry the
+  application effectiveness (variant A: flat q_hat = eta(t); variant B: exponential
+  recovery from eta_post = (1 - kappa) q_hat). With smooth aggregation each inactive
+  entry lowers the hab clause by a log-sum-exp term, so the number of inactive entries
+  (|Z_r| and the lead) changes the score (test:
+  `tests/test_b4_variants_sections23.py::test_inactive_hab_entries_change_softmin_argument_count_and_score`).
+  With all 44 entries inactive (|Z_r| = 4) the nominal hab clause is
+  1 - ln(44)/12 = 0.6846, not 1.
+* **exp entries**: e_z(s) of every cell in Z_r; e_z(0) is `cell_exposure_rate`
+  (sum over planner-grid nodes inside the cell polygon of w(x) lambda_hat(x) dx dy,
+  nodes with w <= 0 skipped). Only the target cell's trace is changed by the action.
+* **cov entries**: g_z(s) = g_z(0) + s, the target cell reset to s - lead after the lead.
+* **Truncation**: the `Always_[0,H]` window at index 0 is [0, floor(H/Delta_m)] = all 11 samples.
+
+### Numerical convention
+
+* Predicates are normalized (table below); a positive value is a margin, negative a violation.
+* `softmin_theta(x_1..x_n) = m - (1/theta) ln sum_i exp(-theta (x_i - m))`, m = min_i x_i
+  (`stl._softmin`); it lies in [m - ln(n)/theta, m], equal to m - ln(n)/theta when all
+  x_i are equal. Classical mode uses the exact min.
+* Score of a candidate: U(a) = rho(Phi_r, xi^{+a}, 0) - rho(Phi_r, xi^{-a}, 0)
+  (same Z_r, same grid, same mask for both traces).
+
+### Aggregation tree (exactly as built by `build_spec`)
+
+```
+rho = softmin_theta over clauses c in (exp, cov, hab) of            # And(weighted clauses)
+        softmin_theta over k = 0..10 of                             # Always_[0,H] at index 0
+          softmin_theta over z in Z_r (sorted) of pred_c,z(s_k)     # And over cells
+```
+
+The time soft-min is applied to the per-time cell soft-min (cells inside, time outside).
+
+### Per-candidate binding diagnostics
+
+`task_value.robustness_breakdown` returns, per clause and per trace (`binding_nom`,
+`binding_wa`), the argmin time index / time / cell / predicate value of the nested
+soft-min, the soft-min weight of that entry (product of the time and cell soft-min
+weights; 1 under classical min), the number of soft-min arguments and the clause value
+recomputed from the same entries. The simulator writes one JSONL row per candidate on
+a sampled fraction of decisions with `stl_binding_log_path` and
+`stl_binding_log_fraction` (a decision is one task-generation call; sampling uses its
+own stream seeded by (seed, 0x53544C42), so logging never changes the run).
+
 ## Aggregation tree (explicit)
 
 The planner evaluates the following formula at t=0 on a trace of length H/dt steps:

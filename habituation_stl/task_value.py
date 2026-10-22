@@ -25,7 +25,12 @@ exposure -- exactly the behavior a scalar exposure objective cannot produce.
 valuation_mode options (set on Dynamics):
   "stl_robustness"       -- default; return rho(xi^{+a}) - rho(xi^{-a})
   "integrated_exposure"  -- return integral of exposure reduction over [lead, H]
-                            (Plan §3 variant C objective)
+                            (earlier one-cell variant C objective)
+  "integrated_exposure_eq3" -- Plan Eq. (3) over every modeled cell with pointwise
+                            cue-footprint suppression (variant C, decision 6); computed
+                            on the planner grid by
+                            planner_task_estimation.eq3_counterfactual_value
+                            (see integrated_exposure_eq3 below)
 """
 from __future__ import annotations
 
@@ -35,6 +40,7 @@ import numpy as np
 
 from stl import Trace, robustness_at
 from mission_spec import SpecParams, build_spec
+from habituation import apply_habituation_update
 
 
 @dataclass
@@ -80,6 +86,19 @@ class Dynamics:
     # mode maximizing effectiveness * beta at its own application time.  When
     # False (default), the rollout freezes hab and uses mode 0 (A4.2, A4.3).
     rollout_cue_dynamics: bool = False
+    # Plan Section 2 ("use the same state-update routine for the internal planner
+    # state and its copied forecasts"): name of the habituation update model the
+    # forecasts apply to pending/candidate applications, through
+    # habituation.apply_habituation_update (the routine DeterrentSystem applies to
+    # the live planner state).  "" (default) keeps the historical hab.apply call.
+    hab_update_model: str = ""
+    # Eq. 3 valuation ("integrated_exposure_eq3"): the planner model stamps an
+    # executed intervention with sigma = cue sigma * feedback_sigma_scale and decay
+    # omega = cue omega * feedback_omega_scale (DeterrentSystem model feedback).
+    feedback_sigma_scale: float = 1.0
+    feedback_omega_scale: float = 1.0
+    # Eq. 3 quadrature step (the simulator dt).
+    eq3_dt_s: float = 1.0
 
 
 @dataclass
@@ -121,6 +140,50 @@ def _nominal_signals(cells, cell_states, times, dyn: Dynamics):
     return sig
 
 
+def _forecast_apply(hab_fc, cell, mode, dyn: Dynamics):
+    """Deplete one (cell, mode) in a copied forecast state.
+
+    With dyn.hab_update_model set, uses the same routine as the live planner
+    state (habituation.apply_habituation_update with the planner's update model);
+    otherwise the historical hab.apply call.
+    """
+    model = str(getattr(dyn, "hab_update_model", "") or "")
+    if model:
+        apply_habituation_update(hab_fc, cell, mode, model)
+    else:
+        hab_fc.apply(cell, mode)
+
+
+def forecast_q_hat(a_cell, a_mode, lead, hab, dyn: Dynamics, pending_events):
+    """Eqs. (1)-(2) with known intervening applications (Plan Section 2).
+
+    Copies hab (the live state is never mutated), processes pending events
+    (rel_t, cell, mode) with rel_t < lead chronologically, alternating recovery
+    with depletion, then recovers to the application time.
+    Returns (q_hat, eta_post).
+    """
+    hab_fc = hab.copy()
+    t_cursor = 0.0
+    for t_ev, c_ev, m_ev in sorted(pending_events or [], key=lambda e: e[0]):
+        if t_ev >= lead:
+            break
+        hab_fc.recover(t_ev - t_cursor)
+        _forecast_apply(hab_fc, c_ev, m_ev, dyn)
+        t_cursor = t_ev
+    # Eq. (1): q_hat = 1 - [1 - eta(t)] exp(-delta_a / T_rec)
+    hab_fc.recover(lead - t_cursor)
+    q_hat = hab_fc.effectiveness(a_cell, a_mode)
+    # Eq. (2): eta(t_a+) = (1 - kappa) q_hat  (multiplicative model; with the
+    # planner's update model set, the post-application state of that routine)
+    if str(getattr(dyn, "hab_update_model", "") or ""):
+        _forecast_apply(hab_fc, a_cell, a_mode, dyn)
+        eta_post = hab_fc.effectiveness(a_cell, a_mode)
+    else:
+        kappa_m = float(hab.kappa[a_mode]) if a_mode < len(hab.kappa) else float(hab.kappa[-1])
+        eta_post = (1.0 - kappa_m) * q_hat
+    return q_hat, eta_post
+
+
 def _compute_q_hat(a_cell, a_mode, lead, hab, dyn, params, pending_events):
     """Compute q_hat (application effectiveness) and eta_post (post-depletion eta).
 
@@ -129,23 +192,9 @@ def _compute_q_hat(a_cell, a_mode, lead, hab, dyn, params, pending_events):
     """
     if "hab" in set(str(c) for c in params.active_clauses):
         if dyn.forecast_correction:
-            # Proposal §2: copy hab so the live state is never mutated (item 2.6).
-            hab_fc = hab.copy()
-            t_cursor = 0.0
-            # Proposal §2: process known intervening committed applications
-            # chronologically, alternating recovery with depletion jumps (item 2.3).
-            for t_ev, c_ev, m_ev in sorted(pending_events or [], key=lambda e: e[0]):
-                if t_ev >= lead:
-                    break
-                hab_fc.recover(t_ev - t_cursor)
-                hab_fc.apply(c_ev, m_ev)
-                t_cursor = t_ev
-            # Eq. (1): q̂_a = 1 − [1 − η̂(t)] exp(−δ_a / T̂_rec)
-            hab_fc.recover(lead - t_cursor)
-            q_hat = hab_fc.effectiveness(a_cell, a_mode)
-            # Eq. (2): η̂(t_a+) = (1 − κ̂) q̂_a
-            kappa_m = float(hab.kappa[a_mode]) if a_mode < len(hab.kappa) else float(hab.kappa[-1])
-            eta_post = (1.0 - kappa_m) * q_hat
+            # Proposal §2: copy hab, process known intervening committed
+            # applications chronologically (items 2.3, 2.6), Eqs. (1)-(2).
+            q_hat, eta_post = forecast_q_hat(a_cell, a_mode, lead, hab, dyn, pending_events)
         else:
             # Variant A: reads η at decision time, no travel-time recovery.
             q_hat = hab.effectiveness(a_cell, a_mode)
@@ -195,6 +244,9 @@ def counterfactual_value(action, cells, cell_states, hab, params: SpecParams,
       "integrated_exposure" -- sum_{s>=lead} min(e_nom(s), supp(s)) * dt
       "continuation_rollout"-- J_H(pi_0) - J_H(pi_a) via greedy rollout (Plan §4)
     """
+    if dyn.valuation_mode == "integrated_exposure_eq3":
+        raise ValueError("integrated_exposure_eq3 needs the planner grid: use "
+                         "planner_task_estimation.eq3_counterfactual_value")
     a_cell, a_mode, lead = int(action[0]), int(action[1]), float(action[2])
     times = _times(params)
     nom = _nominal_signals(cells, cell_states, times, dyn)
@@ -313,9 +365,127 @@ def robustness_breakdown(action, cells, cell_states, hab, params: SpecParams,
         "wa": wa_rho,
         "binding_clause_nom": binding_nom,
         "binding_clause_wa": binding_wa,
+        # Plan Section 3: time index, cell and clause that determine the score.
+        "binding_nom": {name: clause_binding(name, cells, nom_trace, params) for name in clauses},
+        "binding_wa": {name: clause_binding(name, cells, wa_trace, params) for name in clauses},
+        "n_top_args": int(len(clauses)),
+        "rho_nom": float(rho_nom),
+        "rho_wa": float(rho_wa),
         "U_stl": float(rho_wa - rho_nom),
         "U_ie": u_ie,
+        "q_hat": float(q_hat),
+        "lead_s": float(lead),
     }
+
+
+_CLAUSE_PREDICATES = {
+    # clause -> (signal prefix, robustness of the normalized predicate), exactly
+    # the signal_leq / signal_geq predicates of mission_spec.build_clauses.
+    "exp": ("e", lambda v, p: (p.E_star - v) / (float(p.E_star) if p.E_star else 1.0)),
+    "cov": ("g", lambda v, p: (p.T_cov - v) / (float(p.T_cov) if p.T_cov else 1.0)),
+    "hab": ("eta", lambda v, p: (v - p.eta_min) / ((1.0 - p.eta_min) if (1.0 - p.eta_min) else 1.0)),
+}
+
+
+def clause_binding(clause, cells, trace: Trace, params: SpecParams):
+    """Time index, cell and predicate value that determine one clause's score.
+
+    A clause is Always_[0,H]( And_{z in cells} pred_z ) evaluated at t = 0, i.e.
+    agg-min over the time window of agg-min over cells (mission_spec.build_clauses).
+    The determining entry is the argmin over (time, cell) of pred_z(s); with
+    smooth aggregation its weight is the derivative of the nested soft-min with
+    respect to that entry (product of the two soft-min weights; 1 for classical).
+    'value' recomputes the clause robustness from the same entries (a check).
+    Returns None for clauses without a per-cell predicate (react, timed_recovery).
+    """
+    if clause not in _CLAUSE_PREDICATES:
+        return None
+    prefix, pred_fn = _CLAUSE_PREDICATES[clause]
+    cells = list(cells)
+    R = np.stack([pred_fn(np.asarray(trace.signals[f"{prefix}_{c}"], float), params)
+                  for c in cells], axis=0)                    # (n_cells, n_times)
+    ib = int(np.floor(float(params.horizon) / trace.dt + 1e-9))
+    hi = min(trace.n - 1, max(ib, 0))
+    W = R[:, : hi + 1]
+    zi, ki = np.unravel_index(int(np.argmin(W)), W.shape)
+    if params.smooth:
+        th = float(params.theta)
+        col_min = W.min(axis=0, keepdims=True)
+        e_in = np.exp(-th * (W - col_min))
+        inner = col_min[0] - (1.0 / th) * np.log(e_in.sum(axis=0))
+        inner_w = e_in / e_in.sum(axis=0, keepdims=True)
+        e_out = np.exp(-th * (inner - inner.min()))
+        value = float(inner.min() - (1.0 / th) * np.log(e_out.sum()))
+        outer_w = e_out / e_out.sum()
+        weight = float(outer_w[ki] * inner_w[zi, ki])
+    else:
+        value = float(W.min())
+        weight = 1.0
+    return {
+        "t_index": int(ki),
+        "t_s": float(trace.t[ki]),
+        "cell": int(cells[zi]),
+        "pred": float(W[zi, ki]),
+        "weight": weight,
+        "n_softmin_args": int(W.size),
+        "value": value,
+    }
+
+
+def integrated_exposure_eq3(*, base_grid, trigger_grid, inhib_grid, lam_grid, node_weight,
+                            center_iy, center_ix, kernel, amp, omega_c, lead, horizon, dt,
+                            omega_e, omega_u, forward_trajectory_correction):
+    """Plan Eq. (3) one-intervention counterfactual over every modeled cell.
+
+    U(a) = J_H(no candidate) - J_H(with candidate),
+    J_H  = int_0^H sum_{z in region} e_z(s) ds,  e_z(s) = int_z w(x) lambda_hat(x, s) dx.
+
+    Grids are the planner model's (ny, nx) node grids. node_weight[y, x] =
+    w(x) * node area * (number of region cells whose polygon contains the node),
+    so sum_x node_weight * lambda = sum_z e_z exactly as cell_exposure_rate sums it.
+
+    Forecast (B's forecast, applied pointwise):
+      forward_trajectory_correction=True:
+        lambda_nom(x, s) = max(0, base(x) + trigger(x) e^{-s/omega_e} - inhib(x) e^{-s/omega_u})
+        with base = mu * time_multiplier(t) held over the horizon (as in B),
+      otherwise:  lambda_nom(x, s) = lambda(x) e^{-s/omega_e}.
+    Candidate suppression in the planner's own (legacy OnlineSESTPP) form, i.e. the
+    stamp add_intervention_event applies when the action executes:
+      supp(x, s) = amp * K(x - x_a) e^{-(s - lead)/omega_c} for s >= lead, else 0,
+      amp = alpha_inhib * q_hat * beta_c, K the model's normalized grid kernel.
+    The legacy intensity is clipped pointwise at 0, so pointwise
+      lambda_nom - lambda_wa = min(lambda_nom, supp).
+    The difference vanishes outside the kernel footprint, so U is summed there.
+
+    Quadrature: left Riemann sum on the simulator step, s_k = k dt,
+    k = 0 .. round(H/dt) - 1:  U = dt * sum_k sum_x node_weight min(lambda_nom, supp).
+    """
+    ny, nx = node_weight.shape
+    k_rad = (kernel.shape[0] - 1) // 2
+    y0 = max(0, center_iy - k_rad); y1 = min(ny, center_iy + k_rad + 1)
+    x0 = max(0, center_ix - k_rad); x1 = min(nx, center_ix + k_rad + 1)
+    ky0 = y0 - (center_iy - k_rad); kx0 = x0 - (center_ix - k_rad)
+    K = kernel[ky0:ky0 + (y1 - y0), kx0:kx0 + (x1 - x0)]
+    wgt = node_weight[y0:y1, x0:x1]
+    n_steps = int(round(float(horizon) / float(dt)))
+    s = np.arange(n_steps, dtype=float) * float(dt)
+    act = s >= float(lead)
+    n_fp = int(np.count_nonzero(wgt > 0.0))
+    if not np.any(act) or n_fp == 0:
+        return {"U": 0.0, "n_steps": n_steps, "footprint_nodes": n_fp}
+    s_act = s[act][:, None, None]
+    if forward_trajectory_correction:
+        lam_nom = np.maximum(
+            0.0,
+            base_grid[y0:y1, x0:x1][None]
+            + trigger_grid[y0:y1, x0:x1][None] * np.exp(-s_act / float(omega_e))
+            - inhib_grid[y0:y1, x0:x1][None] * np.exp(-s_act / float(omega_u)),
+        )
+    else:
+        lam_nom = lam_grid[y0:y1, x0:x1][None] * np.exp(-s_act / float(omega_e))
+    supp = float(amp) * K[None] * np.exp(-(s_act - float(lead)) / float(omega_c))
+    u = float(np.sum(np.minimum(lam_nom, supp) * wgt[None]) * float(dt))
+    return {"U": u, "n_steps": n_steps, "footprint_nodes": n_fp}
 
 
 def cue_preservation_value(action, cells, cell_states, hab, params: SpecParams,

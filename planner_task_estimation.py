@@ -7,7 +7,18 @@ from typing import List
 import numpy as np
 
 from habituation_stl.mission_spec import SpecParams
-from habituation_stl.task_value import CellState, Dynamics, counterfactual_value
+from habituation_stl.task_value import (
+    CellState,
+    Dynamics,
+    _compute_q_hat,
+    counterfactual_value,
+    forecast_q_hat,
+    integrated_exposure_eq3,
+    robustness_breakdown,
+)
+
+EQ3_VALUATION_MODE = "integrated_exposure_eq3"
+_EQ3_CELL_WEIGHT_CACHE: dict = {}
 from ZonePartitioner import Point, point_in_polygon, point_to_poly_distance, polygon_centroid
 
 
@@ -294,6 +305,87 @@ def cell_exposure_rate(
     return float(max(total, 0.0))
 
 
+def _cell_node_weight(model, cell_poly, weight_fn) -> np.ndarray:
+    """(ny, nx) grid of w(x) * node area on the nodes cell_exposure_rate sums for one cell.
+
+    Same node set, weight and area as cell_exposure_rate, so
+    sum(grid * field) == cell_exposure_rate(model, cell_poly, field_grid=field).
+    Cached per (grid geometry, polygon, weight function).
+    """
+    key = (int(model.nx), int(model.ny), float(model.xs[0]), float(model.xs[-1]),
+           float(model.ys[0]), float(model.ys[-1]),
+           tuple((float(px), float(py)) for (px, py) in cell_poly), id(weight_fn))
+    hit = _EQ3_CELL_WEIGHT_CACHE.get(key)
+    if hit is not None and hit[0] is weight_fn:
+        return hit[1]
+    grid = np.zeros((model.ny, model.nx), float)
+    xs_poly = [float(p[0]) for p in cell_poly]
+    ys_poly = [float(p[1]) for p in cell_poly]
+    ix0 = max(0, int(np.searchsorted(model.xs, min(xs_poly), side="left") - 1))
+    ix1 = min(model.nx - 1, int(np.searchsorted(model.xs, max(xs_poly), side="right")))
+    iy0 = max(0, int(np.searchsorted(model.ys, min(ys_poly), side="left") - 1))
+    iy1 = min(model.ny - 1, int(np.searchsorted(model.ys, max(ys_poly), side="right")))
+    delta_a = float(model.dx * model.dy)
+    for yy in range(iy0, iy1 + 1):
+        wy = float(model.ys[yy])
+        for xx in range(ix0, ix1 + 1):
+            wx = float(model.xs[xx])
+            if not point_in_polygon(wx, wy, cell_poly):
+                continue
+            weight = float(weight_fn(wx, wy)) if weight_fn is not None else 1.0
+            if weight <= 0.0:
+                continue
+            grid[yy, xx] = weight * delta_a
+    if len(_EQ3_CELL_WEIGHT_CACHE) > 4096:
+        _EQ3_CELL_WEIGHT_CACHE.clear()
+    _EQ3_CELL_WEIGHT_CACHE[key] = (weight_fn, grid)
+    return grid
+
+
+def eq3_counterfactual_value(model, x, y, *, cells, cell_polys, weight_fn, hab, spec_params,
+                             dynamics, target_cell_id, mode_id, completion_lead_s, now_t,
+                             cue_sigma, cue_omega, pending_events=None, dt=1.0) -> dict:
+    """Plan Eq. (3) value of one candidate (variant C), see task_value.integrated_exposure_eq3.
+
+    Region = the robot's modeled cells (its STL local cells plus the target cell).
+    q_hat as in the STL path (_compute_q_hat: Eqs. 1-2 with pending events when
+    forecast_correction, eta(t) otherwise, 1 when the hab clause is inactive).
+    Amplitude q_hat * beta_c (decision 1) times the legacy model's alpha_inhib, kernel
+    sigma = cue sigma * feedback_sigma_scale, decay omega = cue omega * feedback_omega_scale:
+    the stamp the planner model receives when the action executes.
+    """
+    if str(getattr(model, "estimator_mode", "legacy")) != "legacy":
+        raise ValueError("integrated_exposure_eq3 is defined for the legacy planner estimator")
+    lead = float(completion_lead_s)
+    q_hat, _ = _compute_q_hat(int(target_cell_id), int(mode_id), lead, hab, dynamics,
+                              spec_params, pending_events)
+    beta_c = (float(dynamics.beta[mode_id]) if mode_id < len(dynamics.beta)
+              else float(dynamics.beta[-1]))
+    node_weight = np.zeros((model.ny, model.nx), float)
+    for cid in cells:
+        poly = cell_polys[int(cid)]
+        if poly:
+            node_weight = node_weight + _cell_node_weight(model, poly, weight_fn)
+    sigma_c = float(cue_sigma) * float(getattr(dynamics, "feedback_sigma_scale", 1.0))
+    omega_c = float(cue_omega) * float(getattr(dynamics, "feedback_omega_scale", 1.0))
+    _rad, kernel = model._build_kernel(sigma_c)
+    iy, ix = model.world_to_idx(float(x), float(y))
+    amp = float(model.alpha_inhib) * float(q_hat) * beta_c
+    out = integrated_exposure_eq3(
+        base_grid=model.mu * float(model.time_multiplier(float(now_t))),
+        trigger_grid=model.trigger_mass,
+        inhib_grid=model.inhib_mass,
+        lam_grid=model.lam,
+        node_weight=node_weight,
+        center_iy=int(iy), center_ix=int(ix), kernel=kernel, amp=amp, omega_c=omega_c,
+        lead=lead, horizon=float(spec_params.horizon), dt=float(dt),
+        omega_e=float(dynamics.omega_e), omega_u=float(dynamics.omega_u),
+        forward_trajectory_correction=bool(getattr(dynamics, "forward_trajectory_correction", False)),
+    )
+    out.update({"q_hat": float(q_hat), "amp": float(amp), "sigma_c": sigma_c, "omega_c": omega_c})
+    return out
+
+
 def estimate_stl_counterfactual_value(
     model,
     x: float,
@@ -314,8 +406,16 @@ def estimate_stl_counterfactual_value(
     pending_events=None,
     fleet_pending_events=None,
     reactive_tasks=None,
+    cue_sigma: float | None = None,
+    cue_omega: float | None = None,
+    binding_log_fn=None,
 ) -> dict:
     """Compute proposal U(a,r) for one candidate deterrence action.
+
+    dynamics.valuation_mode == "integrated_exposure_eq3" values the candidate by
+    Plan Eq. (3) (eq3_counterfactual_value; needs cue_sigma / cue_omega).
+    binding_log_fn: when given (sampled decisions, Plan Section 3), called with a
+    dict naming the clause, time and cell that determine this candidate's score.
 
     Returns compatibility diagnostics so the existing task rows can continue to
     expose predicted_deltaJ/deltaJ_per_cost while the underlying value is STL
@@ -385,18 +485,11 @@ def estimate_stl_counterfactual_value(
             )
             use_correction = bool(getattr(dynamics, "forecast_correction", False))
             if use_correction:
-                # Compute q̂_a exactly: process pending events chronologically through
-                # a hab copy, matching the computation inside counterfactual_value().
-                hab_diag = hab.copy()
-                t_cursor = 0.0
-                for t_ev, c_ev, m_ev in sorted(pending_events or [], key=lambda e: e[0]):
-                    if t_ev >= float(completion_lead_s):
-                        break
-                    hab_diag.recover(t_ev - t_cursor)
-                    hab_diag.apply(c_ev, m_ev)
-                    t_cursor = t_ev
-                hab_diag.recover(float(completion_lead_s) - t_cursor)
-                q_hat = float(hab_diag.effectiveness(int(target_cell_id), int(mode_id)))
+                # Compute q̂_a exactly: the same routine counterfactual_value() uses
+                # (pending events chronologically through a hab copy).
+                q_hat, _ = forecast_q_hat(int(target_cell_id), int(mode_id), float(completion_lead_s),
+                                          hab, dynamics, pending_events)
+                q_hat = float(q_hat)
                 stl_travel_recovery_delta = q_hat - eta_now
                 stl_eta_at_apply = q_hat
             else:
@@ -436,33 +529,59 @@ def estimate_stl_counterfactual_value(
         else:
             states[int(cid)] = CellState(e0=float(e0), g0=float(g0))
 
-    u_value = counterfactual_value(
-        (int(target_cell_id), int(mode_id), float(completion_lead_s)),
-        cells,
-        states,
-        hab,
-        spec_params,
-        dynamics,
-        pending_events=pending_events,
-        fleet_pending_events=fleet_pending_events,
-        reactive_tasks=reactive_tasks,
-    )
-    # Same-state shadow valuation (Plan §2 ranking check): score this candidate
-    # again under overridden dynamics, e.g. variant A, on the identical snapshot.
-    u_shadow = float("nan")
-    shadow_overrides = dict(getattr(dynamics, "shadow_overrides", ()) or ())
-    if shadow_overrides:
-        u_shadow = float(counterfactual_value(
+    eq3_info = {}
+
+    def _value(dyn):
+        if str(getattr(dyn, "valuation_mode", "")) == EQ3_VALUATION_MODE:
+            if cue_sigma is None or cue_omega is None:
+                raise ValueError("integrated_exposure_eq3 needs cue_sigma and cue_omega")
+            info = eq3_counterfactual_value(
+                model, x, y, cells=cells, cell_polys=cell_polys, weight_fn=weight_fn, hab=hab,
+                spec_params=spec_params, dynamics=dyn, target_cell_id=int(target_cell_id),
+                mode_id=int(mode_id), completion_lead_s=float(completion_lead_s), now_t=float(now_t),
+                cue_sigma=float(cue_sigma), cue_omega=float(cue_omega),
+                pending_events=pending_events, dt=float(getattr(dyn, "eq3_dt_s", 1.0)),
+            )
+            if not eq3_info:
+                eq3_info.update(info)
+            u = float(info["U"])
+            return u if u > float(dyn.benefit_gate) else 0.0
+        return counterfactual_value(
             (int(target_cell_id), int(mode_id), float(completion_lead_s)),
             cells,
             states,
             hab,
             spec_params,
-            replace(dynamics, shadow_overrides=(), **shadow_overrides),
+            dyn,
             pending_events=pending_events,
             fleet_pending_events=fleet_pending_events,
             reactive_tasks=reactive_tasks,
-        ))
+        )
+
+    u_value = _value(dynamics)
+    # Same-state shadow valuation (Plan §2 ranking check): score this candidate
+    # again under overridden dynamics, e.g. variant A, on the identical snapshot.
+    u_shadow = float("nan")
+    shadow_overrides = dict(getattr(dynamics, "shadow_overrides", ()) or ())
+    if shadow_overrides:
+        u_shadow = float(_value(replace(dynamics, shadow_overrides=(), **shadow_overrides)))
+    # Plan Section 3 diagnostic (sampled decisions, robustness valuation only).
+    if binding_log_fn is not None and str(getattr(dynamics, "valuation_mode", "")) == "stl_robustness":
+        bd = robustness_breakdown(
+            (int(target_cell_id), int(mode_id), float(completion_lead_s)),
+            cells, states, hab, spec_params, dynamics, pending_events=pending_events,
+        )
+        binding_log_fn({
+            "x": float(x), "y": float(y), "mode": str(mode), "target_cell": int(target_cell_id),
+            "cells": [int(c) for c in cells], "U": float(u_value),
+            "lead_s": float(completion_lead_s), "q_hat": bd["q_hat"],
+            "rho_nom": bd["rho_nom"], "rho_wa": bd["rho_wa"],
+            "clause_rho_nom": bd["nom"], "clause_rho_wa": bd["wa"],
+            "binding_clause_nom": bd["binding_clause_nom"],
+            "binding_clause_wa": bd["binding_clause_wa"],
+            "binding_nom": bd["binding_nom"], "binding_wa": bd["binding_wa"],
+            "n_top_args": bd["n_top_args"],
+        })
     return {
         "predictive_stl_U": float(u_value),
         "predictive_stl_U_shadow": float(u_shadow),
@@ -478,6 +597,8 @@ def estimate_stl_counterfactual_value(
         "stl_completion_lead_s": float(completion_lead_s),
         "stl_target_exposure_rate": float(states[int(target_cell_id)].e0),
         "stl_target_coverage_age_s": float(states[int(target_cell_id)].g0),
+        **({"eq3_q_hat": float(eq3_info["q_hat"]), "eq3_amp": float(eq3_info["amp"]),
+            "eq3_footprint_nodes": int(eq3_info["footprint_nodes"])} if eq3_info else {}),
     }
 
 

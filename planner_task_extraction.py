@@ -493,6 +493,7 @@ def run_task_location_estimation(
     min_hotspot_score: float = 1.0e-4,
     patrol_cost_weight: float = 1.0,
     deterring_cost_multiplier: float = 1.0,
+    stl_robot_queue_by_robot: dict | None = None,
 ) -> None:
     """Run task generation for the current production frame and return the updated task table.
 
@@ -587,6 +588,7 @@ def run_task_location_estimation(
         stl_cell_id_for_xy_fn=stl_cell_id_for_xy_fn,
         min_hotspot_score=float(min_hotspot_score),
         cost_w_eta=float(patrol_cost_weight),
+        stl_robot_queue_by_robot=stl_robot_queue_by_robot,
     )
 
 

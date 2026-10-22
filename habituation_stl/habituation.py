@@ -92,3 +92,44 @@ class HabituationField:
                              self.kappa.copy(), self.gamma)
         h.eta = self.eta.copy()
         return h
+
+
+# ---------------------------------------------------------------------------
+# State-update routine shared by the simulator's live planner state and every
+# copied forecast (Plan Section 2: "use the same state-update routine for the
+# internal planner state and its copied forecasts").  DeterrentSystem's
+# _apply_habituation_update delegates here, so both use literally one routine.
+# ---------------------------------------------------------------------------
+def canonical_habituation_update_model(model_name) -> str:
+    """Normalize the habituation update model used after a deterrence action."""
+    key = str(model_name or "multiplicative").strip().lower().replace("-", "_")
+    if key in {"", "multiplicative", "provided", "proposal", "proposal_multiplicative"}:
+        return "multiplicative"
+    if key in {"additive", "additive_drop", "linear", "linear_drop"}:
+        return "additive_drop"
+    raise ValueError(
+        "habituation update model must be one of: multiplicative, additive_drop; "
+        f"got {model_name!r}"
+    )
+
+
+def apply_habituation_update(hab, cell_id, mode_idx, update_model) -> None:
+    """Apply one deterrence cue update using the selected habituation state model."""
+    if hab is None:
+        return
+    c = int(cell_id)
+    m = int(mode_idx)
+    model = canonical_habituation_update_model(update_model)
+    if model == "multiplicative":
+        hab.apply(c, m)
+        return
+
+    kappa_m = float(hab.kappa[m])
+    hab.eta[c, m] = max(0.0, float(hab.eta[c, m]) - kappa_m)
+    gamma = float(getattr(hab, "gamma", 0.0))
+    if gamma <= 0.0:
+        return
+    for other_mode in range(int(hab.n_modes)):
+        if other_mode == m:
+            continue
+        hab.eta[c, other_mode] = max(0.0, float(hab.eta[c, other_mode]) - gamma * kappa_m)
