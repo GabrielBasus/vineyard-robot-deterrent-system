@@ -72,6 +72,7 @@ results because every (policy, scenario) run is deterministic given the tree.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import math
 import os
 import pickle
@@ -3639,9 +3640,9 @@ def planner_forecast_from_sim_locals(L, *, t0: float, horizon_s: float, robot_id
     n_steps = int(round(float(horizon_s) / dt))
     if robot_id is not None:
         if mode == "consistent":
-            # Not decided: which background mu_hat a single robot uses outside its own
-            # zone under the consistent estimator (open question, report).
-            raise NotImplementedError("per-robot planner world is implemented for the legacy estimator only")
+            # User answer Q5 (2026-10-22): unsupported with the consistent estimator (the
+            # simulator rejects the combination at start; docs/STATED_ASSUMPTIONS.md).
+            raise NotImplementedError("per-robot planner world is supported for the legacy estimator only")
         m = L["robots"][robot_id].m
         # copies: the snapshot never aliases the live estimator grids
         chans = {key: (np.array(g, float, copy=True), float(m.inhib_channel_omegas.get(key, m.omega_inhib)))
@@ -3886,17 +3887,34 @@ def robot_information_snapshot(L: dict, snap: RolloutSnapshot, robot_id, *, orac
         section 4: active and completed task rows, consumed keys, the TaskGenerator buffer
         and so the pending reactive tasks are seen by every robot's dispatch immediately),
         so r knows every task; known_task_ids / known_pending_keys stay None (all).
-      * the B5-facing record of completed actions (recent_deterrences, read by the
-        centralized TaskGenerator's pruning / repeat block) is the centralized record
-        the live B5 reads, and the other robots' policy-side state (poses, goals,
-        estimators used by their B5 generation) is the fleet state the centralized
-        dispatcher sees; both are kept (open question in the report).
+      * ROBOT'S BELIEFS about the fleet (user answer Q3, 2026-10-22): r simulates the whole
+        fleet with its own beliefs.  Every robot's estimator in r's snapshot (the model its
+        B5 continuation and candidate scoring read) is a copy of r's estimator, the cue
+        effectiveness every robot's B5 reads is r's record (above), and the B5-facing
+        record of completed actions (recent_deterrences: TaskGenerator pruning / repeat
+        block) is the record r knows (``_known_deterrences_for_robot(r)``: r's own
+        completions plus the intervention records that reached r, same message id, delay
+        and drop as the habituation records).  The other robots' poses, goals and tasks
+        stay the centralized task state.  Each robot's own detection history
+        (Robot.recent_events, read by B5's detection-cluster seeds) is kept as the fleet
+        state: what r believes about another robot's detections is not decided (open
+        question in the report).
     Oracle snapshots (``oracle=True``) keep the truth world and change only the policy
-    side (r's effectiveness record), so the oracle evaluates exactly the policies the
-    planner evaluated with r's information.
+    side (r's estimator copies, effectiveness record and action record), so the oracle
+    evaluates exactly the policies the planner evaluated with r's information.
     """
     rid = str(robot_id)
     out = restrict_snapshot_to_information(snap, effectiveness=L["_planner_hab_for_robot"](rid))
+    # B5-facing action record r knows (policy side only: the world store is not touched,
+    # so an oracle's truth world keeps every suppression term)
+    out.recent_deterrences = list(L["_known_deterrences_for_robot"](rid))
+    own_model = L["robots"][rid].m
+    robots = []
+    for rs in snap.robots:
+        planner = copy.copy(rs.planner)            # shallow: pose-independent robot fields shared read-only
+        planner.m = copy.deepcopy(own_model)      # r's estimator for every robot (one independent copy each)
+        robots.append(dataclasses.replace(rs, planner=planner))
+    out.robots = robots
     if not oracle:
         fc, store = planner_forecast_from_sim_locals(L, t0=float(snap.t0), horizon_s=float(snap.horizon_s),
                                                      robot_id=rid)

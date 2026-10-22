@@ -458,7 +458,8 @@ def test_per_robot_path_with_shared_information_reproduces_shared_decisions(tmp_
     assert la["metrics_compact"]["plan_deviations_admitted"] >= 1
     assert _decisions(pa) == _decisions(pb)
     _same_as_b5(fb, fa)
-    assert all(len({x.robot_id for x in c["candidates"]}) == 1 for c in eng.calls)
+    # one robot per evaluation (empty: the per-robot Prop. 2 pi_0 diagnostic after the decision)
+    assert all(len({x.robot_id for x in c["candidates"]}) <= 1 for c in eng.calls)
     assert all(r.get("information_sets") == "per_robot" for r in _records(pb))
 
 
@@ -477,9 +478,25 @@ class InfoCapture(StubEngine):
             fr = fr.f_back
         L = fr.f_locals["L"]
         rids = sorted({c.robot_id for c in candidates})
+        if not rids:            # per-robot Prop. 2 diagnostic: pi_0 only
+            self.info.append({"t0": snapshot.t0, "rids": [], "n_scenarios": kw.get("n_scenarios")})
+            return super().evaluate(snapshot, candidates, **kw)
         rid = rids[0]
+        own_m = L["robots"][rid].m
         self.info.append({
             "t0": snapshot.t0, "rids": rids, "n_scenarios": kw.get("n_scenarios"),
+            # Q3 (2026-10-22): r simulates the fleet with its own beliefs
+            "estimators_all_own": all(
+                rs.planner.m is not own_m and np.array_equal(rs.planner.m.mu, own_m.mu)
+                and np.array_equal(rs.planner.m.trigger_mass, own_m.trigger_mass)
+                and set(rs.planner.m.inhib_channels) == set(own_m.inhib_channels)
+                and all(np.array_equal(rs.planner.m.inhib_channels[k], own_m.inhib_channels[k])
+                        for k in own_m.inhib_channels)
+                for rs in snapshot.robots),
+            "estimators_distinct": len({id(rs.planner.m) for rs in snapshot.robots}) == len(snapshot.robots),
+            "record_equal_known": [dict(e) for e in snapshot.recent_deterrences]
+            == L["_known_deterrences_for_robot"](rid),
+            "record_equal_fleet": len(snapshot.recent_deterrences) == len(L["recent_deterrences"]),
             "hab_equal_own": bool(np.array_equal(snapshot.habituation.eta, L["_planner_hab_for_robot"](rid).eta)),
             "hab_equal_shared": bool(np.array_equal(snapshot.habituation.eta, L["planner_hab"].eta)),
             "mu_equal_own": bool(np.array_equal(snapshot.forecast.bg_node_rate, L["robots"][rid].m.mu)),
@@ -502,23 +519,71 @@ def test_per_robot_information_sets_drive_the_decision(tmp_path):
     _, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=1.0,
                            plan_oracle_scenarios=4, plan_log_path=str(path), planner_hab_mode="per_robot",
                            neighbor_delay_s=120.0, neighbor_drop_prob=0.3, T_end=600.0))
-    planner = [e for e in eng.info if e["n_scenarios"] == 16]
+    planner = [e for e in eng.info if e["n_scenarios"] == 16 and e["rids"]]
     oracle = [e for e in eng.info if e["n_scenarios"] == 4]
     assert planner and oracle
-    assert all(len(e["rids"]) == 1 for e in eng.info)
+    assert all(len(e["rids"]) <= 1 for e in eng.info)
     assert all(e["hab_equal_own"] and e["mu_equal_own"] and e["trig_equal_own"] for e in planner)
     assert all(e["hab_equal_own"] and e["world_hab"] for e in oracle)
+    # Q3: every robot's estimator and the B5-facing action record are r's beliefs
+    assert all(e["estimators_all_own"] and e["estimators_distinct"] and e["record_equal_known"]
+               for e in planner + oracle)
     # the information sets differ from the shared union somewhere in this run
     assert any(not e["mu_equal_union"] or not e["hab_equal_shared"] for e in planner)
+    assert any(not e["record_equal_fleet"] for e in planner)
     recs = _records(path)
     assert recs and all(r["information_sets"] == "per_robot" for r in recs)
+    robot_ids = {str(rid) for rid in last["poses"]}
+    n_rounds = 0
     for r in recs:
         if not r["rounds"]:
+            assert r["J_hat_executed_by_robot"] == {}
             continue
+        n_rounds += 1
         rnd0 = r["rounds"][0]
         robots = {r["candidates"][i]["robot"] for i in rnd0["cand_indices"]}
         assert set(rnd0["per_robot"]) == {str(x) for x in robots}
-    assert last["metrics_compact"]["plan_decision_count"] == len(recs)
+        # Q4: every robot's own J-hat of the executed policy
+        assert set(r["J_hat_executed_by_robot"]) == robot_ids
+        assert set(r["J_hat_executed_by_robot_source"].values()) <= {"decision", "diagnostic"}
+        assert math.isnan(r["J_hat_executed"])
+    assert n_rounds
+    m = last["metrics_compact"]
+    assert m["plan_decision_count"] == len(recs)
+    assert m["plan_pr_robots"] == len(robot_ids)
+    for rid in robot_ids:
+        assert f"plan_pr_realized_minus_pred_mean_{rid}" in m
+    for k in ("plan_pr_realized_minus_pred_mean", "plan_pr_realized_minus_pred_spread_sd",
+              "plan_pr_realized_minus_pred_spread_range", "plan_pr_realized_minus_pred_mean_abs"):
+        assert math.isfinite(m[k])
+    per = [m[f"plan_pr_realized_minus_pred_mean_{rid}"] for rid in sorted(robot_ids)]
+    assert m["plan_pr_realized_minus_pred_mean"] == pytest.approx(float(np.mean(per)))
+    assert m["plan_pr_realized_minus_pred_spread_range"] == pytest.approx(max(per) - min(per))
+
+
+def test_per_robot_action_record_with_instant_relay_equals_fleet_record():
+    """Q3: with no delay and no drop every robot's B5-facing action record equals the
+    fleet record recent_deterrences (the per-robot record only removes what has not
+    reached the robot)."""
+    import DeterrentSystem as ds
+    gen = ds.run_simulation_frames_persistent(**_params(planner_hab_mode="per_robot", T_end=900.0))
+    for _ in range(900):
+        next(gen)
+    L = gen.gi_frame.f_locals
+    keep = ("x", "y", "t", "mode", "source", "action_id", "habituation_mode")
+    ref = [{k: e[k] for k in keep if k in e} for e in L["recent_deterrences"]]
+    assert ref
+    for rid in L["robots"]:
+        assert L["_known_deterrences_for_robot"](rid) == ref
+    gen.close()
+
+
+def test_per_robot_information_rejects_consistent_estimator():
+    import DeterrentSystem as ds
+    with pytest.raises(ValueError, match="per_robot"):
+        next(ds.run_simulation_frames_persistent(**_params(
+            planner_procedure="plan", plan_engine=StubEngine(lambda c, call: 0.0), planner_hab_mode="per_robot",
+            estimator_mode="consistent")))
 
 
 def test_per_robot_information_rejects_timed_recovery():

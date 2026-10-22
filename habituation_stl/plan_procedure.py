@@ -384,9 +384,10 @@ class PlanProcedure:
         is the truth snapshot and only its policy side is restricted."""
         cfg.validate()
         if info_provider is not None and cfg.timed_recovery:
-            # Not decided: the obligation ledger and the bounded-violation comparison with
-            # pi_0 are fleet-level, while pi_0 is per robot under per-robot information.
-            raise ValueError("per-robot information sets are not defined with timed recovery (open question)")
+            # User answer Q5 (2026-10-22): unsupported, stays a clear error (the obligation
+            # ledger and bounded-violation comparison are fleet-level, pi_0 is per robot);
+            # listed in docs/STATED_ASSUMPTIONS.md.
+            raise ValueError("per-robot information sets are not supported with timed recovery")
         self.cfg = cfg
         self.engine = engine if engine is not None else RolloutEngine(cfg.pool_workers, cfg.scenario_chunk)
         self._own_engine = engine is None
@@ -887,7 +888,28 @@ class PlanProcedure:
         }
         if per_robot:
             rec["information_sets"] = "per_robot"
-            rec["J_hat_executed_by_robot"] = J_exec_by_robot
+            # User answer Q4 (2026-10-22): Prop. 2 per robot, i.e. EVERY robot's own J-hat of the
+            # executed policy (pi_0 plus all commitments of this decision) on its own snapshot.
+            # Robots whose decision evaluations already contain exactly that policy reuse it
+            # (source "decision"); the others get one pi_0 evaluation of their final snapshot
+            # with the decision's seed and scenario count (source "diagnostic", outside the
+            # decision runtime, like the oracle).  Only for decisions that completed a round
+            # (as J_hat_executed in shared mode).
+            by_robot, src = {}, {}
+            if rounds:
+                for rid_e, v in (J_exec_by_robot or {}).items():
+                    by_robot[rid_e], src[rid_e] = float(v), "decision"
+                w_diag = time.perf_counter()
+                for rs in snap0.robots:
+                    if str(rs.rid) in by_robot:
+                        continue
+                    res_e = self._evaluate(snaps_k[rs.rid], [], n_scenarios=cfg.n_scenarios, seed=dec_seed,
+                                           deadline=None)
+                    by_robot[str(rs.rid)] = float(self._U(res_e)[2][0])
+                    src[str(rs.rid)] = "diagnostic"
+                rec["J_hat_executed_by_robot_diag_wall_s"] = float(time.perf_counter() - w_diag)
+            rec["J_hat_executed_by_robot"] = by_robot
+            rec["J_hat_executed_by_robot_source"] = src
         # ---------------- oracle evaluation (diagnostic; not part of the decision budget)
         if rounds and float(self._oracle_rng.random()) < float(cfg.oracle_fraction):
             rec["oracle"] = self._oracle(L, cands, cand_log, rounds, commitments, idx)
@@ -1148,6 +1170,40 @@ class PlanProcedure:
                                                         if o.get("violation_size") is not None]),
             "plan_obligations_outstanding_at_end": sum(1 for o in self.obligations if o["status"] == "outstanding"),
         }
+        if self.info_provider is not None:
+            out.update(self._per_robot_prediction_metrics(recs))
+        return out
+
+    @staticmethod
+    def _per_robot_prediction_metrics(recs) -> dict:
+        """User answer Q4 (2026-10-22), per-robot information sets only: Prop. 2 per robot.
+        For every robot, realized J minus that robot's own J-hat of the executed policy over
+        the decisions with a complete realized window; then the mean and the spread (SD over
+        robots, ddof=0, and max - min) of the per-robot mean errors across robots."""
+        err = {}
+        for r in recs:
+            if not r.get("realized_window_complete"):
+                continue
+            for rid, v in (r.get("J_hat_executed_by_robot") or {}).items():
+                if _finite(v):
+                    err.setdefault(str(rid), []).append(float(r["realized_exposure"]) - float(v))
+        out = {}
+        means, abss = [], []
+        for rid in sorted(err):
+            e = np.asarray(err[rid], float)
+            out[f"plan_pr_realized_minus_pred_n_{rid}"] = int(e.size)
+            out[f"plan_pr_realized_minus_pred_mean_{rid}"] = _m(e)
+            out[f"plan_pr_realized_minus_pred_mean_abs_{rid}"] = _m(np.abs(e))
+            means.append(_m(e))
+            abss.append(_m(np.abs(e)))
+        m = np.asarray(means, float)
+        out.update({
+            "plan_pr_robots": len(means),
+            "plan_pr_realized_minus_pred_mean": _m(m),
+            "plan_pr_realized_minus_pred_spread_sd": float(np.std(m)) if m.size else float("nan"),
+            "plan_pr_realized_minus_pred_spread_range": float(m.max() - m.min()) if m.size else float("nan"),
+            "plan_pr_realized_minus_pred_mean_abs": _m(abss),
+        })
         return out
 
 

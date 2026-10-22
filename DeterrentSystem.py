@@ -172,6 +172,9 @@ class EventBus:
         # Per-robot habituation relay (planner_hab_mode="per_robot"): callback
         # (recipient_id, t_event, cell, mode) installed by the simulator.
         self.habituation_apply_fn = None
+        # Per-robot B5-facing intervention records (planner_hab_mode="per_robot"): callback
+        # (recipient_id, record) installed by the simulator.
+        self.intervention_record_fn = None
         self.bytes_per_boundary_msg = int(bytes_per_boundary_msg)
         self.bytes_per_intervention_msg = int(bytes_per_intervention_msg)
         self.boundary_msg_count = 0
@@ -241,11 +244,19 @@ class EventBus:
             n += 1
         return n
 
-    def relay_habituation(self, *, t: float, cell: int, mode: int, action_id, source_id: str) -> None:
-        """Send one intervention's (time, cell, cue) record to every other robot (complete relay)."""
+    def relay_habituation(self, *, t: float, cell: int, mode: int, action_id, source_id: str,
+                          message_key=None) -> None:
+        """Send one intervention's (time, cell, cue) record to every other robot (complete relay).
+
+        ``message_key``: the intervention's message id when the caller already drew it (so
+        the B5-facing intervention record of relay_intervention_record shares it); None
+        draws it here exactly as before.
+        """
         if self.habituation_apply_fn is None:
             return
-        key = self.intervention_key(action_id) if self.neighbor_drop_prob > 0.0 else None
+        key = message_key
+        if key is None and self.neighbor_drop_prob > 0.0:
+            key = self.intervention_key(action_id)
         for rid in self.robots:
             if rid == source_id:
                 continue
@@ -254,13 +265,31 @@ class EventBus:
                 (lambda delayed, _r=rid: self.habituation_apply_fn(_r, float(t), int(cell), int(mode))),
             )
 
+    def relay_intervention_record(self, *, record: dict, message_key, source_id: str) -> None:
+        """planner_hab_mode="per_robot" (user answer Q3, 2026-10-22): send one completed
+        intervention's B5-facing record (x, y, t, cue, source, action id, habituation cue)
+        to every other robot.  It carries the same message id as the intervention's
+        habituation record, so the two are dropped together and delayed alike."""
+        if self.intervention_record_fn is None:
+            return
+        for rid in self.robots:
+            if rid == source_id:
+                continue
+            self._relay(
+                "intervention_record", message_key, rid, float(record["t"]),
+                (lambda delayed, _r=rid, _rec=dict(record): self.intervention_record_fn(_r, _rec)),
+            )
+
     def relay_metrics(self) -> dict:
         out = {
             "neighbor_delay_s": float(self.neighbor_delay_s),
             "neighbor_drop_prob": float(self.neighbor_drop_prob),
             "relay_pending_at_end": int(len(self._pending)),
         }
-        for kind in ("detection", "intervention", "habituation"):
+        kinds = ("detection", "intervention", "habituation")
+        if self.intervention_record_fn is not None:
+            kinds = kinds + ("intervention_record",)     # per_robot mode only
+        for kind in kinds:
             out[f"relay_{kind}_sent_total"] = int(self.relay_sent_by_kind.get(kind, 0))
             out[f"relay_{kind}_dropped_total"] = int(self.relay_dropped_by_kind.get(kind, 0))
             out[f"relay_{kind}_delayed_total"] = int(self.relay_delayed_by_kind.get(kind, 0))
@@ -4788,6 +4817,37 @@ def run_simulation_frames_persistent(
 
         bus.habituation_apply_fn = _per_robot_hab_receive
 
+    # User answer Q3 (2026-10-22): each robot's B5-facing record of completed actions
+    # (the per-robot counterpart of recent_deterrences): its own completions at once, the
+    # other robots' completions when their record reaches it (same message id, delay and
+    # drop as the habituation record).  Kept in event-time order with the same 200-entry
+    # cap as recent_deterrences (a late record is inserted at its own time).
+    _KNOWN_DETERRENCE_FIELDS = ("x", "y", "t", "mode", "source", "action_id", "habituation_mode")
+    known_deterrences_by_robot = None
+    if planner_hab_mode == "per_robot":
+        known_deterrences_by_robot = {str(_rid): [] for _rid in robots.keys()}
+
+        def _known_deterrence_add(rid_recv, record):
+            lst = known_deterrences_by_robot[str(rid_recv)]
+            rec = {k: record[k] for k in _KNOWN_DETERRENCE_FIELDS if k in record}
+            pos = len(lst)
+            while pos > 0 and float(lst[pos - 1]["t"]) > float(rec["t"]):
+                pos -= 1
+            lst.insert(pos, rec)
+            maxlen = recent_deterrences.maxlen
+            if maxlen is not None and len(lst) > maxlen:
+                del lst[: len(lst) - maxlen]
+
+        bus.intervention_record_fn = _known_deterrence_add
+
+    def _known_deterrences_for_robot(rid):
+        """Read-only accessor (plan procedure, per-robot information sets): the B5-facing
+        record of completed actions robot ``rid`` knows, in time order (copies).
+        "shared": the fleet record recent_deterrences."""
+        if known_deterrences_by_robot is None:
+            return [{k: e[k] for k in _KNOWN_DETERRENCE_FIELDS if k in e} for e in recent_deterrences]
+        return [dict(e) for e in known_deterrences_by_robot[str(rid)]]
+
     def _planner_hab_for_robot(rid):
         """Robot ``rid``'s own planner effectiveness field (live object; copy before mutating).
 
@@ -7823,6 +7883,11 @@ def run_simulation_frames_persistent(
         planner_eta_metric = float("nan")
         # Decision 17: the executing robot's own field (the shared field in "shared" mode).
         own_planner_hab = _planner_hab_for_robot(rid)
+        # per_robot: one message id for this intervention's habituation record and its
+        # B5-facing record (drawn at the point relay_habituation drew it before)
+        _pr_msg_key = None
+        if planner_hab_by_robot is not None and bus.neighbor_drop_prob > 0.0:
+            _pr_msg_key = bus.intervention_key(task_row.get("id", -1))
         if bool(enable_habituation) and cell_id is not None and mode_idx is not None:
             eta_at_apply = truth_hab.effectiveness(cell_id, mode_idx)
             planner_eta_metric = float(own_planner_hab.effectiveness(cell_id, mode_idx))
@@ -7836,7 +7901,7 @@ def run_simulation_frames_persistent(
                 planner_hab_by_robot.apply(rid, float(now_t), int(cell_id), int(mode_idx))
                 bus.relay_habituation(
                     t=float(now_t), cell=int(cell_id), mode=int(mode_idx),
-                    action_id=task_row.get("id", -1), source_id=rid,
+                    action_id=task_row.get("id", -1), source_id=rid, message_key=_pr_msg_key,
                 )
         if cell_id is not None and mode_idx is not None:
             # Decisions 14 and 15: effectiveness at application by stream, cue reuse.
@@ -7866,6 +7931,9 @@ def run_simulation_frames_persistent(
             "habituation_mode": habituation_mode_label
         }
         recent_deterrences.append(deterrence_entry)
+        if known_deterrences_by_robot is not None:
+            _known_deterrence_add(rid, deterrence_entry)
+            bus.relay_intervention_record(record=deterrence_entry, message_key=_pr_msg_key, source_id=rid)
         if truth_deterrence_store is not recent_deterrences:
             truth_deterrence_store.append(deterrence_entry)
         feedback_beta = float(params.get("beta", 1.0))
@@ -8193,6 +8261,11 @@ def run_simulation_frames_persistent(
             # (_planner_hab_for_robot), and the centralized task state; pi_0 per robot.
             # Read-only accessors it uses from these locals: robots[rid].m and
             # _planner_hab_for_robot(rid).  "shared" keeps one snapshot (unchanged).
+            if consistent_estimator:
+                # User answer Q5 (2026-10-22): unsupported, stays a clear error
+                # (docs/STATED_ASSUMPTIONS.md, unsupported combinations).
+                raise ValueError("planner_procedure='plan' with planner_hab_mode='per_robot' is not supported "
+                                 "with estimator_mode='consistent'")
             from habituation_stl.scenario_rollout import robot_information_snapshot as _plan_info_provider
         plan_proc = PlanProcedure(
             PlanConfig(

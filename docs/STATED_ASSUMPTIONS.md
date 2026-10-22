@@ -47,7 +47,8 @@ list was decided by an agent; open items are listed at the end.
 | P9 | Timed recovery (Eq. 4) thresholds E_high = 323.8, E_low = 29.1, T_response = 300 s: pooled over loads, p90 / p50 of per-step planner forecast cell exposure under B5 on dev seeds 200-209; stand-in values (no physical values). | 2026-10-15, 2026-10-17, 2026-10-19; `docs/calibration/timed_recovery_thresholds.json` |
 | P10 | Eq. 4 relaxation = bounded violation: keep the obligation, minimise the mean-over-scenarios exceedance of E_low at the deadline summed over obligations, lexicographic (min exceedance, then max U), never worse than pi_0. | decision 28; WS-B follow-up |
 | P11 | Effectiveness floor 0.4 on planner q_hat at application: reject if below in ANY applied scenario; never-applied candidates exempt. | decision 26; WS-B follow-up |
-| P12 | Information: instant full sharing by default; per-robot information sets = the candidate's robot (its estimator, effectiveness record, known tasks; pi_0 per robot; fleet picks best U). | decision 17; WS-B follow-up |
+| P12 | Information: instant full sharing by default; per-robot information sets = the candidate's robot (its estimator, effectiveness record, known tasks; pi_0 per robot; fleet picks best U). r simulates the whole fleet with its own beliefs: every robot's estimator and cue effectiveness in r's rollouts are r's, and the B5-facing action record is the one r knows; poses, goals and tasks stay the centralized task state. Prop. 2 is reported per robot (each robot's own J-hat of the executed policy vs realized J; per-robot errors, their mean and spread across robots). Installed automatically by `planner_hab_mode="per_robot"`. | decision 17; WS-B follow-up; user 2026-10-22 (Q3, Q4) |
+| P16 | C_plan application time: the candidate's own robot travels and holds under the engine's motion model from the snapshot (a hold in progress finishes first), the same time in every scenario. | user 2026-10-22 (Q1) |
 | P13 | Busy robot = at least one active assigned task. | WS-B follow-up |
 | P14 | No wall-clock budget in evaluation runs (simulator clock frozen while planning); 45 s budget only in the exploratory timeout study. | 2026-10-15; decision 16 |
 | P15 | Oracle = truth snapshot, 64 scenarios from an independent seed stream, sampled on 25% of decisions; it does not measure R1-R12. | decision 31 |
@@ -77,7 +78,7 @@ list was decided by an agent; open items are listed at the end.
 |---|---|---|
 | R1 | Mismatch: planner kappa 0.50, environment kappa {0.10, 0.25, 0.50, 0.75, 0.90}; heavy; E_plan, B5_c; 10 seeds. The kappa 0.50 cell reuses confirmatory heavy seeds 300-309 (identical effective parameters). | decision 19; user 2026-10-22 |
 | R2 | Neighbor histories: one factor at a time, D in {30, 120, 300} s (p = 0), p in {0.1, 0.3, 0.5} (D = 0); heavy; 10 seeds. | decision 18 |
-| R3 | Disturbances (the planner is told neither): truth travel speed 20% below nominal; truth background x2 for 300 s starting at a per-seed uniform time in [300, 1200] s drawn from `CoupledRandomStreams(seed).arrival_burst_start_s` (purpose 15, seed only: identical for every system of a seed). | decision 29; user 2026-10-22 |
+| R3 | Disturbances (the planner is told neither): truth travel speed 20% below nominal; truth background x2 for 300 s starting at a per-seed uniform time in [300, 1200] s drawn from `CoupledRandomStreams(seed).arrival_burst_start_s` (purpose 15, seed only: identical for every system of a seed). The planner's world and rollouts keep the nominal background and speed; the oracle evaluates the truth, so its world includes the burst (and any demand step) and its truth motion is slower by `travel_speed_error` (planner ETAs inside the oracle stay nominal, as in the simulator). | decision 29; user 2026-10-22 |
 | R4 | Persistent: 5400 s runs, windows [0, 1800) and [1800, 5400], demand switch at 2700 s (x5 spare->heavy, x0.2 heavy->spare), depleted start = per-cell/cue eta at the end of an 1800 s B5_c run at the same starting load and seed. | decision 22 |
 | R5 | Zero habituation: hab off for truth and planner, 3 loads, 10 seeds (300-309; reduced from 30 for the budget). | decision 20; user 2026-10-22 |
 | R6 | Timed recovery (exploratory): E_plan_tr vs confirmatory E_plan, 3 loads, seeds 300-309. | decision 2; user 2026-10-22 |
@@ -92,6 +93,16 @@ list was decided by an agent; open items are listed at the end.
 * `--study all` overlaps ordinary simulations with the two concurrent plan runs (user decision
   2026-10-22): plan decision runtimes are measured on a loaded machine, not an idle one.
 
-## 8. Open items
+## 8. Unsupported combinations (clear errors)
 
-None from the 2026-10-22 round.
+| # | Combination | Source |
+|---|---|---|
+| U1 | Per-robot information sets (`planner_hab_mode="per_robot"` with `planner_procedure="plan"`) together with timed recovery (E_plan_tr thresholds): the obligation ledger and bounded-violation comparison are fleet-level while pi_0 is per robot. `PlanProcedure` raises ValueError. | user 2026-10-22 (Q5) |
+| U2 | Per-robot information sets with `estimator_mode="consistent"`: the simulator raises ValueError at start. | user 2026-10-22 (Q5) |
+| U3 | C_plan (`plan_valuation="one_intervention"`) with service protection, timed recovery or the effectiveness floor (all need continuation rollouts): `PlanConfig.validate` raises ValueError. | decision 8; WS-B follow-up |
+
+## 9. Open items
+
+* In the per-robot plan snapshot, r's belief about another robot's detection history
+  (`Robot.recent_events`, read by B5's detection-cluster seeds) is kept as the fleet state;
+  not decided (`docs/communication_assumptions.md` Q3).
