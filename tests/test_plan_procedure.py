@@ -47,7 +47,7 @@ class StubEngine:
         self.timeout = timeout
 
     def evaluate(self, snapshot, candidates, *, n_scenarios, seed, reactive_deadline_s, deadline=None,
-                 one_intervention=False):
+                 one_intervention=False, continuation=True):
         if self.timeout and deadline is not None:
             while time.perf_counter() <= deadline:
                 time.sleep(0.001)
@@ -57,7 +57,7 @@ class StubEngine:
                            "forced": [tr for tr in snapshot.active_tasks if tr.get("_forced_first")],
                            "start_stage": snapshot.start_stage, "obligations": list(snapshot.obligations),
                            "n_scenarios": n_scenarios, "seed": seed, "one_intervention": one_intervention,
-                           "deadline": deadline})
+                           "continuation": continuation, "deadline": deadline})
         S = self.n_s
         t0 = snapshot.t0
         key = ("synthetic",)
@@ -392,22 +392,141 @@ def test_eta_floor_rejects_low_effectiveness_at_application():
 
 
 def test_one_intervention_valuation_gates_on_U_one():
-    """Decision 8 (C_plan): admission reads the one-intervention U; feasibility is unchanged."""
+    """Decision 8 (C_plan) with the 2026-10-22 follow-up: admission reads the one-intervention
+    U, the engine runs no continuation, and there is no service protection (as D_plan)."""
+    c_plan = dict(planner_procedure="plan", plan_oracle_fraction=0.0, plan_valuation="one_intervention",
+                  plan_service_protection=False)
     eng = StubEngine(lambda c, call: 5.0, U1_fn=lambda c, call: -1.0)
-    _, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0,
-                           plan_valuation="one_intervention"))
+    _, last = _run(_params(plan_engine=eng, **c_plan))
     m = last["metrics_compact"]
     assert m["plan_deviations_admitted"] == 0 and m["plan_rejected_gate"] > 0
-    assert eng.calls and all(c["one_intervention"] for c in eng.calls)
+    assert eng.calls and all(c["one_intervention"] and not c["continuation"] for c in eng.calls)
     eng = StubEngine(lambda c, call: -1.0, U1_fn=lambda c, call: 5.0)
-    _, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0,
-                           plan_valuation="one_intervention"))
+    _, last = _run(_params(plan_engine=eng, **c_plan))
     assert last["metrics_compact"]["plan_deviations_admitted"] >= 1
+    # no service protection: a candidate that would delay a protected task is still admitted
     eng = StubEngine(lambda c, call: -1.0, U1_fn=lambda c, call: 5.0, infeasible_fn=lambda c, call: True)
-    _, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0,
-                           plan_valuation="one_intervention"))
+    _, last = _run(_params(plan_engine=eng, **c_plan))
     m = last["metrics_compact"]
-    assert m["plan_deviations_admitted"] == 0 and m["plan_rejected_infeasible_service"] > 0
+    assert m["plan_deviations_admitted"] >= 1 and m["plan_rejected_infeasible_service"] == 0
+    # constraints that need a continuation are rejected with this valuation
+    import DeterrentSystem as ds
+    for bad in ({"plan_service_protection": True}, {"plan_eta_floor": 0.4},
+                {"plan_E_high": 0.0, "plan_E_low": -1.0, "plan_T_response_s": 50.0}):
+        with pytest.raises(ValueError):
+            next(ds.run_simulation_frames_persistent(**_params(plan_engine=StubEngine(lambda c, call: 0.0),
+                                                               **{**c_plan, **bad})))
+
+
+def _U_by_candidate(c, call):
+    """Deterministic U of a candidate alone (independent of the call), some admissible."""
+    return float(int(1000 * (c.x + 3.0 * c.y)) % 7) - 3.0 + (0.5 if c.mode == "laser" else 0.0)
+
+
+def _decisions(path):
+    out = []
+    for r in _records(path):
+        out.append({"t": r["t"], "n_candidates": r["n_candidates"],
+                    "status": [(c["robot"], c["x"], c["y"], c["mode"], c["status"]) for c in r["candidates"]],
+                    "admitted": [(a["robot"], a["x"], a["y"], a["mode"], a["U_mean"]) for a in r["admitted"]]})
+    return out
+
+
+def test_shared_mode_has_no_information_provider(tmp_path):
+    """planner_hab_mode="shared" (default): one shared snapshot, the per-robot path is not used."""
+    path = tmp_path / "s.jsonl"
+    eng = StubEngine(_U_by_candidate)
+    _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0, plan_log_path=str(path)))
+    recs = _records(path)
+    assert recs and all("information_sets" not in r and "J_hat_executed_by_robot" not in r for r in recs)
+    assert all("per_robot" not in rnd for r in recs for rnd in r["rounds"])
+    # a round evaluates every robot's remaining candidates in ONE call (one shared pi_0)
+    multi = [c for c in eng.calls if len({x.robot_id for x in c["candidates"]}) >= 2]
+    assert multi
+
+
+def test_per_robot_path_with_shared_information_reproduces_shared_decisions(tmp_path):
+    """The per-robot evaluation path (one evaluation and one pi_0 per robot, fleet argmax across
+    robots, sequential commitment into every robot's snapshot) gives exactly the shared
+    decisions when every robot's information set is the shared one."""
+    pa, pb = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    fa, la = _run(_params(planner_procedure="plan", plan_engine=StubEngine(_U_by_candidate),
+                          plan_oracle_fraction=0.0, plan_log_path=str(pa)))
+    eng = StubEngine(_U_by_candidate)
+    fb, lb = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=0.0,
+                          plan_log_path=str(pb), plan_info_provider=lambda L, s, rid, oracle=False: s))
+    assert la["metrics_compact"]["plan_deviations_admitted"] >= 1
+    assert _decisions(pa) == _decisions(pb)
+    _same_as_b5(fb, fa)
+    assert all(len({x.robot_id for x in c["candidates"]}) == 1 for c in eng.calls)
+    assert all(r.get("information_sets") == "per_robot" for r in _records(pb))
+
+
+class InfoCapture(StubEngine):
+    """Stub that records, for each planner evaluation, the snapshot's information next to
+    the simulator's per-robot information at that moment."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.info = []
+
+    def evaluate(self, snapshot, candidates, **kw):
+        import sys
+        fr = sys._getframe(1)
+        while fr is not None and "L" not in fr.f_locals:
+            fr = fr.f_back
+        L = fr.f_locals["L"]
+        rids = sorted({c.robot_id for c in candidates})
+        rid = rids[0]
+        self.info.append({
+            "t0": snapshot.t0, "rids": rids, "n_scenarios": kw.get("n_scenarios"),
+            "hab_equal_own": bool(np.array_equal(snapshot.habituation.eta, L["_planner_hab_for_robot"](rid).eta)),
+            "hab_equal_shared": bool(np.array_equal(snapshot.habituation.eta, L["planner_hab"].eta)),
+            "mu_equal_own": bool(np.array_equal(snapshot.forecast.bg_node_rate, L["robots"][rid].m.mu)),
+            "trig_equal_own": bool(np.array_equal(snapshot.forecast.legacy_trigger_mass,
+                                                  L["robots"][rid].m.trigger_mass)),
+            "mu_equal_union": bool(np.array_equal(
+                snapshot.forecast.bg_node_rate,
+                sr.planner_forecast_from_sim_locals(L, t0=snapshot.t0, horizon_s=snapshot.horizon_s)[0].bg_node_rate)),
+            "world_hab": snapshot.world_habituation is not None,
+        })
+        return super().evaluate(snapshot, candidates, **kw)
+
+
+def test_per_robot_information_sets_drive_the_decision(tmp_path):
+    """Decision 17 follow-up: with planner_hab_mode="per_robot" each robot's candidates are
+    evaluated on its own snapshot (its effectiveness record, its own estimator world), one
+    pi_0 per robot; the oracle keeps the truth world with that robot's policy side."""
+    path = tmp_path / "pr.jsonl"
+    eng = InfoCapture(_U_by_candidate)
+    _, last = _run(_params(planner_procedure="plan", plan_engine=eng, plan_oracle_fraction=1.0,
+                           plan_oracle_scenarios=4, plan_log_path=str(path), planner_hab_mode="per_robot",
+                           neighbor_delay_s=120.0, neighbor_drop_prob=0.3, T_end=600.0))
+    planner = [e for e in eng.info if e["n_scenarios"] == 16]
+    oracle = [e for e in eng.info if e["n_scenarios"] == 4]
+    assert planner and oracle
+    assert all(len(e["rids"]) == 1 for e in eng.info)
+    assert all(e["hab_equal_own"] and e["mu_equal_own"] and e["trig_equal_own"] for e in planner)
+    assert all(e["hab_equal_own"] and e["world_hab"] for e in oracle)
+    # the information sets differ from the shared union somewhere in this run
+    assert any(not e["mu_equal_union"] or not e["hab_equal_shared"] for e in planner)
+    recs = _records(path)
+    assert recs and all(r["information_sets"] == "per_robot" for r in recs)
+    for r in recs:
+        if not r["rounds"]:
+            continue
+        rnd0 = r["rounds"][0]
+        robots = {r["candidates"][i]["robot"] for i in rnd0["cand_indices"]}
+        assert set(rnd0["per_robot"]) == {str(x) for x in robots}
+    assert last["metrics_compact"]["plan_decision_count"] == len(recs)
+
+
+def test_per_robot_information_rejects_timed_recovery():
+    import DeterrentSystem as ds
+    with pytest.raises(ValueError):
+        next(ds.run_simulation_frames_persistent(**_params(
+            planner_procedure="plan", plan_engine=StubEngine(lambda c, call: 0.0), planner_hab_mode="per_robot",
+            plan_E_high=0.0, plan_E_low=-1.0, plan_T_response_s=50.0)))
 
 
 def test_bounded_violation_keeps_obligation_and_minimises_exceedance(tmp_path):
@@ -548,9 +667,10 @@ def _run_spied(snap, cand, monkeypatch):
         inhib.append((str(mode), float(weight)))
         return orig(self, x, y, mode, weight, sigma, omega)
 
-    def spyf(self, x, y, t, weight=1.0, sigma=None, omega_inhib=None, *, mode=None, beta=None, action_id=None):
+    def spyf(self, x, y, t, weight=1.0, sigma=None, omega_inhib=None, *, mode=None, beta=None, action_id=None,
+             **kw):
         fb.append(float(weight))
-        return origf(self, x, y, t, weight, sigma, omega_inhib, mode=mode, beta=beta, action_id=action_id)
+        return origf(self, x, y, t, weight, sigma, omega_inhib, mode=mode, beta=beta, action_id=action_id, **kw)
 
     monkeypatch.setattr(sr._World, "add_legacy_inhibition", spy)
     monkeypatch.setattr(R.Robot, "ingest_intervention_event", spyf)
@@ -627,9 +747,11 @@ def test_executed_feedback_uses_planner_q_times_beta(monkeypatch):
             log.append(("hab", float(field.effectiveness(cell, mode))))
             return oh(field, cell, mode, model)
 
-        def ing(self, x, y, t, weight=1.0, sigma=None, omega_inhib=None, *, mode=None, beta=None, action_id=None):
+        def ing(self, x, y, t, weight=1.0, sigma=None, omega_inhib=None, *, mode=None, beta=None, action_id=None,
+                **kw):
+            # kw: e.g. delayed= (decision 18 relay); the own robot's stamp is never delayed
             log.append(("ing", float(weight), str(mode)))
-            return oi(self, x, y, t, weight, sigma, omega_inhib, mode=mode, beta=beta, action_id=action_id)
+            return oi(self, x, y, t, weight, sigma, omega_inhib, mode=mode, beta=beta, action_id=action_id, **kw)
 
         monkeypatch.setattr(ds, "_apply_habituation_update", hab)
         monkeypatch.setattr(R.Robot, "ingest_intervention_event", ing)
