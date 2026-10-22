@@ -33,7 +33,7 @@ Variants (decisions 3-8, 26):
 The old rollout variants D, E, *_adm and *_cue_adm are dropped (decision 4).
 
 Original legacy setup (Section 7 reproduction only; NOT part of the progression):
-  B1, B5, B4   the ladder systems exactly as the ACC submission ran them (legacy random
+  B1, B5, B4, B3  the ladder systems exactly as the ACC submission ran them (legacy random
                streams, window200 memory, no new flags).  See
                experiments/reproduce_acc_submission.py.
 
@@ -105,7 +105,9 @@ PAPER_LADDER_ARGV = [
     "--habituation-kappa", "0.5",
 ]
 LADDER_SYSTEMS = {"B4": "B4_res_stl_full_multicue", "B1": "B1_greedy_fixedcue",
-                  "B5": "B5_greedy_habcue"}
+                  "B5": "B5_greedy_habcue",
+                  # B3 as in the paper's joint sweep (Table VII), Section 7 reproduction only
+                  "B3": "B3_res_stl_nohab_multicue"}
 # Backward-compatible name used by older scripts.
 LADDER_BASE = LADDER_SYSTEMS
 
@@ -133,7 +135,7 @@ def _ladder_params(system: str, hab_on: bool, mu: float) -> dict:
 # Section 7 reproduction: the ladder systems in the ORIGINAL legacy setup (legacy
 # random streams, window200 truth memory, no new flags).  "B1" and "B5" keep their
 # historical meaning for older scripts and tests.
-LEGACY_VARIANTS = {"B1": "B1", "B5": "B5", "B4": "B4"}
+LEGACY_VARIANTS = {"B1": "B1", "B5": "B5", "B4": "B4", "B3": "B3"}
 
 # Shared environment of every evaluated system (decisions 2026-10-16, 2026-10-19, Sec. 6 #1).
 PLAN_ENV = {"estimator_mode": "legacy", "random_stream_mode": "coupled",
@@ -285,7 +287,7 @@ def build_params(variant: str, hab_on: bool, mu: float, t_end: float | None,
     """Simulator parameters of ``variant``.
 
     Evaluation variants (VARIANTS) = ladder paper params + PLAN_ENV + variant overrides.
-    Legacy variants (B1, B5, B4) = ladder paper params unchanged (Section 7 reproduction).
+    Legacy variants (B1, B5, B4, B3) = ladder paper params unchanged (Section 7 reproduction).
     ``extra`` is applied last.  E_plan_tr reads TIMED_RECOVERY_FILE unless
     ``timed_recovery`` gives all three thresholds.
     """

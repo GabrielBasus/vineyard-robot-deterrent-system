@@ -242,8 +242,9 @@ def test_study_sizes_and_matched_seeds(jobs_by_study):
     _, jobs = jobs_by_study
     expect = {  # study -> (cells, variants per cell, seeds)
         "confirmatory": (3, 9, list(range(300, 330))),
-        "zero_hab": (3, 3, list(range(300, 330))),
-        "mismatch": (5, 2, list(range(300, 310))),
+        "zero_hab": (3, 3, list(range(300, 310))),
+        "mismatch": (4, 2, list(range(300, 310))),   # kappa 0.50 cell reuses confirmatory/heavy
+        "timed_recovery": (3, 1, list(range(300, 310))),
         "neighbor": (6, 2, list(range(300, 310))),
         "timeout": (2, 1, list(range(200, 210))),
         "disturbance": (2, 2, list(range(300, 310))),
@@ -259,19 +260,84 @@ def test_study_sizes_and_matched_seeds(jobs_by_study):
             assert len(by_var) == n_var, (name, cell)
             for v, s in by_var.items():
                 assert sorted(s) == seeds, (name, cell, v)  # same seeds for every system
-    assert jobs["timed_recovery"] == []  # size undecided: nothing scheduled
+    assert {j["variant"] for j in jobs["timed_recovery"]} == {"E_plan_tr"}
     assert all(not j["params"]["enable_habituation"] for j in jobs["zero_hab"])
 
 
 def test_mismatch_and_neighbor_params(jobs_by_study):
     _, jobs = jobs_by_study
     kap = sorted({j["params"]["truth_habituation_kappa"] for j in jobs["mismatch"]})
-    assert kap == [0.10, 0.25, 0.50, 0.75, 0.90]
+    assert kap == [0.10, 0.25, 0.75, 0.90]   # 0.50 is not rerun
     assert {j["params"]["planner_habituation_kappa"] for j in jobs["mismatch"]} == {0.50}
     assert {j["params"]["mu_true"] for j in jobs["mismatch"] + jobs["neighbor"]} == {1e-4}
     combos = {(j["params"]["neighbor_delay_s"], j["params"]["neighbor_drop_prob"]) for j in jobs["neighbor"]}
     assert combos == {(30.0, 0.0), (120.0, 0.0), (300.0, 0.0), (0.0, 0.1), (0.0, 0.3), (0.0, 0.5)}
     assert {j["params"]["planner_hab_mode"] for j in jobs["neighbor"]} == {"per_robot"}
+
+
+def test_mismatch_kappa_050_reuses_confirmatory_heavy_with_identical_effective_params(jobs_by_study, tmp_path):
+    root, jobs = jobs_by_study
+    st = rps.STUDIES["mismatch"](_Args(root))
+    cell = next(c for c in st.cells if c.name == "env_kappa_0p50")
+    assert cell.variants == []
+    assert sorted(cell.reuse) == [("confirmatory/heavy", "B5_c", "B5_c"), ("confirmatory/heavy", "E_plan", "E_plan")]
+    conf = {(j["cell"], j["variant"], j["seed"]): j["params"] for j in jobs["confirmatory"]}
+    import inspect
+    import DeterrentSystem as ds
+    src = inspect.getsource(ds.run_simulation_frames_persistent)
+    # the simulator resolves None to habituation_kappa for truth and planner
+    assert 'habituation_kappa if truth_habituation_kappa in (None, "") else truth_habituation_kappa' in src
+    assert 'habituation_kappa if planner_habituation_kappa in (None, "") else planner_habituation_kappa' in src
+
+    def eff(p):
+        q = dict(p)
+        for k in ("truth_habituation_kappa", "planner_habituation_kappa"):
+            q[k] = q["habituation_kappa"] if q.get(k) in (None, "") else q[k]
+        return q
+
+    for v in ("B5_c", "E_plan"):
+        mism = rpc.build_params(v, True, rpc.LOADS["heavy"], None, rps.mismatch_extra(0.50))
+        for seed in rps.EVAL_SEEDS_10:
+            assert _diff(eff(conf[("heavy", v, seed)]), eff(mism)) == set(), (v, seed)
+    # the analysis reads the confirmatory runs, restricted to seeds 300-309
+    raw = root / "confirmatory" / "heavy" / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    for seed in (300, 315):
+        for v in ("B5_c", "E_plan"):
+            (raw / f"{v}_hab_on_seed_{seed}.json").write_text(json.dumps(
+                {"variant": v, "habituation_condition": "hab_on", "seed": seed, "value_weighted_exposure": 1.0}))
+    rows = rps.cell_rows(root, st, cell)
+    assert sorted((r["variant"], r["seed"]) for r in rows) == [("B5_c", 300), ("E_plan", 300)]
+    for f in raw.glob("*.json"):
+        f.unlink()
+
+
+def test_binding_log_every_decision_for_A_and_B(jobs_by_study):
+    _, jobs = jobs_by_study
+    for j in jobs["confirmatory"]:
+        p = j["params"]
+        if j["variant"] in ("A", "B"):
+            assert p["stl_binding_log_fraction"] == 1.0
+            assert p["stl_binding_log_path"].endswith(f"{j['system']}_seed_{j['seed']}_binding.jsonl")
+        else:
+            assert "stl_binding_log_path" not in p
+
+
+def test_overlap_default_for_all():
+    assert rps.resolve_overlap("all", None) is True
+    assert rps.resolve_overlap("confirmatory", None) is False
+    assert rps.resolve_overlap("all", False) is False
+    assert rps.resolve_overlap("confirmatory", True) is True
+
+
+def test_timed_recovery_study(jobs_by_study):
+    _, jobs = jobs_by_study
+    thr = rpc.load_timed_recovery()
+    for j in jobs["timed_recovery"]:
+        for k, v in thr.items():
+            assert j["params"][k] == v
+    st = rps.STUDIES["timed_recovery"](_Args(jobs_by_study[0]))
+    assert all(c.reuse == [(f"confirmatory/{c.name}", "E_plan", "E_plan")] for c in st.cells)
 
 
 def test_timeout_and_floor_and_disturbance_reuse_identical_params(jobs_by_study, tmp_path):
@@ -375,13 +441,83 @@ def test_confirmatory_family_end_to_end(tmp_path):
 # ---------------------------------------------------------------- Section 7 reproduction
 def test_reproduction_jobs_use_original_legacy_setup(tmp_path):
     from experiments import reproduce_acc_submission as rep
-    jobs = rep.build_jobs(tmp_path, [300, 301])
-    assert len(jobs) == 4 * 3 * 2
+    jobs = rep.build_jobs(tmp_path)
+    main = [j for j in jobs if not j["cell"].startswith("table_vii")]
+    t7 = [j for j in jobs if j["cell"].startswith("table_vii")]
+    assert len(main) == 2 * 4 * 3 * 30 and len(t7) == 3 * 3 * 10
+    assert {j["seed"] for j in main} == set(range(125, 155)) | set(range(300, 330))
+    assert {j["seed"] for j in t7} == set(range(125, 135))
+    assert {j["variant"] for j in main} == {"B1", "B4", "B5"}
+    assert {j["variant"] for j in t7} == {"B1", "B3", "B4"}
     for j in jobs:
         p = j["params"]
-        assert j["variant"] in ("B1", "B4", "B5")
         assert p.get("random_stream_mode", "legacy") == "legacy"
         assert p.get("truth_deterrence_memory", "window200") == "window200"
         assert p.get("estimator_mode", "legacy") == "legacy"
         assert not p.get("stl_forecast_correction", False)
         assert "planner_procedure" not in p
+    assert {j["params"]["enable_habituation"] for j in t7} == {True}
+    assert {j["params"]["habituation_kappa"] for j in t7} == {0.5}
+
+
+def _testbench():
+    from experiments import reproduce_acc_submission as rep
+    tb = rep.find_testbench()
+    if tb is None or not (tb / "habituation_stl_joint_sweep").exists():
+        pytest.skip("archived ACC results not available")
+    return rep, tb
+
+
+def test_table_vii_archive_matches_paper_exactly():
+    rep, tb = _testbench()
+    for cell, _load, _mu, src in rep.TABLE7_CELLS:
+        rows = rep.archive_rows(tb / "habituation_stl_joint_sweep" / src / "per_run_metrics.csv", rep.TABLE7_SYSTEMS)
+        assert sorted({r["seed"] for r in rows}) == rep.TABLE7_SEEDS
+        v = rep.table7_values(rows)
+        for k, paper in rep.PAPER_TABLE_VII[cell].items():
+            nd = 2 if k == "travel" else 1
+            assert round(v[k], nd) == paper, (cell, k, v[k], paper)
+
+
+def test_table_vii_design_matches_joint_sweep_manifest():
+    rep, tb = _testbench()
+    import sys as _sys
+    import experiments.run_habituation_stl_production_ladder as ladder
+    for _cell, _load, mu, src in rep.TABLE7_CELLS:
+        man = json.loads((tb / "habituation_stl_joint_sweep" / src / "ladder_manifest.json").read_text())["args"]
+        saved = _sys.argv
+        try:
+            _sys.argv = ["ladder", *rpc.PAPER_LADDER_ARGV, "--mu-true", repr(mu)]
+            ours = vars(ladder.parse_args())
+        finally:
+            _sys.argv = saved
+        skip = {"outdir", "num_runs", "seed_start", "max_workers", "systems", "merge_existing_raw"}
+        compared = 0
+        for k, v in man.items():
+            if k in skip or k not in ours:
+                continue
+            assert ours[k] == v, (src, k, ours[k], v)
+            compared += 1
+        assert compared > 20
+        assert man["seed_start"] == 125 and man["num_runs"] == 10
+        assert "B3_res_stl_nohab_multicue" in man["systems"]
+
+
+def test_table_i_and_iv_archive_match_paper():
+    rep, tb = _testbench()
+    for cell, load, _mu, hab_on in rep.CELLS:
+        rows = rep.archive_rows(tb / "acc_submission" / "data" / rep.ARCHIVE_FILES[load], rep.SYSTEMS,
+                                "hab_on" if hab_on else "hab_off")
+        for s in ("B4", "B5"):
+            if (cell, s) in rep.PAPER_VS_B1:
+                m, lo, hi, n = rep.paper_table1_interval(rows, s)
+                assert n == 30
+                assert tuple(round(x, 1) + 0.0 for x in (m, lo, hi)) == \
+                    tuple(x + 0.0 for x in rep.PAPER_VS_B1[(cell, s)])
+        if cell in rep.PAPER_B4_B5:
+            a, b = rep._paired(rows, "B5", "B4", "value_weighted_exposure")
+            d = b - a
+            pct = 100 * d.mean() / rep._mean(rows, "B1", "value_weighted_exposure")
+            paper = rep.PAPER_B4_B5[cell]
+            assert round(pct, 1) == paper[0]
+            assert f"{int(np.sum(d < 0))}/{d.size}" == paper[2]

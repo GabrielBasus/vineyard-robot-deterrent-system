@@ -75,17 +75,23 @@ list was decided by an agent; open items are listed at the end.
 
 | # | Assumption | Source |
 |---|---|---|
-| R1 | Mismatch: planner kappa 0.50, environment kappa {0.10, 0.25, 0.50, 0.75, 0.90}; heavy; E_plan, B5_c; 10 seeds. | decision 19 |
+| R1 | Mismatch: planner kappa 0.50, environment kappa {0.10, 0.25, 0.50, 0.75, 0.90}; heavy; E_plan, B5_c; 10 seeds. The kappa 0.50 cell reuses confirmatory heavy seeds 300-309 (identical effective parameters). | decision 19; user 2026-10-22 |
 | R2 | Neighbor histories: one factor at a time, D in {30, 120, 300} s (p = 0), p in {0.1, 0.3, 0.5} (D = 0); heavy; 10 seeds. | decision 18 |
 | R3 | Disturbances (the planner is told neither): truth travel speed 20% below nominal; truth background x2 for 300 s starting at a per-seed uniform time in [300, 1200] s drawn from `CoupledRandomStreams(seed).arrival_burst_start_s` (purpose 15, seed only: identical for every system of a seed). | decision 29; user 2026-10-22 |
 | R4 | Persistent: 5400 s runs, windows [0, 1800) and [1800, 5400], demand switch at 2700 s (x5 spare->heavy, x0.2 heavy->spare), depleted start = per-cell/cue eta at the end of an 1800 s B5_c run at the same starting load and seed. | decision 22 |
-| R5 | Zero habituation: hab off for truth and planner, 3 loads, 30 seeds. | decision 20 |
+| R5 | Zero habituation: hab off for truth and planner, 3 loads, 10 seeds (300-309; reduced from 30 for the budget). | decision 20; user 2026-10-22 |
+| R6 | Timed recovery (exploratory): E_plan_tr vs confirmatory E_plan, 3 loads, seeds 300-309. | decision 2; user 2026-10-22 |
+| R7 | Timeout: E_plan with a 45 s budget vs E_plan without budget, heavy, dev seeds 200-209. | decision 16; user 2026-10-22 |
 
-## 7. Open items (not decided; no default is assumed)
+## 7. Execution conditions
 
-* Section 3 binding-log sampling fraction for the evaluation runs of A and B (decision 27 says
-  "sampled decisions"); off unless `--binding-log-fraction` is given.
-* Size (loads, seeds) of the exploratory E_plan_tr vs E_plan study; not scheduled unless
-  `--tr-loads` and `--tr-seeds` are given.
-* Whether the timeout study's reference (E_plan without budget on dev seeds 200-209) is
-  wanted; it is scheduled because the "effect" of the budget needs a reference.
+* Section 3 binding log: every decision of A and B in the confirmatory study (fraction 1.0,
+  user decision 2026-10-22). Measured: about 0.59 MB per 300 s heavy run (A and B) and
+  2.2 MB per 600 s overload run (A); projected about 1-2 GB for 30 seeds x 3 loads x {A, B},
+  so plain JSONL is kept.
+* `--study all` overlaps ordinary simulations with the two concurrent plan runs (user decision
+  2026-10-22): plan decision runtimes are measured on a loaded machine, not an idle one.
+
+## 8. Open items
+
+None from the 2026-10-22 round.

@@ -118,8 +118,9 @@ obligations persist across replans (`PP.monitor`, PP:461, called every step at D
 * Evaluation runs use no budget (`plan_compute_budget_s=1e9`, decision 16): the simulator
   clock is frozen during planning, so a budget would only add machine-load dependence.
   Runtimes therefore depend on the rollout pool size (memory-capped, at most 12 workers) and
-  on concurrent runs (two plan runs run concurrently in the evaluation); quantiles are
-  reported with that machine state, not as real-time guarantees.
+  on concurrent load: the evaluation (`run_plan_studies --study all`) runs two plan runs at
+  once AND overlaps ordinary simulations with them (user decision 2026-10-22), so the
+  quantiles describe that loaded machine, not an idle one or a real-time guarantee.
 
 ## 4. Fallback behavior
 

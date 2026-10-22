@@ -13,9 +13,12 @@ Studies (all variants in PLAN_ENV; loads spare 2e-5, heavy 1e-4, overload 4e-4):
                 D_plan, E_plan (decisions 2, 3, 8, 23).  Analysis: progression paired
                 statistics per load and the predeclared confirmatory family
                 (experiments/analyze_plan_confirmatory.py, E_plan vs B5_c).
-  zero_hab      hab off, 3 loads, seeds 300-329: B5_c, D_plan, E_plan (decision 20).
+  zero_hab      hab off, 3 loads, seeds 300-309: B5_c, D_plan, E_plan (decision 20; reduced
+                from 30 to 10 seeds by user decision 2026-10-22, budget).
   mismatch      heavy, planner kappa 0.50, environment kappa {0.10, 0.25, 0.50, 0.75, 0.90},
-                B5_c and E_plan, seeds 300-309 (decision 19).
+                B5_c and E_plan, seeds 300-309 (decision 19).  The kappa 0.50 cell runs nothing:
+                it reuses confirmatory/heavy seeds 300-309 (identical effective parameters;
+                user decision 2026-10-22).
   neighbor      heavy, planner_hab_mode per_robot, D in {30, 120, 300} s with p = 0 and
                 p in {0.1, 0.3, 0.5} with D = 0, B5_c and E_plan, seeds 300-309 (decision 18).
   timeout       heavy, E_plan with plan_compute_budget_s = 45 vs E_plan without budget,
@@ -36,11 +39,20 @@ Studies (all variants in PLAN_ENV; loads spare 2e-5, heavy 1e-4, overload 4e-4):
                 end of an 1800 s B5_c run at the same starting load and seed
                 (save_final_hab_state_path, generated first); B5_c, D_plan, E_plan; seeds
                 300-309 (decision 22).
-  timed_recovery  E_plan_tr vs E_plan (decision 2, exploratory).  NOT in the decided
-                budget: loads and seeds must be given with --tr-loads and --tr-seeds.
+  timed_recovery  E_plan_tr vs E_plan (decision 2, exploratory): 3 loads, seeds 300-309,
+                thresholds from docs/calibration/timed_recovery_thresholds.json, E_plan
+                reference from confirmatory (user decision 2026-10-22).
 
---overlap runs ordinary jobs alongside the plan runs (fastest; plan runtimes are then
-measured under that extra load); without it ordinary jobs of a stage run first.
+Section 3 binding log (decision 27): every decision (fraction 1.0, user decision 2026-10-22)
+of variants A and B in the confirmatory study is logged to raw/<system>_seed_<seed>_binding.jsonl.
+Measured size (heavy 300 s: about 0.59 MB for A and B; overload 600 s: 2.2 MB for A)
+projects to about 1-2 GB for 30 seeds x 3 loads x {A, B}, so plain JSONL is kept.
+
+Overlap: ordinary jobs run alongside the plan runs (fastest).  This is the DEFAULT for
+--study all (user decision 2026-10-22) and opt-in (--overlap) otherwise; --no-overlap turns
+it off.  With overlap, plan decision runtimes (plan_runtime_* metrics) are measured while up
+to --max-workers ordinary simulations and a second plan run share the machine, so they are
+not idle-machine runtimes.
 
 Usage:
   py -3.10 -m experiments.run_plan_studies --study all --overlap
@@ -143,27 +155,43 @@ def study_confirmatory(args) -> Study:
     return Study("confirmatory", cells, "hab on, 3 loads, 30 eval seeds; progression + confirmatory family")
 
 
+BINDING_LOG_FRACTION = 1.0   # user decision 2026-10-22: every decision of A and B
+
+
 def _binding_extra(args) -> dict:
-    # Section 3 binding log for A/B (decision 27) is only written when a fraction is given
-    # (OPEN QUESTION: sampling fraction); the path itself is set per job in collect_jobs.
+    # Section 3 binding log for A/B (decision 27); the path itself is set per job in collect_jobs.
     frac = getattr(args, "binding_log_fraction", None)
-    return {} if not frac else {"__binding_log_fraction": float(frac)}
+    frac = BINDING_LOG_FRACTION if frac is None else float(frac)
+    return {} if not frac else {"__binding_log_fraction": frac}
 
 
 def study_zero_hab(args) -> Study:
     comps = [_pair("B5_c", "E_plan"), _pair("B5_c", "D_plan"), _pair("D_plan", "E_plan")]
-    cells = [Cell(name=load, mu=mu, hab_on=False, variants=["B5_c", "D_plan", "E_plan"], seeds=EVAL_SEEDS_30,
+    cells = [Cell(name=load, mu=mu, hab_on=False, variants=["B5_c", "D_plan", "E_plan"], seeds=EVAL_SEEDS_10,
                   comparisons=comps) for load, mu in LOADS.items()]
-    return Study("zero_hab", cells, "habituation off, 3 loads, 30 eval seeds")
+    return Study("zero_hab", cells, "habituation off, 3 loads, 10 eval seeds (300-309)")
+
+
+MISMATCH_PLANNER_KAPPA = 0.50
+MISMATCH_ENV_KAPPAS = (0.10, 0.25, 0.50, 0.75, 0.90)
+
+
+def mismatch_extra(k: float) -> dict:
+    return {"planner_habituation_kappa": MISMATCH_PLANNER_KAPPA, "truth_habituation_kappa": float(k)}
 
 
 def study_mismatch(args) -> Study:
     cells = []
-    for k in (0.10, 0.25, 0.50, 0.75, 0.90):
-        cells.append(Cell(name=f"env_kappa_{_tag(k)}", mu=LOADS["heavy"], hab_on=True,
-                          variants=["B5_c", "E_plan"], seeds=EVAL_SEEDS_10,
-                          extra={"planner_habituation_kappa": 0.50, "truth_habituation_kappa": float(k)},
-                          comparisons=[_pair("B5_c", "E_plan")]))
+    for k in MISMATCH_ENV_KAPPAS:
+        c = Cell(name=f"env_kappa_{_tag(k)}", mu=LOADS["heavy"], hab_on=True,
+                 variants=["B5_c", "E_plan"], seeds=EVAL_SEEDS_10,
+                 extra=mismatch_extra(k), comparisons=[_pair("B5_c", "E_plan")])
+        if k == MISMATCH_PLANNER_KAPPA:
+            # user decision 2026-10-22: no runs; reuse confirmatory/heavy seeds 300-309, whose
+            # effective parameters are identical (truth/planner kappa None -> habituation_kappa 0.50)
+            c.variants = []
+            c.reuse = [("confirmatory/heavy", "B5_c", "B5_c"), ("confirmatory/heavy", "E_plan", "E_plan")]
+        cells.append(c)
     return Study("mismatch", cells, "planner kappa 0.50, environment kappa varied, heavy, 10 seeds")
 
 
@@ -246,17 +274,10 @@ def study_persistent(args) -> Study:
 
 
 def study_timed_recovery(args) -> Study:
-    loads = [x for x in (getattr(args, "tr_loads", "") or "").split(",") if x]
-    seeds = _parse_seeds(getattr(args, "tr_seeds", "") or "")
-    cells = []
-    for load in loads or ["(unset)"]:
-        c = Cell(name=load, mu=LOADS.get(load, float("nan")), hab_on=True, variants=["E_plan_tr"], seeds=seeds,
-                 reuse=[(f"confirmatory/{load}", "E_plan", "E_plan")],
-                 comparisons=[_pair("E_plan", "E_plan_tr")])
-        if not loads or not seeds:
-            c.skip_reason = "timed-recovery study size not decided: pass --tr-loads and --tr-seeds"
-        cells.append(c)
-    return Study("timed_recovery", cells, "E_plan_tr vs E_plan (exploratory)")
+    cells = [Cell(name=load, mu=mu, hab_on=True, variants=["E_plan_tr"], seeds=EVAL_SEEDS_10,
+                  reuse=[(f"confirmatory/{load}", "E_plan", "E_plan")],
+                  comparisons=[_pair("E_plan", "E_plan_tr")]) for load, mu in LOADS.items()]
+    return Study("timed_recovery", cells, "E_plan_tr vs E_plan (exploratory), 3 loads, 10 seeds")
 
 
 STUDIES = {
@@ -271,8 +292,8 @@ STUDIES = {
     "timed_recovery": study_timed_recovery,
 }
 # Priority when several studies are scheduled together (decision 23 budget order).
-DEFAULT_ORDER = ["confirmatory", "zero_hab", "floor", "mismatch", "neighbor", "disturbance", "timeout",
-                 "persistent"]
+DEFAULT_ORDER = ["confirmatory", "zero_hab", "floor", "timed_recovery", "mismatch", "neighbor", "disturbance",
+                 "timeout", "persistent"]
 
 
 def _parse_seeds(s: str) -> list:
@@ -339,7 +360,7 @@ def cell_rows(root: Path, study: Study, cell: Cell) -> list:
     rows = list(_load_cell_rows(root, f"{study.name}/{cell.name}"))
     for rel, variant, alias in cell.reuse:
         for r in _load_cell_rows(root, rel):
-            if r["variant"] == variant:
+            if r["variant"] == variant and int(r["seed"]) in set(cell.seeds):
                 r = dict(r)
                 r["variant"] = alias
                 rows.append(r)
@@ -404,6 +425,13 @@ def _confirmatory_family(study: Study, root: Path) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+def resolve_overlap(study_arg: str, overlap) -> bool:
+    """Overlap is the default for --study all (user decision 2026-10-22), opt-in otherwise."""
+    if overlap is not None:
+        return bool(overlap)
+    return study_arg.strip() == "all"
+
+
 def build_studies(names: list, args) -> list:
     return [STUDIES[n](args) for n in names]
 
@@ -412,15 +440,15 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Section 6 evaluation studies")
     p.add_argument("--study", required=True, help="comma list of: " + ", ".join(STUDIES) + " (or 'all')")
     p.add_argument("--root", default=str(DEFAULT_ROOT))
-    p.add_argument("--tr-loads", default="", help="timed_recovery study loads (undecided)")
-    p.add_argument("--tr-seeds", default="", help="timed_recovery study seeds, e.g. 300-309 (undecided)")
     p.add_argument("--binding-log-fraction", type=float, default=None,
-                   help="Section 3 binding log sampling fraction for A and B (undecided; off by default)")
+                   help="Section 3 binding log fraction for A and B (default 1.0 = every decision)")
     p.add_argument("--max-workers", type=int, default=2)
     p.add_argument("--plan-concurrency", type=int, default=2)
     p.add_argument("--plan-stagger-s", type=float, default=300.0)
-    p.add_argument("--overlap", action="store_true",
-                   help="run ordinary jobs alongside plan jobs (fastest); default: ordinary first")
+    p.add_argument("--overlap", dest="overlap", action="store_true", default=None,
+                   help="run ordinary jobs alongside plan jobs (fastest); default for --study all")
+    p.add_argument("--no-overlap", dest="overlap", action="store_false",
+                   help="ordinary jobs of a stage first, then plan jobs")
     p.add_argument("--min-free-gb", type=float, default=rpc.MIN_FREE_GB)
     p.add_argument("--poll-s", type=float, default=rpc.MEMORY_POLL_S)
     p.add_argument("--dry-run", action="store_true")
@@ -428,6 +456,7 @@ def main() -> None:
     args = p.parse_args()
 
     names = DEFAULT_ORDER if args.study.strip() == "all" else [s.strip() for s in args.study.split(",") if s.strip()]
+    args.overlap = resolve_overlap(args.study, args.overlap)
     unknown = [n for n in names if n not in STUDIES]
     if unknown:
         raise SystemExit(f"unknown studies {unknown}; choose from {list(STUDIES)}")
