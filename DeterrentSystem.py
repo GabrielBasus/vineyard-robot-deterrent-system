@@ -1,5 +1,7 @@
 import bisect
 import copy
+import heapq
+import json
 import math
 import os
 import random
@@ -40,7 +42,15 @@ from ZonePartitioner import (
     power_cells,
 )
 from SESTPP import ConsistentOnlineSESTPP, OnlineSESTPP, canonical_estimator_mode
-from random_streams import RANDOM_STREAM_MODES, CoupledRandomStreams
+from random_streams import (
+    RANDOM_STREAM_MODES,
+    RELAY_KIND_DETECTION,
+    RELAY_KIND_DETECTION_SEQ,
+    RELAY_KIND_INTERVENTION,
+    RELAY_KIND_INTERVENTION_SEQ,
+    CoupledRandomStreams,
+)
+from robot_information import PerRobotHabituation
 from Robot import Robot, RobotProfile
 from TaskGenerator import TaskGenerator, TaskAssigner
 from graph_motion import (
@@ -133,9 +143,35 @@ def _apply_habituation_update(hab, cell_id, mode_idx, update_model: str | None) 
 # ============================================================================
 
 class EventBus:
-    def __init__(self, robots: Dict[str, Robot], bytes_per_boundary_msg: int = 64, bytes_per_intervention_msg: int = 72):
-        """Initialize the helper object state used by the production simulator."""
+    def __init__(self, robots: Dict[str, Robot], bytes_per_boundary_msg: int = 64, bytes_per_intervention_msg: int = 72,
+                 *, neighbor_delay_s: float = 0.0, neighbor_drop_prob: float = 0.0, relay_streams=None):
+        """Initialize the helper object state used by the production simulator.
+
+        Decision 18 (neighbor histories): every message relayed to another robot
+        (detections, interventions, per-robot habituation records) is dropped with
+        probability ``neighbor_drop_prob`` (uniform keyed by message id and
+        recipient, ``relay_streams.relay_uniform``) and otherwise delivered
+        ``neighbor_delay_s`` after its event time (``deliver_due``). With both 0
+        (the default) delivery is the historical immediate call.
+        """
         self.robots = robots
+        self.neighbor_delay_s = max(0.0, float(neighbor_delay_s))
+        self.neighbor_drop_prob = float(neighbor_drop_prob)
+        if not (0.0 <= self.neighbor_drop_prob <= 1.0):
+            raise ValueError(f"neighbor_drop_prob must be in [0, 1], got {neighbor_drop_prob!r}")
+        if self.neighbor_drop_prob > 0.0 and relay_streams is None:
+            raise ValueError("neighbor_drop_prob > 0 needs relay_streams (CoupledRandomStreams)")
+        self.relay_streams = relay_streams
+        self._pending = []          # heap of (deliver_t, seq, deliver_fn)
+        self._pending_seq = 0
+        self._detection_seq = 0
+        self._intervention_seq = 0
+        self.relay_sent_by_kind = {"detection": 0, "intervention": 0, "habituation": 0}
+        self.relay_dropped_by_kind = {"detection": 0, "intervention": 0, "habituation": 0}
+        self.relay_delayed_by_kind = {"detection": 0, "intervention": 0, "habituation": 0}
+        # Per-robot habituation relay (planner_hab_mode="per_robot"): callback
+        # (recipient_id, t_event, cell, mode) installed by the simulator.
+        self.habituation_apply_fn = None
         self.bytes_per_boundary_msg = int(bytes_per_boundary_msg)
         self.bytes_per_intervention_msg = int(bytes_per_intervention_msg)
         self.boundary_msg_count = 0
@@ -152,6 +188,83 @@ class EventBus:
         self.consistent_detection_msg_count = 0
         self.consistent_intervention_msg_count = 0
         self.consistent_intervention_log = []
+
+    # -- decision 18: delay / drop of relayed messages ---------------------------
+    def next_detection_key(self, event_id=None):
+        """Message id of one published detection: the truth event id when known."""
+        if event_id is not None:
+            return (RELAY_KIND_DETECTION, tuple(int(v) for v in event_id))
+        self._detection_seq += 1
+        return (RELAY_KIND_DETECTION_SEQ, (int(self._detection_seq),))
+
+    def intervention_key(self, action_id=None):
+        """Message id of one completed intervention: its action (task) id when known."""
+        try:
+            aid = int(action_id)
+        except (TypeError, ValueError):
+            aid = -1
+        if aid >= 0:
+            return (RELAY_KIND_INTERVENTION, (aid,))
+        self._intervention_seq += 1
+        return (RELAY_KIND_INTERVENTION_SEQ, (int(self._intervention_seq),))
+
+    def _relay(self, kind_label, message_key, recipient_id, t_event, deliver_fn):
+        """Deliver one relayed message now, later (delay) or never (drop)."""
+        self.relay_sent_by_kind[kind_label] = self.relay_sent_by_kind.get(kind_label, 0) + 1
+        if self.neighbor_drop_prob > 0.0:
+            if message_key is None:
+                message_key = (
+                    self.next_detection_key() if kind_label == "detection" else self.intervention_key()
+                )
+            kind_code, msg_id = message_key
+            u = self.relay_streams.relay_uniform(kind_code, msg_id, recipient_id)
+            if u < self.neighbor_drop_prob:
+                self.relay_dropped_by_kind[kind_label] = self.relay_dropped_by_kind.get(kind_label, 0) + 1
+                return False
+        if self.neighbor_delay_s > 0.0:
+            self.relay_delayed_by_kind[kind_label] = self.relay_delayed_by_kind.get(kind_label, 0) + 1
+            heapq.heappush(
+                self._pending,
+                (float(t_event) + self.neighbor_delay_s, self._pending_seq, deliver_fn),
+            )
+            self._pending_seq += 1
+            return True
+        deliver_fn(False)
+        return True
+
+    def deliver_due(self, now_t: float) -> int:
+        """Deliver every delayed message whose delivery time is <= now_t (time order)."""
+        n = 0
+        while self._pending and self._pending[0][0] <= float(now_t) + 1e-9:
+            _t, _seq, fn = heapq.heappop(self._pending)
+            fn(True)
+            n += 1
+        return n
+
+    def relay_habituation(self, *, t: float, cell: int, mode: int, action_id, source_id: str) -> None:
+        """Send one intervention's (time, cell, cue) record to every other robot (complete relay)."""
+        if self.habituation_apply_fn is None:
+            return
+        key = self.intervention_key(action_id) if self.neighbor_drop_prob > 0.0 else None
+        for rid in self.robots:
+            if rid == source_id:
+                continue
+            self._relay(
+                "habituation", key, rid, t,
+                (lambda delayed, _r=rid: self.habituation_apply_fn(_r, float(t), int(cell), int(mode))),
+            )
+
+    def relay_metrics(self) -> dict:
+        out = {
+            "neighbor_delay_s": float(self.neighbor_delay_s),
+            "neighbor_drop_prob": float(self.neighbor_drop_prob),
+            "relay_pending_at_end": int(len(self._pending)),
+        }
+        for kind in ("detection", "intervention", "habituation"):
+            out[f"relay_{kind}_sent_total"] = int(self.relay_sent_by_kind.get(kind, 0))
+            out[f"relay_{kind}_dropped_total"] = int(self.relay_dropped_by_kind.get(kind, 0))
+            out[f"relay_{kind}_delayed_total"] = int(self.relay_delayed_by_kind.get(kind, 0))
+        return out
 
     def configure_consistent_relay(self, region_polys_fn, *, footprint_sigmas: float = 3.0):
         """Switch to footprint-based relay for the consistent estimator.
@@ -181,10 +294,12 @@ class EventBus:
                 return True
         return False
 
-    def publish_detection(self, events: List[Dict], x: float, y: float, t: float, source_id: str):
+    def publish_detection(self, events: List[Dict], x: float, y: float, t: float, source_id: str,
+                          event_id=None):
         """Relay a detection: legacy boundary events, or footprint relay in consistent mode."""
+        key = self.next_detection_key(event_id) if self.neighbor_drop_prob > 0.0 else None
         if self.estimator_mode != "consistent":
-            self.send_boundary_events(events, source_id=source_id)
+            self.send_boundary_events(events, source_id=source_id, message_key=key)
             return
         for rid, robot in self.robots.items():
             if rid == source_id:
@@ -195,24 +310,37 @@ class EventBus:
             self.consistent_detection_msg_count += 1
             self.boundary_msg_count += 1
             self.boundary_bytes += self.bytes_per_boundary_msg
-            robot.ingest_boundary_event(x=float(x), y=float(y), t=float(t), weight=1.0)
+            self._relay(
+                "detection", key, rid, t,
+                (lambda delayed, _rob=robot: _rob.ingest_boundary_event(
+                    x=float(x), y=float(y), t=float(t), weight=1.0, delayed=delayed)),
+            )
 
     def broadcast_intervention(self, *, x: float, y: float, t: float, amplitude: float,
                                sigma: float, omega: float, mode, action_id, source_id: str):
         """Deliver a completed intervention to the executing robot and every affected robot."""
         recipients = []
+        key = self.intervention_key(action_id) if self.neighbor_drop_prob > 0.0 else None
         for rid, robot in self.robots.items():
             if rid != source_id and not self.robot_region_affected(rid, x, y, sigma):
                 continue
-            robot.ingest_intervention_event(
-                x, y, t,
-                weight=float(amplitude),
-                sigma=float(sigma),
-                omega_inhib=float(omega),
-                mode=mode,
-                beta=float(amplitude),
-                action_id=action_id,
-            )
+
+            def _deliver(delayed, _rob=robot):
+                _rob.ingest_intervention_event(
+                    x, y, t,
+                    weight=float(amplitude),
+                    sigma=float(sigma),
+                    omega_inhib=float(omega),
+                    mode=mode,
+                    beta=float(amplitude),
+                    action_id=action_id,
+                    delayed=delayed,
+                )
+
+            if rid == source_id:
+                _deliver(False)
+            else:
+                self._relay("intervention", key, rid, t, _deliver)
             recipients.append(str(rid))
             if rid != source_id:
                 self.consistent_intervention_msg_count += 1
@@ -229,16 +357,22 @@ class EventBus:
         })
         return recipients
 
-    def send_boundary_events(self, events: List[Dict], source_id: str):
+    def send_boundary_events(self, events: List[Dict], source_id: str, message_key=None):
         """Publish boundary-sharing events to neighboring robot models."""
+        if message_key is None and self.neighbor_drop_prob > 0.0 and events:
+            message_key = self.next_detection_key()
         for ev in events:
             rid = ev['target_robot']
             if rid in self.robots and rid != source_id:
                 self.boundary_msg_count += 1
                 self.boundary_bytes += self.bytes_per_boundary_msg
-                self.robots[rid].ingest_boundary_event(
-                    x=ev['x'], y=ev['y'], t=ev['t'],
-                    weight=ev.get('weight', 0.35), sigma=ev.get('sigma'), omega=ev.get('omega')
+                self._relay(
+                    "detection", message_key, rid, ev['t'],
+                    (lambda delayed, _rob=self.robots[rid], _ev=ev: _rob.ingest_boundary_event(
+                        x=_ev['x'], y=_ev['y'], t=_ev['t'],
+                        weight=_ev.get('weight', 0.35), sigma=_ev.get('sigma'), omega=_ev.get('omega'),
+                        delayed=delayed,
+                    )),
                 )
     
     def send_intervention_events(
@@ -285,14 +419,19 @@ class EventBus:
                     self._last_intervention_key_t[k] = t
                 self.intervention_msg_count += 1
                 self.intervention_bytes += self.bytes_per_intervention_msg
-                self.robots[rid].ingest_intervention_event(
-                    x=ev['x'], y=ev['y'], t=ev['t'],
-                    weight=w,
-                    sigma=ev.get('sigma'),
-                    omega_inhib=ev.get('omega_inhib'),
-                    mode=ev.get('mode'),
-                    beta=ev.get('beta'),
-                    action_id=ev.get('action_id'),
+                key = self.intervention_key(ev.get('action_id')) if self.neighbor_drop_prob > 0.0 else None
+                self._relay(
+                    "intervention", key, rid, ev['t'],
+                    (lambda delayed, _rob=self.robots[rid], _ev=ev, _w=w: _rob.ingest_intervention_event(
+                        x=_ev['x'], y=_ev['y'], t=_ev['t'],
+                        weight=_w,
+                        sigma=_ev.get('sigma'),
+                        omega_inhib=_ev.get('omega_inhib'),
+                        mode=_ev.get('mode'),
+                        beta=_ev.get('beta'),
+                        action_id=_ev.get('action_id'),
+                        delayed=delayed,
+                    )),
                 )
 
     def to_tracking_dict(self, *, include_arrays: bool = False, max_items: int = 50):
@@ -2409,6 +2548,22 @@ def run_simulation_frames_persistent(
     mu_step_time_s=None,            # scored-run time at which truth demand changes (None = never)
     mu_step_factor=1.0,             # multiplier applied to mu_true from mu_step_time_s onward
     exposure_window_s=300.0,        # window width for value_weighted_exposure_windows
+    # Decision 22: outcome windows given by boundaries in scored-run seconds, e.g. [1800.0]
+    # gives [0, 1800) and [1800, T_end]. None = no per-window outcome report.
+    outcome_window_boundaries_s=None,
+    save_final_hab_state_path=None,  # JSON: truth (and planner) eta per cell and cue at run end
+    initial_hab_state_path=None,     # JSON written by save_final_hab_state_path: start state of eta
+    # Decision 17: planner effectiveness information. "shared" = one fleet field
+    # (historical); "per_robot" = each robot reconstructs its own field from the
+    # interventions it has received (docs/communication_assumptions.md).
+    planner_hab_mode="shared",
+    # Decision 18: relayed neighbor messages are delayed by neighbor_delay_s and
+    # dropped with probability neighbor_drop_prob (keyed coupled stream).
+    neighbor_delay_s=0.0,
+    neighbor_drop_prob=0.0,
+    # Decision 29 disturbances (the planner is told neither):
+    travel_speed_error=0.0,          # truth speed = nominal * (1 - travel_speed_error)
+    arrival_burst=None,              # {"start_s", "duration_s", "factor"}: truth background x factor
     # Plan Sections 4 and 6: couple exogenous randomness across compared policies.
     # "legacy" keeps the single shared rng (bit-for-bit historical behavior);
     # "coupled" draws truth arrivals, thinning, offspring and detection noise from
@@ -3433,8 +3588,29 @@ def run_simulation_frames_persistent(
     loiter_until = {r['id']: -1.0 for r in robots_def}
     bird_present_until = {r['id']: -1.0 for r in robots_def}
     last_detection_time = {r['id']: -1.0 for r in robots_def}
+    travel_speed_error = float(travel_speed_error or 0.0)
+    if not (0.0 <= travel_speed_error < 1.0):
+        raise ValueError(f"travel_speed_error must be in [0, 1), got {travel_speed_error!r}")
+    if arrival_burst is not None:
+        arrival_burst = dict(arrival_burst)
+        _missing_burst = [k for k in ("start_s", "duration_s", "factor") if k not in arrival_burst]
+        if _missing_burst:
+            raise ValueError("arrival_burst needs " + ", ".join(_missing_burst))
+        arrival_burst = {k: float(arrival_burst[k]) for k in ("start_s", "duration_s", "factor")}
+        if arrival_burst["duration_s"] < 0.0 or arrival_burst["factor"] < 0.0:
+            raise ValueError(f"arrival_burst duration_s and factor must be >= 0, got {arrival_burst!r}")
+    neighbor_delay_s = float(neighbor_delay_s or 0.0)
+    neighbor_drop_prob = float(neighbor_drop_prob or 0.0)
+    if neighbor_delay_s < 0.0:
+        raise ValueError(f"neighbor_delay_s must be >= 0, got {neighbor_delay_s!r}")
+    relay_streams = None
+    if neighbor_drop_prob > 0.0:
+        # Decision 18: dedicated keyed stream (purpose PURPOSE_RELAY) of the run seed.
+        relay_streams = truth_streams if truth_streams is not None else CoupledRandomStreams(seed)
     bus = EventBus(robots, bytes_per_boundary_msg=bytes_per_boundary_msg,
-                   bytes_per_intervention_msg=bytes_per_intervention_msg)
+                   bytes_per_intervention_msg=bytes_per_intervention_msg,
+                   neighbor_delay_s=neighbor_delay_s, neighbor_drop_prob=neighbor_drop_prob,
+                   relay_streams=relay_streams)
     global_predictive_model = None
     global_predictive_recent_events = deque(maxlen=5000)
     centralized_planning_robots = None
@@ -3898,7 +4074,7 @@ def run_simulation_frames_persistent(
                     global_predictive_model.add_local_event(float(x), float(y))
                 global_predictive_recent_events.append((float(x), float(y), float(t_now)))
             b = robots[owner].ingest_detection(x, y, t_now)
-            bus.publish_detection(b, x, y, t_now, source_id=owner)
+            bus.publish_detection(b, x, y, t_now, source_id=owner, event_id=event_id)
             if enqueue_tasks:
                 if bool(enable_direct_detection_tasks):
                     refresh_task = _find_refreshable_direct_detection_task(x, y, t_now)
@@ -4559,6 +4735,61 @@ def run_simulation_frames_persistent(
         eta0=float(habituation_initial_eta),
     )
     hab = truth_hab
+    # Decision 22 (persistent operation): start truth and planner effectiveness from
+    # the end state saved by an earlier run (save_final_hab_state_path).
+    initial_hab_state_info = None
+    if initial_hab_state_path:
+        with open(str(initial_hab_state_path), "r", encoding="utf-8") as _fh:
+            _init_state = json.load(_fh)
+        _labels = list(_init_state.get("mode_labels", []))
+        if _labels != list(mode_labels):
+            raise ValueError(
+                f"initial_hab_state_path cue modes {_labels} differ from this run's {list(mode_labels)}"
+            )
+        _truth_eta0 = np.asarray(_init_state["truth_eta"], dtype=float)
+        _planner_eta0 = np.asarray(_init_state["planner_eta"], dtype=float)
+        if _truth_eta0.shape != truth_hab.eta.shape or _planner_eta0.shape != planner_hab.eta.shape:
+            raise ValueError(
+                f"initial_hab_state_path eta shape {_truth_eta0.shape} differs from this run's "
+                f"{truth_hab.eta.shape} (cells x cues)"
+            )
+        truth_hab.eta = np.array(_truth_eta0, dtype=float, copy=True)
+        planner_hab.eta = np.array(_planner_eta0, dtype=float, copy=True)
+        initial_hab_state_info = {
+            "path": str(initial_hab_state_path),
+            "source_t_end": _init_state.get("t_end"),
+        }
+    # Decision 17: per-robot planner effectiveness (information sets).
+    planner_hab_mode = str(planner_hab_mode or "shared").strip().lower()
+    if planner_hab_mode not in ("shared", "per_robot"):
+        raise ValueError(f"planner_hab_mode must be 'shared' or 'per_robot', got {planner_hab_mode!r}")
+    planner_hab_by_robot = None
+    if planner_hab_mode == "per_robot":
+        planner_hab_by_robot = PerRobotHabituation(
+            list(robots.keys()),
+            planner_hab,
+            update_fn=lambda _h, _c, _m: _apply_habituation_update(
+                _h, _c, _m, planner_habituation_update_model
+            ),
+            # Messages delivered at step t carry times > t - D - dt (deliver_due runs each step).
+            max_lag_s=(float(neighbor_delay_s) + float(dt)) if float(neighbor_delay_s) > 0.0 else 0.0,
+        )
+
+        def _per_robot_hab_receive(rid_recv, t_event, cell_id_recv, mode_idx_recv):
+            if bool(enable_habituation):
+                planner_hab_by_robot.apply(rid_recv, t_event, cell_id_recv, mode_idx_recv)
+
+        bus.habituation_apply_fn = _per_robot_hab_receive
+
+    def _planner_hab_for_robot(rid):
+        """Robot ``rid``'s own planner effectiveness field (live object; copy before mutating).
+
+        planner_hab_mode="shared": the fleet field ``planner_hab``. "per_robot": the field
+        the robot reconstructed from the interventions it has received.
+        """
+        if planner_hab_by_robot is None:
+            return planner_hab
+        return planner_hab_by_robot.field(str(rid))
     # Drop the φ_hab clause when habituation is disabled: with η≡1 frozen, the
     # hab clause evaluates to a constant in every candidate, which dominates the
     # softmin and collapses all utility scores toward zero, breaking task/mode
@@ -4631,6 +4862,24 @@ def run_simulation_frames_persistent(
     )
     last_service_t_by_cell = {cell_id: 0.0 for cell_id in range(len(cells))}
     eta_at_apply_samples = []
+    # Decisions 13-15: (t, cell, cue, stream, truth eta, planner eta) per cue application,
+    # and per-robot motion time by stream.
+    cue_application_log = []
+    motion_time_by_robot_stream = {
+        str(rid): {"reactive": 0.0, "predictive": 0.0, "deviation": 0.0, "no_task": 0.0} for rid in robots
+    }
+    # Decisions 10-11: distinct reactive task keys (candidate buffer key) with creation time.
+    reactive_generated_distinct_keys = {}
+    reactive_generated_key_counts = {}
+    reactive_completed_keys = {}
+
+    def _application_stream(task_row):
+        """Decisions 13-14 stream: reactive, deviation (admitted plan deviation) or predictive."""
+        if task_row is None:
+            return "no_task"
+        if task_row.get("_forced_first"):
+            return "deviation"
+        return _task_stream(task_row)
     mode_use_by_cell = {}
     last_stl_robustness_by_robot = {}
 
@@ -5356,11 +5605,15 @@ def run_simulation_frames_persistent(
         if bool(enable_habituation):
             truth_hab.recover(dt)
             planner_hab.recover(dt)
+            if planner_hab_by_robot is not None:
+                planner_hab_by_robot.recover(dt, now_t)
+        # Decision 18: delayed neighbor messages due by now (no-op without delay).
+        bus.deliver_due(now_t)
 
         if use_ground_truth:
             _prune_truth_deterrence_store(float(now_t) - float(dt))
         if truth_streams is not None and use_ground_truth:
-            _coupled_truth_step(now_t, _mu_true_at(now_t), warmup=False)
+            _coupled_truth_step(now_t, _truth_background_rate_at(now_t), warmup=False)
             return TruthGenerationCounters(
                 truth_candidate_events=int(truth_candidate_events),
                 truth_accepted_events=int(truth_accepted_events),
@@ -5378,7 +5631,7 @@ def run_simulation_frames_persistent(
             H=H,
             w_cdf=w_cdf,
             w_shape=w_shape,
-            mu_true=_mu_true_at(now_t),
+            mu_true=_truth_background_rate_at(now_t),
             sample_from_value_map_fn=_sample_from_value_map,
             suppression_eval_fn=_suppression_eval,
             process_truth_event_fn=_process_truth_event,
@@ -5808,6 +6061,15 @@ def run_simulation_frames_persistent(
         reactive_generated_total += int(candidate_stream_counts.get("reactive", 0))
         predictive_generated_total += int(candidate_stream_counts.get("predictive", 0))
         for task_row in candidate_tasks:
+            if _task_stream(task_row) == "reactive":
+                # Decision 11: count each reactive task key once (the buffer offers a
+                # waiting undispatched task again at every replan).
+                rkey = _task_buffer_key(task_row)
+                reactive_generated_key_counts[rkey] = int(reactive_generated_key_counts.get(rkey, 0)) + 1
+                if rkey not in reactive_generated_distinct_keys:
+                    reactive_generated_distinct_keys[rkey] = float(
+                        _finite_task_metric(task_row, "time", float(now_t))
+                    )
             if _task_stream(task_row) != "predictive":
                 continue
             opportunity_key = _predictive_opportunity_key(task_row)
@@ -6713,8 +6975,12 @@ def run_simulation_frames_persistent(
         if dist < 1.0e-6:
             return
         speed = max(float(profiles[rid].speed_mps), 1.0e-6)
+        if travel_speed_error != 0.0:
+            # Decision 29: truth motion is slower than the nominal speed every
+            # planner ETA and rollout uses (profiles stay nominal).
+            speed = speed * (1.0 - travel_speed_error)
         step = speed * float(dt_local)
-        nx, ny = (tx, ty) if step >= dist else (x + dx * (step / dist), y + dy * (step / dist))
+        nx, ny =(tx, ty) if step >= dist else (x + dx * (step / dist), y + dy * (step / dist))
         clamped_x = min(max(nx, 0.0), float(W))
         clamped_y = min(max(ny, 0.0), float(H))
         step_dist = math.hypot(clamped_x - x, clamped_y - y)
@@ -7158,6 +7424,49 @@ def run_simulation_frames_persistent(
             return float(mu_true) * float(mu_step_factor)
         return float(mu_true)
 
+    def _save_final_hab_state(path, now_t):
+        """Decision 22: write the truth and planner eta (cells x cues) at run end."""
+        payload = {
+            "t_end": float(now_t),
+            "scored_t_end": float(now_t) - float(warmup_s),
+            "seed": seed,
+            "mu_true": float(mu_true),
+            "mode_labels": list(mode_labels),
+            "n_cells": int(truth_hab.n_cells),
+            "truth_eta": np.asarray(truth_hab.eta, dtype=float).tolist(),
+            "planner_eta": np.asarray(planner_hab.eta, dtype=float).tolist(),
+            "planner_hab_mode": str(planner_hab_mode),
+            "planner_eta_by_robot": (
+                None if planner_hab_by_robot is None
+                else {str(r): np.asarray(e, dtype=float).tolist() for r, e in planner_hab_by_robot.snapshot().items()}
+            ),
+            "truth_habituation": {"T_rec": float(truth_hab.T_rec), "kappa": np.asarray(truth_hab.kappa).tolist(),
+                                  "gamma": float(truth_hab.gamma)},
+            "planner_habituation": {"T_rec": float(planner_hab.T_rec), "kappa": np.asarray(planner_hab.kappa).tolist(),
+                                    "gamma": float(planner_hab.gamma)},
+        }
+        out_dir = os.path.dirname(os.path.abspath(path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=1)
+
+    def _arrival_burst_factor_at(now_t):
+        """Decision 29: unforecast burst, truth background x factor on [start, start + duration)."""
+        if arrival_burst is None:
+            return 1.0
+        t_rel = float(now_t) - float(warmup_s)
+        t0_b = float(arrival_burst["start_s"])
+        if t0_b <= t_rel < t0_b + float(arrival_burst["duration_s"]):
+            return float(arrival_burst["factor"])
+        return 1.0
+
+    def _truth_background_rate_at(now_t):
+        """Truth background rate actually generated: demand step and arrival burst (planner told neither)."""
+        if arrival_burst is None:
+            return _mu_true_at(now_t)
+        return _mu_true_at(now_t) * _arrival_burst_factor_at(now_t)
+
     def _exposure_windows():
         """Value-weighted exposure per exposure_window_s window of the scored run."""
         width = max(float(exposure_window_s), 1e-9)
@@ -7169,24 +7478,51 @@ def run_simulation_frames_persistent(
                 out[k] += float(w_ev)
         return out
 
-    def _service_and_mechanism_metrics():
-        """Plan §6 service outcomes (deadline-based) and mechanism/runtime diagnostics."""
+    def _service_and_mechanism_metrics(now_t=None, *, final=True):
+        """Plan §6 service outcomes (deadline-based) and mechanism/runtime diagnostics.
+
+        Decision 11 check: ``reactive_generated_total`` counts reactive candidates
+        each time the candidate buffer offers them; a candidate the dispatcher does
+        not admit (no assigned robot) is offered again at the next replan.
+        ``reactive_generated_distinct_total`` counts distinct task keys and
+        ``reactive_generated_repeat_offers_total`` the difference. The test
+        (tests/test_service_mechanism_metrics.py) found no repeat offers, so the
+        miss fraction keeps its original denominator (decision: switch only if
+        double counting is confirmed).
+        """
+        now_t = float(t if now_t is None else now_t)
         deadline_s = float(reactive_service_deadline_s)
         ages = np.asarray(reactive_completion_ages_s, dtype=float)
         on_time = int(np.sum(ages <= deadline_s)) if ages.size else 0
         late = int(ages.size - on_time)
         generated = int(reactive_generated_total)
         missed = max(0, generated - on_time)
+        distinct = int(len(reactive_generated_distinct_keys))
+        unfinished_keys = [k for k in reactive_generated_distinct_keys if k not in reactive_completed_keys]
+        overdue_end = np.asarray(
+            [now_t - (reactive_generated_distinct_keys[k] + deadline_s) for k in unfinished_keys], dtype=float
+        )
+        overdue_end = overdue_end[overdue_end > 0.0] if overdue_end.size else overdue_end
         runtimes = np.asarray(getattr(taskgen, "stl_eval_runtime_s", []) or [], dtype=float)
         diag = dict(getattr(taskgen, "diag_counts", {}) or {})
-        return {
+        out = {
             "reactive_service_deadline_s": deadline_s,
             "reactive_on_time_total": on_time,
             "reactive_late_total": late,
+            "reactive_generated_distinct_total": distinct,
+            "reactive_generated_repeat_offers_total": int(max(0, generated - distinct)),
             "reactive_missed_total": int(missed),
             "reactive_miss_fraction": (float(missed) / float(generated)) if generated > 0 else float("nan"),
+            # Decision 10: tasks not completed by run end (dropped or still pending), separate
+            # from completed-late tasks; overdue at end = T_end - deadline for those past it.
             "reactive_unfinished_total": int(max(0, generated - int(ages.size))),
+            "reactive_unfinished_distinct_total": int(len(unfinished_keys)),
+            "reactive_unfinished_overdue_total": int(overdue_end.size),
+            "reactive_unfinished_overdue_time_s": float(np.sum(overdue_end)) if overdue_end.size else 0.0,
+            "reactive_unfinished_overdue_mean_s": float(np.mean(overdue_end)) if overdue_end.size else float("nan"),
             "reactive_overdue_time_completed_s": float(np.sum(np.maximum(ages - deadline_s, 0.0))) if ages.size else 0.0,
+            # Decision 9: primary response time = creation-to-completion age of completed reactive tasks.
+            "reactive_age_at_completion_mean_s": float(np.mean(ages)) if ages.size else float("nan"),
             "reactive_age_at_completion_p50_s": float(np.percentile(ages, 50)) if ages.size else float("nan"),
             "reactive_age_at_completion_p90_s": float(np.percentile(ages, 90)) if ages.size else float("nan"),
             "predictive_rejected_benefit_gate_total": int(diag.get("model_deterring_rejected_benefit_gate", 0)),
@@ -7198,7 +7534,124 @@ def run_simulation_frames_persistent(
             **_stl_ranking_metrics(list(getattr(taskgen, "stl_eval_log", []) or [])),
             "exposure_window_s": float(exposure_window_s),
             "value_weighted_exposure_windows": _exposure_windows(),
+            **bus.relay_metrics(),
+            "planner_hab_mode": str(planner_hab_mode),
+            "travel_speed_error": float(travel_speed_error),
         }
+        if final:
+            out.update(_motion_metrics())
+            out.update(_application_metrics())
+            out.update(_cue_reuse_metrics())
+            out.update(_outcome_window_metrics(now_t))
+        return out
+
+    def _motion_metrics():
+        """Decision 13: time in motion per robot, total and by stream."""
+        streams = ("reactive", "predictive", "deviation", "no_task")
+        out = {"motion_time_by_robot_stream_s": {r: dict(v) for r, v in motion_time_by_robot_stream.items()}}
+        tot = 0.0
+        for st in streams:
+            v = float(sum(b.get(st, 0.0) for b in motion_time_by_robot_stream.values()))
+            out[f"motion_time_{st}_s"] = v
+            tot += v
+        out["motion_time_total_s"] = tot
+        out["motion_time_by_robot_s"] = {r: float(sum(v.values())) for r, v in motion_time_by_robot_stream.items()}
+        return out
+
+    def _application_metrics():
+        """Decision 14: truth and planner eta at application, overall and by stream."""
+        out = {}
+        for st in ("all", "reactive", "predictive", "deviation"):
+            rows = [r for r in cue_application_log if st == "all" or r[3] == st]
+            tr = np.asarray([r[4] for r in rows], dtype=float)
+            pl = np.asarray([r[5] for r in rows], dtype=float)
+            pl = pl[np.isfinite(pl)]
+            out[f"eta_at_application_{st}_count"] = int(len(rows))
+            out[f"eta_truth_at_application_{st}_mean"] = float(np.mean(tr)) if tr.size else float("nan")
+            out[f"eta_planner_at_application_{st}_mean"] = float(np.mean(pl)) if pl.size else float("nan")
+        return out
+
+    def _cue_reuse_metrics():
+        """Decision 15: for each application of cue c in cell z, the time to the next
+        application of (z, c) and the truth eta at that next application.
+
+        Applications with no later application of (z, c) before run end have no
+        reuse interval; they are counted as ``*_without_reuse``.
+        """
+        by_zc = {}
+        for i, r in enumerate(cue_application_log):
+            by_zc.setdefault((r[1], r[2]), []).append(i)
+        intervals = {"all": [], "deviation": []}
+        eta_next = {"all": [], "deviation": []}
+        without = {"all": 0, "deviation": 0}
+        for idxs in by_zc.values():
+            idxs = sorted(idxs, key=lambda i: (cue_application_log[i][0], i))
+            for a, b in zip(idxs, idxs[1:] + [None]):
+                ra = cue_application_log[a]
+                groups = ["all"] + (["deviation"] if ra[3] == "deviation" else [])
+                for g in groups:
+                    if b is None:
+                        without[g] += 1
+                    else:
+                        rb = cue_application_log[b]
+                        intervals[g].append(float(rb[0]) - float(ra[0]))
+                        eta_next[g].append(float(rb[4]))
+        out = {}
+        for g in ("all", "deviation"):
+            iv = np.asarray(intervals[g], dtype=float)
+            en = np.asarray(eta_next[g], dtype=float)
+            out[f"cue_reuse_{g}_count"] = int(iv.size)
+            out[f"cue_reuse_{g}_without_reuse"] = int(without[g])
+            out[f"cue_reuse_{g}_interval_mean_s"] = float(np.mean(iv)) if iv.size else float("nan")
+            out[f"cue_reuse_{g}_interval_median_s"] = float(np.median(iv)) if iv.size else float("nan")
+            out[f"cue_reuse_{g}_eta_truth_at_reuse_mean"] = float(np.mean(en)) if en.size else float("nan")
+        return out
+
+    def _outcome_window_metrics(now_t):
+        """Decision 22: service outcomes and exposure per scored-run window.
+
+        Windows: [0, b1), [b1, b2), ..., [bk, T_end] from outcome_window_boundaries_s.
+        A reactive task belongs to the window of its creation time; its outcome
+        (on time / missed / completed / unfinished) is evaluated at run end.
+        Exposure is summed by event time.
+        """
+        if outcome_window_boundaries_s is None:
+            return {}
+        bounds = sorted(float(b) for b in outcome_window_boundaries_s)
+        edges = [0.0] + [b for b in bounds if 0.0 < b < float(T_end)] + [float(T_end)]
+        deadline_s = float(reactive_service_deadline_s)
+        t0 = float(warmup_s)
+        windows = []
+        for k in range(len(edges) - 1):
+            lo, hi = edges[k], edges[k + 1]
+            last = (k == len(edges) - 2)
+
+            def _in(rel, _lo=lo, _hi=hi, _last=last):
+                return _lo <= rel < _hi or (_last and rel == _hi)
+
+            keys = [key for key, tc in reactive_generated_distinct_keys.items() if _in(float(tc) - t0)]
+            completed = [key for key in keys if key in reactive_completed_keys]
+            on_time = [key for key in completed
+                       if float(reactive_completed_keys[key]) - float(reactive_generated_distinct_keys[key]) <= deadline_s]
+            n = len(keys)
+            exposure = float(sum(float(w) for (te, w) in exposure_event_log if _in(float(te) - t0)))
+            windows.append({
+                "start_s": lo, "end_s": hi,
+                "reactive_generated_distinct_total": int(n),
+                "reactive_completed_total": int(len(completed)),
+                "reactive_on_time_total": int(len(on_time)),
+                "reactive_missed_total": int(n - len(on_time)),
+                "reactive_miss_fraction": (float(n - len(on_time)) / float(n)) if n > 0 else float("nan"),
+                "reactive_unfinished_total": int(n - len(completed)),
+                "value_weighted_exposure": exposure,
+            })
+        out = {"outcome_windows": windows}
+        for k, w in enumerate(windows):
+            for key, val in w.items():
+                if key in ("start_s", "end_s"):
+                    continue
+                out[f"outcome_window{k}_{key}"] = val
+        return out
 
     def _stl_ranking_metrics(log_rows):
         """Summarize per-decision candidate rankings, masking and travel-recovery gaps.
@@ -7266,6 +7719,7 @@ def run_simulation_frames_persistent(
             reactive_completion_ages_s.append(
                 max(0.0, float(now_t) - _finite_task_metric(task_row, "time", float(now_t)))
             )
+            reactive_completed_keys[_task_buffer_key(task_row)] = float(now_t)
         else:
             predictive_completed_total += 1
             confidence = _finite_task_metric(task_row, "predictive_confidence", float("nan"))
@@ -7300,14 +7754,30 @@ def run_simulation_frames_persistent(
         # Proposal §2 "Historical suppression": read planner η BEFORE depletion
         # so the planner model is stamped with η-weighted suppression amplitude.
         planner_eta_at_apply = 1.0
+        planner_eta_metric = float("nan")
+        # Decision 17: the executing robot's own field (the shared field in "shared" mode).
+        own_planner_hab = _planner_hab_for_robot(rid)
         if bool(enable_habituation) and cell_id is not None and mode_idx is not None:
             eta_at_apply = truth_hab.effectiveness(cell_id, mode_idx)
+            planner_eta_metric = float(own_planner_hab.effectiveness(cell_id, mode_idx))
             if bool(stl_forecast_correction) or consistent_estimator:
                 # Consistent estimator: q_hat is always the planner effectiveness
                 # just before depletion, mirroring the truth's eta_at_apply.
-                planner_eta_at_apply = planner_hab.effectiveness(cell_id, mode_idx)
+                planner_eta_at_apply = own_planner_hab.effectiveness(cell_id, mode_idx)
             _apply_habituation_update(truth_hab, cell_id, mode_idx, truth_habituation_update_model)
             _apply_habituation_update(planner_hab, cell_id, mode_idx, planner_habituation_update_model)
+            if planner_hab_by_robot is not None:
+                planner_hab_by_robot.apply(rid, float(now_t), int(cell_id), int(mode_idx))
+                bus.relay_habituation(
+                    t=float(now_t), cell=int(cell_id), mode=int(mode_idx),
+                    action_id=task_row.get("id", -1), source_id=rid,
+                )
+        if cell_id is not None and mode_idx is not None:
+            # Decisions 14 and 15: effectiveness at application by stream, cue reuse.
+            cue_application_log.append((
+                float(now_t), int(cell_id), int(mode_idx), _application_stream(task_row),
+                float(eta_at_apply), float(planner_eta_metric),
+            ))
         if cell_id is not None:
             last_service_t_by_cell[int(cell_id)] = float(now_t)
             if mode_idx is not None:
@@ -7529,6 +7999,7 @@ def run_simulation_frames_persistent(
         # Burn in the ground-truth process to seed robot models before active tasking.
         t_w = 0.0
         while t_w < warmup_s:
+            bus.deliver_due(t_w)
             _prune_truth_deterrence_store(float(t_w) - float(dt))
             if truth_streams is not None:
                 # Coupled mode: same generator layout and offspring due-time rule
@@ -8188,6 +8659,17 @@ def run_simulation_frames_persistent(
                         stale_goal_clears += 1
 
         graph_reservations_snapshot = graph_reservations_step
+        # Decision 13: time in motion (the robot's pose changed this step) by the stream of
+        # the task its goal served (reactive, predictive incl. patrol, admitted deviation).
+        for rid_m, tr_m in current_task_by_robot.items():
+            p0 = step_pose_before.get(rid_m)
+            if p0 is None:
+                continue
+            if math.hypot(float(pose[rid_m][0]) - float(p0[0]), float(pose[rid_m][1]) - float(p0[1])) > 0.0:
+                bucket = motion_time_by_robot_stream.setdefault(
+                    str(rid_m), {"reactive": 0.0, "predictive": 0.0, "deviation": 0.0, "no_task": 0.0}
+                )
+                bucket[_application_stream(tr_m)] += float(dt)
         step_dispatched_stream_counts = {"reactive": 0, "predictive": 0}
         for rid, task_row in current_task_by_robot.items():
             if task_row is None:
@@ -8387,6 +8869,8 @@ def run_simulation_frames_persistent(
         final_step = (t + dt > t_end)
         if final_step:
             deterring_quality_cache = _compute_deterring_quality()
+            if save_final_hab_state_path:
+                _save_final_hab_state(str(save_final_hab_state_path), float(t))
         diag_counts = getattr(taskgen, "diag_counts", {})
         def _diag_source_counts(prefix):
             """Return diagnostic task counts by source stream."""
@@ -8529,7 +9013,7 @@ def run_simulation_frames_persistent(
         )
         last_risk_diag = dict(getattr(last_dispatch_structured, "risk_adjusted_diagnostics", {}) or {})
         stl_hab_metrics = _stl_and_habituation_metrics(t)
-        stl_hab_metrics.update(_service_and_mechanism_metrics())
+        stl_hab_metrics.update(_service_and_mechanism_metrics(t, final=bool(final_step)))
 
         metrics = {
             "dispatch_policy": str(dispatch_policy),

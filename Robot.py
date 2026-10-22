@@ -185,13 +185,22 @@ class Robot:
                 })
         return boundary_events
 
-    def ingest_boundary_event(self, x, y, t, weight, sigma=None, omega=None):
+    def ingest_boundary_event(self, x, y, t, weight, sigma=None, omega=None, *, delayed=False):
+        """Ingest a relayed detection.
+
+        ``delayed=True`` (EventBus neighbor_delay_s > 0) marks a message received
+        after its event time; the legacy model then stamps the mass the event
+        would hold now (the consistent model always stamps by event time).
+        """
         if self.estimator_mode == "consistent":
             self.m.advance_to(t)
             self.m.add_cross_event(x, y, weight=weight, t=t)
             return
         self.m.advance_time(t - self.m.t_now)
-        self.m.add_cross_event(x, y, weight=weight, sigma=sigma, omega=omega)
+        if delayed:
+            self.m.add_cross_event(x, y, weight=weight, sigma=sigma, omega=omega, t=float(t))
+        else:
+            self.m.add_cross_event(x, y, weight=weight, sigma=sigma, omega=omega)
 
     def ingest_intervention_event(
         self,
@@ -205,7 +214,9 @@ class Robot:
         mode=None,
         beta=None,
         action_id=None,
+        delayed=False,
     ):
+        """Ingest an intervention (own, or relayed; ``delayed`` as in ingest_boundary_event)."""
         if self.estimator_mode == "consistent":
             # weight is the full suppression amplitude q_hat * beta.
             self.m.advance_to(t)
@@ -215,7 +226,11 @@ class Robot:
             )
             return
         self.m.advance_time(t - self.m.t_now)
-        self.m.add_intervention_event(x, y, weight=weight, sigma=sigma, omega_inhib=omega_inhib, mode=mode)
+        if delayed:
+            self.m.add_intervention_event(x, y, weight=weight, sigma=sigma, omega_inhib=omega_inhib, mode=mode,
+                                          t=float(t))
+        else:
+            self.m.add_intervention_event(x, y, weight=weight, sigma=sigma, omega_inhib=omega_inhib, mode=mode)
 
     def intervention_boundary_events(
         self,

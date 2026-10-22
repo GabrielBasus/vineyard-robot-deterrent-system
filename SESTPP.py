@@ -189,12 +189,32 @@ class OnlineSESTPP:
         self.mu[iy, ix] = max(1e-6, (1 - self.bg_ema) * self.mu[iy, ix] + self.bg_ema * self.lam[iy, ix])
         self._update_lambda()
 
-    def add_cross_event(self, x, y, weight=0.35, sigma=None, omega=None):
-        """Stamp cross-excitation into `trigger_mass` and refresh intensity."""
-        self._stamp_to(self.trigger_mass, x, y, self.alpha_cross * float(weight), sigma=sigma)
+    def _legacy_late_decay(self, t_event: Optional[float], omega: float) -> float:
+        """Decay for an event stamped after its own time (delayed relay only).
+
+        ``t_event=None`` (every historical call) returns exactly 1.0. A delayed
+        relayed event (EventBus neighbor_delay_s > 0) is stamped with the mass it
+        would hold now had it arrived on time: amplitude * exp(-(t_now - t)/omega).
+        """
+        if t_event is None:
+            return 1.0
+        lag = float(self.t_now) - float(t_event)
+        return math.exp(-lag / max(float(omega), 1e-9)) if lag > 0.0 else 1.0
+
+    def add_cross_event(self, x, y, weight=0.35, sigma=None, omega=None, t: Optional[float] = None):
+        """Stamp cross-excitation into `trigger_mass` and refresh intensity.
+
+        ``t`` is passed only for delayed relays (see ``_legacy_late_decay``);
+        the trigger mass decays with the model's own ``omega``.
+        """
+        amp = self.alpha_cross * float(weight)
+        if t is not None:
+            amp *= self._legacy_late_decay(t, self.omega)
+        self._stamp_to(self.trigger_mass, x, y, amp, sigma=sigma)
         self._update_lambda()
 
-    def add_intervention_event(self, x, y, weight=1.0, sigma=None, omega_inhib=None, *, mode=None):
+    def add_intervention_event(self, x, y, weight=1.0, sigma=None, omega_inhib=None, *, mode=None,
+                               t: Optional[float] = None):
         """Stamp an intervention into the persistent inhibition channel for `mode`.
 
         `weight` remains the backward-compatible amplitude multiplier and is the
@@ -205,9 +225,14 @@ class OnlineSESTPP:
         channel. `mode=None` routes callers to the default compatibility
         channel.
         """
-        _, inhib_grid = self._ensure_inhib_channel(mode, omega_inhib=omega_inhib)
+        mode_key, inhib_grid = self._ensure_inhib_channel(mode, omega_inhib=omega_inhib)
         sigma_val = self.sigma if sigma is None else float(sigma)
-        self._stamp_to(inhib_grid, x, y, self.alpha_inhib * float(weight), sigma=sigma_val)
+        amp = self.alpha_inhib * float(weight)
+        if t is not None:
+            amp *= self._legacy_late_decay(
+                t, self.inhib_channel_omegas.get(mode_key, self.omega_inhib)
+            )
+        self._stamp_to(inhib_grid, x, y, amp, sigma=sigma_val)
         self._update_lambda()
 
     def forecast_state(self):
