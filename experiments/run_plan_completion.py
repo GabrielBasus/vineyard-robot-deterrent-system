@@ -175,7 +175,10 @@ _PLAN = {"planner_procedure": "plan", "reservation_fraction": 0.25, "reservation
          "plan_compute_budget_s": 1e9,
          # Gate (user decision 2026-10-18): eps_gate = 0 with Monte Carlo significance,
          # admit only if the mean paired U exceeds 2 standard errors over scenarios.
-         "plan_eps_gate": 0.0, "plan_gate_se_multiplier": 2.0}
+         "plan_eps_gate": 0.0, "plan_gate_se_multiplier": 2.0,
+         # Section 6 decision 12: oracle of all round-0 candidates on the oracle-sampled
+         # decisions (Kendall tau planner U vs oracle U)
+         "plan_oracle_all_candidates": True}
 # name -> (ladder variant the system is built on, overrides)
 PLAN_VARIANTS: dict[str, tuple[str, dict]] = {
     "B1_c": ("B1", dict(PLAN_ENV)),
@@ -185,6 +188,10 @@ PLAN_VARIANTS: dict[str, tuple[str, dict]] = {
     # E_plan + timed recovery (Plan Eq. 4): plan_E_high, plan_E_low and plan_T_response_s
     # must be supplied through --extra (no defaults are assumed).
     "E_plan_tr": ("B5", {**PLAN_ENV, **_PLAN, "plan_service_protection": True}),
+    # Section 6 decision 8: bridge variant, E_plan with the one-intervention Eq. 3 valuation
+    "C_plan": ("B5", {**PLAN_ENV, **_PLAN, "plan_service_protection": True, "plan_valuation": "one_intervention"}),
+    # Section 6 decision 26: E_plan with an effectiveness floor of 0.4 at application
+    "E_plan_floor": ("B5", {**PLAN_ENV, **_PLAN, "plan_service_protection": True, "plan_eta_floor": 0.4}),
 }
 PLAN_TR_KEYS = ("plan_E_high", "plan_E_low", "plan_T_response_s")
 

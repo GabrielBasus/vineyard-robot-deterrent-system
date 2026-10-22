@@ -2640,6 +2640,11 @@ def run_simulation_frames_persistent(
     plan_exposure_log_path=None,    # calibration: per-step forecast cell exposure JSONL
     plan_seed=None,                 # decision-seed root; None = seed
     plan_engine=None,               # test hook: object with evaluate(...) replacing the rollout engine
+    plan_valuation="continuation",  # "continuation" (D/E) | "one_intervention" (C_plan, Section 6 decision 8)
+    plan_eta_floor=None,            # reject candidates with planner q_hat at application below this (decision 26)
+    plan_obligation_relaxation="bounded_violation",  # Eq. 4 relaxation (decision 28); "drop" = earlier rule
+    plan_oracle_scenarios=64,       # oracle scenarios, independent seed stream (decision 31)
+    plan_info_provider=None,        # decision 17 integration point: callable(L, snapshot) -> snapshot
     report_metrics_end=True,
     emit_rejected_model_det_debug=False,
     emit_planning_diagnostics=False,
@@ -8142,8 +8147,13 @@ def run_simulation_frames_persistent(
                 oracle_all_candidates=bool(plan_oracle_all_candidates),
                 exposure_log_path=plan_exposure_log_path,
                 seed=int(seed if plan_seed is None else plan_seed) if (seed is not None or plan_seed is not None) else 0,
+                valuation=str(plan_valuation),
+                eta_floor=(None if plan_eta_floor is None else float(plan_eta_floor)),
+                obligation_relaxation=str(plan_obligation_relaxation),
+                oracle_scenarios=int(plan_oracle_scenarios),
             ),
             engine=plan_engine,
+            info_provider=plan_info_provider,
         )
 
     def _task_intensity_score(tr):
@@ -9550,7 +9560,8 @@ def run_simulation_frames_persistent(
         }
         if plan_proc is not None:
             if final_step and plan_proc.summary is None:
-                plan_proc.finalize(exposure_event_log=list(exposure_event_log), t_end=float(t_end))
+                plan_proc.finalize(exposure_event_log=list(exposure_event_log), t_end=float(t_end),
+                                   completed_tasks=completed_tasks, active_tasks=active_tasks)
             _plan_metrics = dict(plan_proc.summary) if plan_proc.summary is not None else {}
             _plan_metrics["planner_procedure"] = "plan"
             metrics.update(_plan_metrics)
