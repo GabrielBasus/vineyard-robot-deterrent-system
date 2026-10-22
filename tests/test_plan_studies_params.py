@@ -75,9 +75,10 @@ def test_variants_B_C_Cgate_chain():
                            "stl_queue_aware_lead", "stl_forecast_planner_update_model", "stl_shadow_overrides"}
     assert c["stl_valuation_mode"] == "integrated_exposure_eq3"
     assert _diff(b, c) == {"stl_valuation_mode", "stl_shadow_overrides"}
-    assert _diff(c, g) == {"stl_strict_admission", "stl_benefit_gate", "reservation_mode"}
-    assert g["stl_strict_admission"] is True and g["stl_benefit_gate"] == 0.0 and g["reservation_mode"] == "ceiling"
-    assert g["dispatch_policy"] == "res"  # the ceiling is defined for res only
+    # no ceiling anywhere (audit round 2026-10-22): C_gate differs from C by the gate only
+    assert _diff(c, g) == {"stl_strict_admission", "stl_benefit_gate"}
+    assert g["stl_strict_admission"] is True and g["stl_benefit_gate"] == 0.0
+    assert "ceiling" not in json.dumps(g)
 
 
 def test_plan_variants():
@@ -119,6 +120,7 @@ def test_legacy_variants_are_pure_ladder():
 def test_comparisons_cover_the_progression_and_are_matched():
     pairs = {(r, t) for r, t, _ in rpc.COMPARISONS}
     assert pairs == {("A", "B"), ("B", "C"), ("C", "C_gate"), ("C_plan", "D_plan"), ("C_gate", "C_plan"),
+                     ("C", "D_plan"),
                      ("D_plan", "E_plan"), ("B5_c", "E_plan"), ("E_plan", "E_plan_tr"), ("E_plan", "E_plan_floor"),
                      ("B1_c", "B5_c"), ("B5_c", "A")}
     for r, t in pairs:
@@ -245,7 +247,7 @@ def test_study_sizes_and_matched_seeds(jobs_by_study):
         "zero_hab": (3, 3, list(range(300, 310))),
         "mismatch": (4, 2, list(range(300, 310))),   # kappa 0.50 cell reuses confirmatory/heavy
         "timed_recovery": (3, 1, list(range(300, 310))),
-        "neighbor": (6, 2, list(range(300, 310))),
+        "neighbor": (7, 2, list(range(300, 310))),   # 6 delay/drop cells + per_robot reference
         "timeout": (2, 1, list(range(200, 210))),
         "disturbance": (2, 2, list(range(300, 310))),
         "floor": (3, 1, list(range(300, 310))),
@@ -271,7 +273,7 @@ def test_mismatch_and_neighbor_params(jobs_by_study):
     assert {j["params"]["planner_habituation_kappa"] for j in jobs["mismatch"]} == {0.50}
     assert {j["params"]["mu_true"] for j in jobs["mismatch"] + jobs["neighbor"]} == {1e-4}
     combos = {(j["params"]["neighbor_delay_s"], j["params"]["neighbor_drop_prob"]) for j in jobs["neighbor"]}
-    assert combos == {(30.0, 0.0), (120.0, 0.0), (300.0, 0.0), (0.0, 0.1), (0.0, 0.3), (0.0, 0.5)}
+    assert combos == {(0.0, 0.0), (30.0, 0.0), (120.0, 0.0), (300.0, 0.0), (0.0, 0.1), (0.0, 0.3), (0.0, 0.5)}
     assert {j["params"]["planner_hab_mode"] for j in jobs["neighbor"]} == {"per_robot"}
 
 
@@ -521,3 +523,382 @@ def test_table_i_and_iv_archive_match_paper():
             paper = rep.PAPER_B4_B5[cell]
             assert round(pct, 1) == paper[0]
             assert f"{int(np.sum(d < 0))}/{d.size}" == paper[2]
+
+
+# ======================================================================== 2026-10-22 audit round
+def test_no_ceiling_reservation_floor_everywhere():
+    import inspect
+    import DeterrentSystem as ds
+    sig = inspect.signature(ds.run_simulation_frames_persistent)
+    assert sig.parameters["reservation_mode"].default == "floor"   # B4 variants inherit the floor
+    for v in rpc.VARIANTS:
+        p = rpc.build_params(v, True, MU, None)
+        assert p.get("reservation_mode", "floor") == "floor", v
+        assert "ceiling" not in json.dumps(p), v
+    for v in ("A", "B", "C", "C_gate"):
+        p = rpc.build_params(v, True, MU, None)
+        assert p["dispatch_policy"] == "res" and p["reservation_fraction"] == 0.25
+        assert p["reservation_window_s"] == 600.0
+    for v in ("C_plan", "D_plan", "E_plan", "E_plan_tr", "E_plan_floor"):
+        p = rpc.build_params(v, True, MU, None)
+        assert (p["reservation_mode"], p["reservation_fraction"], p["reservation_window_s"]) == ("floor", 0.25, 600.0)
+    assert rpc.RESERVATION_FLOOR == {"reservation_mode": "floor", "reservation_fraction": 0.25,
+                                     "reservation_window_s": 600.0}
+
+
+def test_c_plan_final_params_and_no_stale_todo():
+    cp = rpc.build_params("C_plan", True, MU, None)
+    ladder = rpc._ladder_params(rpc.LADDER_SYSTEMS["B5"], True, MU)
+    want = {**ladder, **rpc.PLAN_ENV, **rpc._PLAN, "plan_service_protection": False,
+            "plan_valuation": "one_intervention", "mu_true": MU}
+    assert _diff(want, cp) == set()
+    src = Path(rpc.__file__).read_text(encoding="utf-8")
+    assert "TODO(FU-1)" not in src
+
+
+def test_variant_A_dual_shadow():
+    a = rpc.build_params("A", True, MU, None)
+    assert a["stl_shadow_overrides"] == {"forecast_correction": True}     # forecast-only shadow kept
+    assert rpc.SHADOW_B_FULL_SECTION2 == rpc._SECTION2                    # full-set shadow content
+    assert set(rpc.SHADOW_B_FULL_SECTION2) == {
+        "stl_forecast_correction", "stl_forward_trajectory_correction", "stl_committed_schedule",
+        "stl_queue_aware_lead", "stl_forecast_planner_update_model"}
+    assert all(v is True for v in rpc.SHADOW_B_FULL_SECTION2.values())
+    for kind in ("full", "forecast"):
+        for m in ("top1_agree_fraction", "kendall_tau_mean", "masked_group_fraction"):
+            assert f"stl_shadow_{kind}_{m}" in rpc.REPORT_METRICS
+
+
+def test_report_metrics_audit_round():
+    from habituation_stl import plan_procedure as pp
+    for m in ("stl_travel_recovery_gap_mean", "stl_travel_recovery_gap_p90", "stl_travel_recovery_gap_max",
+              "stl_travel_recovery_gap_rel_mean", "plan_exact_u_tie_count"):
+        assert m in rpc.REPORT_METRICS, m
+    reasons = {m[len("plan_rejected_"):] for m in rpc.PLAN_REJECTION_METRICS}
+    assert reasons <= set(pp.REJECTION_REASONS) and "ceiling" not in reasons
+    assert {"infeasible_service", "infeasible_late", "gate", "floor", "infeasible_obligation",
+            "obligation_exceedance", "timeout"} <= reasons
+    assert rpc.PROP2_PRIMARY_METRICS[:2] == ["plan_oracle_U_sign_agree_fraction", "plan_oracle_kendall_tau_mean"]
+    assert "plan_oracle_admitted_U_oracle_positive_fraction" in rpc.PROP2_PRIMARY_METRICS
+    for m in rpc.PROP2_PRIMARY_METRICS:
+        assert rpc.metric_group(m).startswith("Prop. 2 PRIMARY")
+    for m in rpc.PROP2_SECONDARY_METRICS:
+        assert rpc.metric_group(m).startswith("Prop. 2 secondary")
+    assert len(set(rpc.REPORT_METRICS)) == len(rpc.REPORT_METRICS)
+
+
+def test_expand_metrics_raw_units_and_per_robot():
+    rows = [{"plan_pred_err_U_mean_abs_raw_units": 1.0, "plan_pr_realized_minus_pred_mean_r0": 2.0, "x": 1}]
+    base = ["value_weighted_exposure"]
+    assert rpc.expand_metrics(base, rows) == base + ["plan_pred_err_U_mean_abs_raw_units"]
+    pr = rpc.expand_metrics(base, rows, per_robot=True)
+    assert "plan_pr_realized_minus_pred_mean_r0" in pr and all(m in pr for m in rpc.PER_ROBOT_METRICS)
+    assert rpc.metric_group("plan_pred_err_U_mean_abs_raw_units").startswith("Prop. 2 secondary")
+    assert rpc.metric_group("plan_pr_realized_minus_pred_mean_r0") == "Prop. 2 per robot"
+
+
+def _rows(variants, seeds, **vals):
+    out = []
+    for v in variants:
+        for s in seeds:
+            r = {"variant": v, "habituation_condition": "hab_on", "seed": s,
+                 "value_weighted_exposure": 100.0 + s + (0 if v == "B5_c" else -10),
+                 "reactive_miss_fraction": 0.30 + (0 if v == "B5_c" else 0.01)}
+            r.update({k: f(v, s) for k, f in vals.items()})
+            out.append(r)
+    return out
+
+
+def test_paired_detail_reports_dropped_seeds_and_reasons():
+    rows = _rows(["B5_c"], [1, 2, 3]) + _rows(["E_plan"], [2, 3, 4])
+    rows[2]["m"] = float("nan")
+    for r in rows:
+        r.setdefault("m", 1.0)
+    d = rpc.paired_detail(rows, "B5_c", "E_plan", "m", expected_seeds=[1, 2, 3, 4, 5])
+    assert d["seeds"] == [2]
+    assert d["dropped"] == [{"seed": 1, "reason": "no E_plan run"},
+                            {"seed": 3, "reason": "B5_c value not finite"},
+                            {"seed": 4, "reason": "no B5_c run"},
+                            {"seed": 5, "reason": "no B5_c run; no E_plan run"}]
+
+
+def test_analyze_errors_on_missing_seeds_by_default():
+    comps = [("B5_c", "E_plan", "E vs B5")]
+    rows = _rows(["B5_c"], [1, 2, 3]) + _rows(["E_plan"], [1, 2])
+    with pytest.raises(rpc.MissingSeedsError, match="E_plan"):
+        rpc.analyze(rows, None, "hab_on", comps, ["value_weighted_exposure"], expected_seeds=[1, 2, 3])
+    st = rpc.analyze(rows, None, "hab_on", comps, ["value_weighted_exposure"], expected_seeds=[1, 2, 3],
+                     allow_missing=True)
+    assert st[0]["n"] == 2 and st[0]["dropped_seeds"] == "3: no E_plan run" and st[0]["n_dropped"] == 1
+    # a non-finite PRIMARY value is an error; a non-finite secondary value is listed only
+    rows = _rows(["B5_c", "E_plan"], [1, 2, 3], eta=lambda v, s: float("nan") if s == 2 else 0.5)
+    st = rpc.analyze(rows, None, "hab_on", comps, ["eta"], expected_seeds=[1, 2, 3])
+    assert st[0]["dropped_seeds"] == "2: B5_c value not finite; E_plan value not finite"
+    rows[0]["reactive_miss_fraction"] = float("nan")
+    with pytest.raises(rpc.MissingSeedsError, match="reactive_miss_fraction"):
+        rpc.analyze(rows, None, "hab_on", comps, ["reactive_miss_fraction"], expected_seeds=[1, 2, 3])
+
+
+def test_analyze_refuses_mixed_commits():
+    comps = [("B5_c", "E_plan", "E vs B5")]
+    rows = _rows(["B5_c", "E_plan"], [1, 2])
+    for r in rows:
+        r.update({"git_commit": "aaa", "git_dirty": False, "git_diff_sha1": ""})
+    rpc.analyze(rows, None, "hab_on", comps, ["value_weighted_exposure"], expected_seeds=[1, 2])
+    rows[-1]["git_commit"] = "bbb"
+    with pytest.raises(rpc.MixedCommitsError):
+        rpc.analyze(rows, None, "hab_on", comps, ["value_weighted_exposure"], expected_seeds=[1, 2])
+    assert rpc.analyze(rows, None, "hab_on", comps, ["value_weighted_exposure"], expected_seeds=[1, 2],
+                       allow_mixed=True)
+    rows[-1].update({"git_commit": "aaa", "git_dirty": True, "git_diff_sha1": "f" * 40})
+    assert rpc.code_key(rows[-1]) != rpc.code_key(rows[0])   # uncommitted changes count as other code
+    with pytest.raises(rpc.MixedCommitsError):
+        rpc.check_commits(rows)
+
+
+def test_run_job_records_code_version(monkeypatch):
+    import DeterrentSystem as ds
+    monkeypatch.setattr(ds, "run_simulation_frames_persistent",
+                        lambda **p: iter([{"metrics_compact": {"value_weighted_exposure": 1.0}}]))
+    row = rpc.run_job({"system": "B5_c_hab_on", "variant": "B5_c", "habituation_condition": "hab_on",
+                       "seed": 300, "params": rpc.build_params("B5_c", True, MU, 60.0)})
+    v = rpc.code_version()
+    assert row["git_commit"] == v["git_commit"] and len(v["git_commit"]) == 40
+    assert row["git_dirty"] == v["git_dirty"] and row["git_diff_sha1"] == v["git_diff_sha1"]
+
+
+class _FailProc:
+    def __init__(self, job, fail_first):
+        self.job, self.fail_first, self.polls, self.returncode = job, fail_first, 0, None
+
+    def poll(self):
+        self.polls += 1
+        if self.polls < 2:
+            return None
+        if self.fail_first:
+            self.returncode = 3
+        else:
+            Path(self.job["raw_json"]).write_text("{}")
+            self.returncode = 0
+        return self.returncode
+
+
+def test_scheduler_retries_and_writes_failure_report(tmp_path, monkeypatch):
+    launches = []
+
+    def fake_launch(job):
+        n = sum(1 for j in launches if j == job["system"])
+        launches.append(job["system"])
+        fail = job["system"] == "always" or (job["system"] == "flaky" and n == 0)
+        log = Path(job["raw_json"]).with_suffix(".log")
+        log.write_text(f"Traceback\nRuntimeError: boom {job['system']} attempt {n + 1}\n")
+        return _FailProc(job, fail), open(tmp_path / f"h{len(launches)}.txt", "w"), str(tmp_path / "x.pkl")
+
+    monkeypatch.setattr(rpc, "_launch", fake_launch)
+    monkeypatch.setattr(rpc, "wait_for_memory", lambda *a, **k: 20.0)
+    monkeypatch.setattr(rpc, "free_memory_gb", lambda: 20.0)
+    monkeypatch.setattr(rpc.time, "sleep", lambda s: None)
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    jobs = [{"system": s, "seed": 1, "params": {}, "raw_json": str(raw / f"{s}.json")} for s in ("flaky", "always")]
+    res = rpc.execute_jobs(jobs, max_workers=1, plan_concurrency=1, plan_stagger_s=0.0, retries=2)
+    assert launches.count("flaky") == 2 and launches.count("always") == 3
+    assert [f["system"] for f in res["failed"]] == ["always"] and res["failed"][0]["final"] is True
+    recs = [json.loads(x) for x in (raw / "failures.jsonl").read_text().splitlines()]
+    assert [(r["system"], r["attempt"]) for r in recs] == [("flaky", 1), ("always", 1), ("always", 2), ("always", 3)]
+    assert "RuntimeError: boom always attempt 3" in recs[-1]["error_tail"]
+    assert (raw / "flaky.attempt1.log").exists() and (raw / "failures.md").exists()
+
+
+def test_analyze_did_difference_of_differences():
+    rows = []
+    for s in (1, 2, 3):
+        for v, m in (("B5_c", 10.0), ("E_plan", 8.0 + s), ("B5_c@ref", 10.0), ("E_plan@ref", 7.0)):
+            rows.append({"variant": v, "habituation_condition": "hab_on", "seed": s, "m": m})
+    st = rpc.analyze_did(rows, ("B5_c", "E_plan"), ("B5_c@ref", "E_plan@ref"), "did", metrics=["m"],
+                         expected_seeds=[1, 2, 3])
+    assert len(st) == 1 and st[0]["n"] == 3
+    assert math.isclose(st[0]["mean_diff"], np.mean([(8.0 + s - 10.0) - (7.0 - 10.0) for s in (1, 2, 3)]))
+    assert st[0]["dropped_seeds"] == ""
+
+
+def test_tradeoff_points_and_outputs(tmp_path):
+    rows = _rows(["B5_c", "E_plan", "D_plan"], list(range(300, 310)))
+    pts = rpc.tradeoff(rows, "hab_on", expected_seeds=list(range(300, 310)))
+    assert [p["variant"] for p in pts] == ["D_plan", "E_plan"]
+    b5 = np.mean([100.0 + s for s in range(300, 310)])
+    for p in pts:
+        assert math.isclose(p["exposure_pct_of_ref"], 100.0 - 1000.0 / b5)
+        assert math.isclose(p["miss_diff_pp"], 1.0)
+        assert p["exposure_pct_ci_lo"] <= p["exposure_pct_of_ref"] <= p["exposure_pct_ci_hi"]
+    flat = rpc.write_tradeoff({"heavy": pts}, tmp_path, "tradeoff", "test")
+    assert len(flat) == 2 and (tmp_path / "tradeoff.csv").exists() and (tmp_path / "tradeoff.md").exists()
+    pytest.importorskip("matplotlib")
+    assert (tmp_path / "tradeoff.png").stat().st_size > 0
+
+
+def test_neighbor_reference_cell_and_comparisons(jobs_by_study):
+    root, jobs = jobs_by_study
+    st = rps.STUDIES["neighbor"](_Args(root))
+    assert st.per_robot_metrics is True
+    ref = next(c for c in st.cells if c.name == rps.NEIGHBOR_REFERENCE_CELL)
+    assert ref.variants == ["B5_c", "E_plan"] and ref.seeds == list(range(300, 310)) and ref.mu == rpc.LOADS["heavy"]
+    assert ref.extra == {"planner_hab_mode": "per_robot", "neighbor_delay_s": 0.0, "neighbor_drop_prob": 0.0}
+    others = [c for c in st.cells if c is not ref]
+    assert len(others) == 6
+    for c in others:
+        assert sorted(c.reuse) == [("neighbor/per_robot_reference", "B5_c", "B5_c@ref"),
+                                   ("neighbor/per_robot_reference", "E_plan", "E_plan@ref")]
+        pairs = {(r, t) for r, t, _ in c.comparisons}
+        assert pairs == {("B5_c", "E_plan"), ("E_plan@ref", "E_plan"), ("B5_c@ref", "B5_c")}
+        assert [(d[0], d[1]) for d in c.did] == [(("B5_c", "E_plan"), ("B5_c@ref", "E_plan@ref"))]
+    # the reference differs from every delay/drop cell only in the delay/drop parameters
+    by = {(j["cell"], j["variant"], j["seed"]): j["params"] for j in jobs["neighbor"]}
+    for (cell, v, s), p in by.items():
+        if cell != rps.NEIGHBOR_REFERENCE_CELL:
+            assert _diff(by[(rps.NEIGHBOR_REFERENCE_CELL, v, s)], p) <= {"neighbor_delay_s", "neighbor_drop_prob"}
+    assert sum(1 for j in jobs["neighbor"] if rpc.is_plan_job(j["params"])) == 70   # +10 plan runs
+
+
+def test_neighbor_analysis_end_to_end_with_per_robot_metrics(tmp_path):
+    st = rps.STUDIES["neighbor"](_Args(tmp_path))
+    st.cells = st.cells[:2]   # reference + delay_30s
+    for c in st.cells:
+        raw = tmp_path / "neighbor" / c.name / "raw"
+        raw.mkdir(parents=True)
+        for s in c.seeds:
+            for v in c.variants:
+                r = {"variant": v, "habituation_condition": "hab_on", "seed": s,
+                     "value_weighted_exposure": 100.0 + s + (5.0 if c.name != st.cells[0].name else 0.0),
+                     "reactive_miss_fraction": 0.3}
+                if v == "E_plan":
+                    r.update({"plan_pr_realized_minus_pred_mean": 1.0, "plan_pr_realized_minus_pred_mean_0": 2.0})
+                (raw / f"{v}_hab_on_seed_{s}.json").write_text(json.dumps(r))
+    stats = rps.analyze_study(st, tmp_path)
+    cells = {s["cell"] for s in stats}
+    assert cells == {rps.NEIGHBOR_REFERENCE_CELL, "delay_30s"}
+    d = [s for s in stats if s["cell"] == "delay_30s"]
+    assert any(s["comparison"].startswith("(E_plan - B5_c) in cell") for s in d)
+    e = next(s for s in d if s["reference"] == "E_plan@ref" and s["metric"] == "value_weighted_exposure")
+    assert math.isclose(e["mean_diff"], 5.0)
+    assert any(s["metric"] == "plan_pr_realized_minus_pred_mean_0" for s in stats)
+    assert (tmp_path / "neighbor" / "tradeoff.csv").exists()
+    # a missing seed in the reference makes the analysis fail by default
+    (tmp_path / "neighbor" / rps.NEIGHBOR_REFERENCE_CELL / "raw" / "E_plan_hab_on_seed_305.json").unlink()
+    with pytest.raises(rpc.MissingSeedsError):
+        rps.analyze_study(st, tmp_path)
+    rps.analyze_study(st, tmp_path, allow_missing=True)
+    assert "305: no E_plan" in (tmp_path / "neighbor" / "analysis.md").read_text()
+
+
+def test_timeout_study_isolated_and_last(jobs_by_study):
+    _, jobs = jobs_by_study
+    assert all(j["isolated"] and j["stage"] == rps.ISOLATED_STAGE for j in jobs["timeout"])
+    assert not any(j["isolated"] for n, js in jobs.items() if n != "timeout" for j in js)
+    allj = rps.order_jobs([j for js in jobs.values() for j in js], rps.DEFAULT_ORDER)
+    sched = rps.schedule(allj)
+    assert sched[-1][2] is True and {j["study"] for j in sched[-1][1]} == {"timeout"}
+    assert sched[0][0] == rps.TRACE_STAGE
+    assert all(not iso for _, _, iso in sched[:-1])
+
+
+def test_run_scheduled_isolation_one_run_at_a_time(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(rpc, "execute_jobs", lambda jobs, **kw: calls.append((sorted({j["study"] for j in jobs}), kw))
+                        or {"done": len(jobs), "failed": []})
+    exported = []
+    monkeypatch.setattr(rps, "export_traces", lambda root: exported.append(root) or {})
+
+    class A:
+        max_workers, plan_concurrency, plan_stagger_s, min_free_gb, poll_s, overlap, retries = 2, 2, 300.0, 12.0, 300.0, True, 1
+    args = _Args(tmp_path)
+    jobs = rps.order_jobs([j for n in ("traces", "timeout", "floor") for j in rps.collect_jobs(rps.STUDIES[n](args), tmp_path)],
+                          rps.DEFAULT_ORDER)
+    rps.run_scheduled(jobs, A, tmp_path)
+    assert [c[0] for c in calls] == [["traces"], ["floor"], ["timeout"]]
+    iso = calls[-1][1]
+    assert iso["max_workers"] == 1 and iso["plan_concurrency"] == 1 and iso["overlap"] is False
+    assert calls[1][1]["overlap"] is True and calls[1][1]["plan_concurrency"] == 2
+    assert exported == [tmp_path]   # traces exported right after the trace stage
+
+
+def test_trace_study_definition(jobs_by_study):
+    _, jobs = jobs_by_study
+    js = jobs["traces"]
+    assert {(j["variant"], j["seed"], j["params"]["mu_true"]) for j in js} == {
+        ("A", 200, 1e-4), ("B", 200, 1e-4), ("E_plan", 200, 1e-4)}
+    assert all(j["stage"] == rps.TRACE_STAGE for j in js) and rps.DEFAULT_ORDER[0] == "traces"
+    for j in js:
+        if j["variant"] in ("A", "B"):
+            assert j["params"]["stl_binding_log_fraction"] == 1.0
+            assert j["params"]["stl_binding_log_path"].endswith("_seed_200_binding.jsonl")
+        else:
+            assert rpc.is_plan_job(j["params"]) and j["decision_log"].endswith("_seed_200_decisions.jsonl")
+    # the E_plan trace run has the evaluation parameters of E_plan (only the seed differs)
+    assert _diff(rpc.build_params("E_plan", True, 1e-4, None), [j for j in js if j["variant"] == "E_plan"][0]["params"]) == set()
+
+
+def test_export_traces_on_logs(tmp_path):
+    raw = rps.cell_dir(tmp_path, "traces", rps.TRACE_CELL) / "raw"
+    raw.mkdir(parents=True)
+    rec = {"decision": 0, "t": 45.0, "n_candidates": 1, "n_evaluated": 1, "rounds": [{"round": 0, "J0_mean": 5.0}],
+           "admitted": [{"robot": "r0", "mode": "laser", "U_mean": 1.0, "U_se": 0.1}], "timed_out": False,
+           "candidates": [{"robot": "r0", "mode": "laser", "status": "admitted",
+                           "rounds": [{"round": 0, "U_mean": 1.0, "U_se": 0.1}]}]}
+    (raw / "E_plan_hab_on_seed_200_decisions.jsonl").write_text(json.dumps(rec) + "\n")
+    b = [{"t": 45.0, "robot": "r0", "mode": "laser", "U": 0.1}, {"t": 45.0, "robot": "r0", "mode": "horn", "U": 0.2}]
+    (raw / "A_hab_on_seed_200_binding.jsonl").write_text("\n".join(json.dumps(x) for x in b) + "\n")
+    res = rps.export_traces(tmp_path)
+    assert res["plan_rows"] == 1 and res["binding_rows"] == 2
+    assert (tmp_path / "traces" / "candidate_traces" / "plan_traces.md").exists()
+
+
+def test_persistent_old_design_refuses_to_run():
+    from experiments import run_persistent_operation as rpo
+    with pytest.raises(SystemExit, match="run_plan_studies --study persistent"):
+        rpo.main()
+
+
+def test_persistent_depleted_start_has_planner_fresh_placeholder(jobs_by_study):
+    _, jobs = jobs_by_study
+    dep = [j for j in jobs["persistent"] if j["cell"].startswith("depleted")]
+    for k in rps.TODO_SIM_PLANNER_FRESH:
+        assert all(k in j["params"] for j in dep)
+
+
+def test_compute_estimate(tmp_path):
+    args = _Args(tmp_path)
+    studies = [rps.STUDIES[n](args) for n in ("traces", "neighbor", "timeout")]
+    rates = {("plan", "heavy"): 1.0, ("ordinary", "heavy"): 0.1}
+    est = rps.compute_estimate(studies, tmp_path, rates, plan_concurrency=2, max_workers=2)
+    assert est["runs"]["neighbor/plan/heavy"] == 70 and est["runs"]["neighbor/ordinary/heavy"] == 70
+    assert est["runs"]["timeout/plan/heavy"] == 20 and est["runs"]["traces/plan/heavy"] == 1
+    w = est["priced_wall_hours_by_stage"]
+    assert math.isclose(w["isolated"], 20.0)            # isolated: full wall time, one at a time
+    assert math.isclose(w["stage1"], 35.0)              # 70 plan h / 2 slots > 7 ordinary h / 2
+    assert math.isclose(w["stage-1"], 1.0)              # never shorter than its longest run
+    est2 = rps.compute_estimate([rps.STUDIES["floor"](args)], tmp_path, rates)
+    assert est2["unpriced_run_units_1800s"] == {"plan/spare": 10.0, "plan/overload": 10.0}
+
+
+def test_confirmatory_family_errors_on_missing_seed(tmp_path):
+    dirs = {}
+    for load in ("spare", "heavy", "overload"):
+        raw = tmp_path / load / "raw"
+        raw.mkdir(parents=True)
+        for s in range(300, 330):
+            for v in ("B5_c", "E_plan"):
+                if load == "heavy" and v == "E_plan" and s == 317:
+                    continue
+                (raw / f"{v}_hab_on_seed_{s}.json").write_text(json.dumps(
+                    {"variant": v, "habituation_condition": "hab_on", "seed": s,
+                     "value_weighted_exposure": 1000.0 - (10 if v == "E_plan" else 0) + s % 7,
+                     "reactive_miss_fraction": 0.3}))
+        dirs[load] = tmp_path / load
+    with pytest.raises(rpc.MissingSeedsError, match="317"):
+        apc.run_family(treatment="E_plan", reference="B5_c", dirs=dirs, expected_n=30, out=tmp_path / "out")
+    tests = apc.run_family(treatment="E_plan", reference="B5_c", dirs=dirs, expected_n=30, out=tmp_path / "out",
+                           allow_missing=True)
+    heavy = [t for t in tests if t["load"] == "heavy"]
+    assert all(t["n"] == 29 and t["dropped_reasons"] == "317: no E_plan run" for t in heavy)
+    assert "317: no E_plan run" in (tmp_path / "out" / "confirmatory_tests.md").read_text()

@@ -20,9 +20,23 @@ Studies (all variants in PLAN_ENV; loads spare 2e-5, heavy 1e-4, overload 4e-4):
                 it reuses confirmatory/heavy seeds 300-309 (identical effective parameters;
                 user decision 2026-10-22).
   neighbor      heavy, planner_hab_mode per_robot, D in {30, 120, 300} s with p = 0 and
-                p in {0.1, 0.3, 0.5} with D = 0, B5_c and E_plan, seeds 300-309 (decision 18).
+                p in {0.1, 0.3, 0.5} with D = 0, B5_c and E_plan, seeds 300-309 (decision 18),
+                plus a per_robot REFERENCE cell with D = 0, p = 0 (user decision 2026-10-22).
+                Every delay/drop cell is compared with the reference: E_plan vs E_plan@ref,
+                B5_c vs B5_c@ref, and the difference of differences
+                (E_plan - B5_c) minus (E_plan@ref - B5_c@ref).  Per-robot Prop. 2 metrics
+                (plan_pr_*) are reported.
   timeout       heavy, E_plan with plan_compute_budget_s = 45 vs E_plan without budget,
-                dev seeds 200-209 (decision 16).
+                dev seeds 200-209 (decision 16).  Runs IN ISOLATION (user decision
+                2026-10-22): excluded from the overlap and scheduled after every other job,
+                one run at a time with nothing else running, so its wall-clock budget sees an
+                otherwise idle machine.  Timeouts are an outcome here (plan_timeout_rate,
+                plan_rejected_timeout), never a reason to drop a run.
+  traces        pre-evaluation trace study (user decision 2026-10-22): heavy, dev seed 200,
+                A and B with the Section 3 binding log of every decision and E_plan with its
+                plan decision log; runs FIRST (stage -1), then
+                experiments/export_candidate_traces.py exports a few decisions of each kind
+                to <root>/traces/candidate_traces.
   disturbance   heavy, B5_c and E_plan, seeds 300-309 (decision 29): travel_speed_error 0.2;
                 unforecast arrival burst x2 for 300 s whose start is drawn per seed uniformly
                 in [300, 1200] s (user decision 2026-10-22) from
@@ -33,12 +47,15 @@ Studies (all variants in PLAN_ENV; loads spare 2e-5, heavy 1e-4, overload 4e-4):
                 confirmatory/heavy, same seeds.
   floor         E_plan_floor, 3 loads, seeds 300-309; E_plan reference from confirmatory
                 (identical parameters) (decision 26).
-  persistent    production T_rec 1800 s, 5400 s runs, outcome windows [0, 1800) and
-                [1800, 5400], {fresh, depleted} x {spare->heavy, heavy->spare} switching at
-                2700 s (mu_step_time_s / mu_step_factor); depleted start = cue state at the
+  persistent    the ONE persistent design (decision 22; experiments/run_persistent_operation.py
+                refuses to run): production T_rec 1800 s, 5400 s runs, outcome windows [0, 1800)
+                and [1800, 5400], {fresh, depleted} x {spare->heavy, heavy->spare} switching at
+                2700 s (mu_step_time_s / mu_step_factor); depleted start = TRUTH cue state at the
                 end of an 1800 s B5_c run at the same starting load and seed
-                (save_final_hab_state_path, generated first); B5_c, D_plan, E_plan; seeds
-                300-309 (decision 22).
+                (save_final_hab_state_path, generated first); the PLANNER starts fresh for every
+                system (no informed-planner reference); thesis wording for the fresh vs depleted
+                difference: "startup after unrecorded prior use".  B5_c, D_plan, E_plan; seeds
+                300-309.
   timed_recovery  E_plan_tr vs E_plan (decision 2, exploratory): 3 loads, seeds 300-309,
                 thresholds from docs/calibration/timed_recovery_thresholds.json, E_plan
                 reference from confirmatory (user decision 2026-10-22).
@@ -47,6 +64,14 @@ Section 3 binding log (decision 27): every decision (fraction 1.0, user decision
 of variants A and B in the confirmatory study is logged to raw/<system>_seed_<seed>_binding.jsonl.
 Measured size (heavy 300 s: about 0.59 MB for A and B; overload 600 s: 2.2 MB for A)
 projects to about 1-2 GB for 30 seeds x 3 loads x {A, B}, so plain JSONL is kept.
+
+Analysis (user decisions 2026-10-22): every comparison ERRORS if a planned seed of a compared
+system is missing (or a primary metric is not finite), unless --allow-missing (then the
+dropped seeds are listed); runs of different code versions (git commit + uncommitted diff,
+recorded in every raw result) are never compared unless --allow-mixed-commits.  A failed run
+is retried --retries times (default 1); every failed attempt is written with its log tail to
+<cell>/raw/failures.jsonl and failures.md.  Each cell with B5_c also gets the exposure vs
+service trade-off (tradeoff.csv/.md/.png in the study directory).
 
 Overlap: ordinary jobs run alongside the plan runs (fastest).  This is the DEFAULT for
 --study all (user decision 2026-10-22) and opt-in (--overlap) otherwise; --no-overlap turns
@@ -130,7 +155,11 @@ class Cell:
     # rows reused from another cell for the analysis: (study/cell path, variant, alias)
     reuse: list = field(default_factory=list)
     comparisons: list = field(default_factory=list)
+    # difference of paired differences: ((ref, trt) in this cell, (ref, trt) aliases of the
+    # reference cell, label)
+    did: list = field(default_factory=list)
     stage: int = 1                   # 0 runs (and finishes) before 1
+    isolated: bool = False           # run after everything else, one run at a time
     skip_reason: Optional[str] = None
 
 
@@ -139,6 +168,11 @@ class Study:
     name: str
     cells: list
     description: str = ""
+    per_robot_metrics: bool = False  # report per-robot Prop. 2 metrics (plan_pr_*)
+
+
+TRACE_STAGE = -1        # pre-evaluation trace study: runs and finishes first
+ISOLATED_STAGE = 99     # isolated cells (timeout study): after every other stage, one run at a time
 
 
 # ---------------------------------------------------------------------------
@@ -195,30 +229,79 @@ def study_mismatch(args) -> Study:
     return Study("mismatch", cells, "planner kappa 0.50, environment kappa varied, heavy, 10 seeds")
 
 
+NEIGHBOR_DELAYS_S = (30.0, 120.0, 300.0)
+NEIGHBOR_DROPS = (0.1, 0.3, 0.5)
+NEIGHBOR_REFERENCE_CELL = "per_robot_reference"
+
+
+def neighbor_extra(delay_s: float, drop_p: float) -> dict:
+    return {"planner_hab_mode": "per_robot", "neighbor_delay_s": float(delay_s), "neighbor_drop_prob": float(drop_p)}
+
+
 def study_neighbor(args) -> Study:
-    cells = []
-    for d in (30.0, 120.0, 300.0):
+    ref_rel = f"neighbor/{NEIGHBOR_REFERENCE_CELL}"
+    # user decision 2026-10-22: per_robot reference with D = 0, p = 0 (B5_c and E_plan, heavy,
+    # 300-309); every delay/drop cell is compared with it
+    cells = [Cell(name=NEIGHBOR_REFERENCE_CELL, mu=LOADS["heavy"], hab_on=True, variants=["B5_c", "E_plan"],
+                  seeds=EVAL_SEEDS_10, extra=neighbor_extra(0.0, 0.0), comparisons=[_pair("B5_c", "E_plan")])]
+    reuse = [(ref_rel, "B5_c", "B5_c@ref"), (ref_rel, "E_plan", "E_plan@ref")]
+    comps = [_pair("B5_c", "E_plan"),
+             _pair("E_plan@ref", "E_plan", "E_plan cell vs E_plan per_robot reference (D=0, p=0)"),
+             _pair("B5_c@ref", "B5_c", "B5_c cell vs B5_c per_robot reference (D=0, p=0)")]
+    did = [(("B5_c", "E_plan"), ("B5_c@ref", "E_plan@ref"),
+            "(E_plan - B5_c) in cell minus (E_plan - B5_c) in per_robot reference")]
+    for d in NEIGHBOR_DELAYS_S:
         cells.append(Cell(name=f"delay_{int(d)}s", mu=LOADS["heavy"], hab_on=True, variants=["B5_c", "E_plan"],
-                          seeds=EVAL_SEEDS_10,
-                          extra={"planner_hab_mode": "per_robot", "neighbor_delay_s": d, "neighbor_drop_prob": 0.0},
-                          comparisons=[_pair("B5_c", "E_plan")]))
-    for p in (0.1, 0.3, 0.5):
+                          seeds=EVAL_SEEDS_10, extra=neighbor_extra(d, 0.0), reuse=list(reuse),
+                          comparisons=list(comps), did=list(did)))
+    for p in NEIGHBOR_DROPS:
         cells.append(Cell(name=f"drop_{_tag(p)}", mu=LOADS["heavy"], hab_on=True, variants=["B5_c", "E_plan"],
-                          seeds=EVAL_SEEDS_10,
-                          extra={"planner_hab_mode": "per_robot", "neighbor_delay_s": 0.0, "neighbor_drop_prob": p},
-                          comparisons=[_pair("B5_c", "E_plan")]))
-    return Study("neighbor", cells, "per-robot information, delayed or dropped neighbor histories, heavy, 10 seeds")
+                          seeds=EVAL_SEEDS_10, extra=neighbor_extra(0.0, p), reuse=list(reuse),
+                          comparisons=list(comps), did=list(did)))
+    return Study("neighbor", cells, "per-robot information, delayed or dropped neighbor histories vs the "
+                 "per_robot D=0, p=0 reference, heavy, 10 seeds", per_robot_metrics=True)
 
 
 def study_timeout(args) -> Study:
     ref = ("timeout/no_budget", "E_plan", "E_plan@no_budget")
+    # user decision 2026-10-22: run in ISOLATION (both cells, so the reference runtimes are
+    # measured under the same idle conditions), after everything else, one run at a time
     cells = [
-        Cell(name="no_budget", mu=LOADS["heavy"], hab_on=True, variants=["E_plan"], seeds=DEV_SEEDS_10),
+        Cell(name="no_budget", mu=LOADS["heavy"], hab_on=True, variants=["E_plan"], seeds=DEV_SEEDS_10,
+             isolated=True),
         Cell(name="budget_45s", mu=LOADS["heavy"], hab_on=True, variants=["E_plan"], seeds=DEV_SEEDS_10,
-             extra={"plan_compute_budget_s": 45.0}, reuse=[ref],
+             extra={"plan_compute_budget_s": 45.0}, reuse=[ref], isolated=True,
              comparisons=[_pair("E_plan@no_budget", "E_plan", "E_plan 45 s budget vs no budget")]),
     ]
-    return Study("timeout", cells, "45 s wall-clock budget, heavy, dev seeds 200-209")
+    return Study("timeout", cells, "45 s wall-clock budget, heavy, dev seeds 200-209, run in isolation")
+
+
+TRACE_SEED = 200
+TRACE_VARIANTS = ["A", "B", "E_plan"]
+TRACE_CELL = "heavy_dev_seed_200"
+
+
+def study_traces(args) -> Study:
+    """Pre-evaluation candidate traces (user decision 2026-10-22): heavy, dev seed 200, A and B
+    with the binding log of every decision, E_plan with its plan decision log (every plan
+    run writes raw/<system>_seed_<seed>_decisions.jsonl).  Runs first (TRACE_STAGE)."""
+    cells = [Cell(name=TRACE_CELL, mu=LOADS["heavy"], hab_on=True, variants=list(TRACE_VARIANTS),
+                  seeds=[TRACE_SEED], extra={"__binding_log_fraction": 1.0}, stage=TRACE_STAGE)]
+    return Study("traces", cells, "pre-evaluation candidate traces: heavy, dev seed 200, A, B, E_plan")
+
+
+def export_traces(root: Path, per_kind: int = 2) -> dict:
+    """Run experiments/export_candidate_traces.py on the trace study's logs."""
+    from experiments import export_candidate_traces as ect
+    raw = cell_dir(root, "traces", TRACE_CELL) / "raw"
+    plan_logs = sorted(str(p) for p in raw.glob("*_decisions.jsonl")) if raw.exists() else []
+    binding_logs = sorted(str(p) for p in raw.glob("*_binding.jsonl")) if raw.exists() else []
+    if not plan_logs and not binding_logs:
+        print("[studies] traces: no logs found; export skipped", flush=True)
+        return {}
+    res = ect.export(plan_logs, binding_logs, Path(root) / "traces" / "candidate_traces", per_kind)
+    print(f"[studies] traces exported to {Path(root) / 'traces' / 'candidate_traces'}: {res}", flush=True)
+    return res
 
 
 def study_disturbance(args) -> Study:
@@ -245,6 +328,9 @@ def hab_state_path(root: Path, start_load: str, seed: int) -> Path:
     return Path(root) / "persistent" / "hab_states" / f"B5_c_{start_load}_T{int(DEPLETION_RUN_T_END_S)}_seed_{int(seed)}.json"
 
 
+TODO_SIM_PLANNER_FRESH: dict = {}
+
+
 def study_persistent(args) -> Study:
     root = Path(args.root)
     cells = []
@@ -263,7 +349,13 @@ def study_persistent(args) -> Study:
         for sw, (load0, factor) in switches.items():
             per_seed = None
             if start == "depleted":
-                per_seed = (lambda s, _l=load0: {"initial_hab_state_path": str(hab_state_path(root, _l, s))})
+                # User decision 2026-10-22: the TRUTH starts from the truth eta at the end of the
+                # B5_c source run; the PLANNER starts fresh (eta = 1) for every system.
+                # TODO(SIM): at 704722c initial_hab_state_path also loads the planner field
+                # (DeterrentSystem.py, planner_eta); the simulator agent adds the switch that
+                # keeps the planner fresh and reports its name; put it in TODO_SIM_PLANNER_FRESH.
+                per_seed = (lambda s, _l=load0: {"initial_hab_state_path": str(hab_state_path(root, _l, s)),
+                                                 **TODO_SIM_PLANNER_FRESH})
             cells.append(Cell(
                 name=f"{start}_{sw}", mu=LOADS[load0], hab_on=True, variants=["B5_c", "D_plan", "E_plan"],
                 seeds=EVAL_SEEDS_10, t_end=PERSISTENT_T_END_S,
@@ -281,6 +373,7 @@ def study_timed_recovery(args) -> Study:
 
 
 STUDIES = {
+    "traces": study_traces,
     "confirmatory": study_confirmatory,
     "zero_hab": study_zero_hab,
     "floor": study_floor,
@@ -292,7 +385,7 @@ STUDIES = {
     "timed_recovery": study_timed_recovery,
 }
 # Priority when several studies are scheduled together (decision 23 budget order).
-DEFAULT_ORDER = ["confirmatory", "zero_hab", "floor", "timed_recovery", "mismatch", "neighbor", "disturbance",
+DEFAULT_ORDER = ["traces", "confirmatory", "zero_hab", "floor", "timed_recovery", "mismatch", "neighbor", "disturbance",
                  "timeout", "persistent"]
 
 
@@ -336,7 +429,8 @@ def collect_jobs(study: Study, root: Path) -> list:
                     params["stl_binding_log_path"] = str(raw / f"{v}_{cond}_seed_{seed}_binding.jsonl")
                     params["stl_binding_log_fraction"] = float(frac)
                 job = rpc.make_job(raw, v, cell.hab_on, seed, params, study=study.name, cell=cell.name)
-                job["stage"] = int(cell.stage)
+                job["stage"] = ISOLATED_STAGE if cell.isolated else int(cell.stage)
+                job["isolated"] = bool(cell.isolated)
                 jobs.append(job)
     return jobs
 
@@ -372,16 +466,21 @@ PERSISTENT_WINDOW_METRICS = ["outcome_window0_value_weighted_exposure", "outcome
                              "outcome_window0_reactive_unfinished_total", "outcome_window1_reactive_unfinished_total"]
 
 
-def analyze_study(study: Study, root: Path) -> list:
+def analyze_study(study: Study, root: Path, allow_missing: bool = False, allow_mixed: bool = False) -> list:
+    """Paired statistics of every cell of ``study`` (errors on missing seeds or mixed code
+    versions unless allowed), the difference-of-differences rows, the exposure vs service
+    trade-off of every cell with B5_c, and the study-specific extras (confirmatory family,
+    trace export)."""
     out_dir = Path(root) / study.name
     out_dir.mkdir(parents=True, exist_ok=True)
     metrics = list(rpc.REPORT_METRICS)
     if study.name == "persistent":
         metrics = PERSISTENT_WINDOW_METRICS + metrics
-    all_stats = []
+    all_stats, trade = [], {}
     lines = [f"# Study: {study.name}", "", study.description, "",
              "Paired by seed within each cell; 95% percentile bootstrap over seed pairs (10000 resamples);",
-             "percent effect = mean paired difference / reference mean x 100. Exploratory (nominal).", ""]
+             "percent effect = mean paired difference / reference mean x 100. Exploratory (nominal).",
+             "A missing planned seed is an error unless --allow-missing; dropped seeds are listed per row.", ""]
     for cell in study.cells:
         if cell.skip_reason:
             lines += [f"## {cell.name}", "", f"SKIPPED: {cell.skip_reason}", ""]
@@ -391,35 +490,116 @@ def analyze_study(study: Study, root: Path) -> list:
         if (cdir / "raw").exists():
             _write_csv(rpc.flat_rows(rpc.load_rows(cdir)), cdir / "per_run_metrics.csv")
         hab = "hab_on" if cell.hab_on else "hab_off"
-        stats = rpc.analyze(rows, None, hab, cell.comparisons, metrics) if cell.comparisons else []
+        where = f"{study.name}/{cell.name}"
+        miss = {}
+        if cell.comparisons:
+            miss = rpc.check_missing(rows, cell.comparisons, cell.seeds, hab, allow_missing, where)
+        cm = rpc.expand_metrics(metrics, rows, per_robot=study.per_robot_metrics)
+        stats = rpc.analyze(rows, None, hab, cell.comparisons, cm, expected_seeds=cell.seeds,
+                            allow_missing=allow_missing, allow_mixed=allow_mixed) if cell.comparisons else []
+        for cell_pair, ref_pair, label in cell.did:
+            stats += rpc.analyze_did(rows, cell_pair, ref_pair, label, hab, cm, expected_seeds=cell.seeds,
+                                     allow_mixed=allow_mixed)
         n_runs = {v: sum(1 for r in rows if r["variant"] == v) for v in sorted({r["variant"] for r in rows})}
+        versions = rpc.check_commits(rows, where, allow_mixed=True) if rows else {}
         lines += [f"## {cell.name}", "", f"mu={cell.mu:g}, {hab}, seeds {cell.seeds[0]}-{cell.seeds[-1]}, "
                   f"extra={json.dumps({k: v for k, v in cell.extra.items() if not k.startswith('__')})}",
-                  f"runs present: {json.dumps(n_runs)}", ""]
+                  f"runs present: {json.dumps(n_runs)}; code versions: {json.dumps(versions)}", ""]
+        if miss:
+            lines += [f"MISSING RUNS (partial analysis, --allow-missing): {json.dumps(miss)}", ""]
         if stats:
-            lines += ["| Comparison | Metric | n | Ref mean | Diff | 95% CI | % of ref |",
-                      "| --- | --- | --- | --- | --- | --- | --- |"]
+            lines += rpc.stats_table([dict(s, comparison=s["comparison"]) for s in stats])
         for s in stats:
-            s = dict(s, study=study.name, cell=cell.name)
-            all_stats.append(s)
-            lines.append(f"| {s['comparison']} | {s['metric']} | {s['n']} | {s['ref_mean']:.4g} | "
-                         f"{s['mean_diff']:+.4g} | [{s['ci_lo']:+.4g}, {s['ci_hi']:+.4g}] | {s['pct_of_ref']:+.2f}% |")
+            all_stats.append(dict(s, study=study.name, cell=cell.name))
         lines.append("")
+        if any(r["variant"] == "B5_c" for r in rows):
+            trade[cell.name] = rpc.tradeoff(rows, hab, "B5_c", expected_seeds=cell.seeds, allow_mixed=allow_mixed)
     _write_csv(all_stats, out_dir / "paired_stats.csv")
     (out_dir / "analysis.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if any(trade.values()):
+        rpc.write_tradeoff(trade, out_dir, "tradeoff", f"({study.name})")
     if study.name == "confirmatory":
-        _confirmatory_family(study, root)
+        _confirmatory_family(study, root, allow_missing, allow_mixed)
+    if study.name == "traces":
+        export_traces(root)
     return all_stats
 
 
-def _confirmatory_family(study: Study, root: Path) -> None:
+def _confirmatory_family(study: Study, root: Path, allow_missing: bool = False, allow_mixed: bool = False) -> None:
     from experiments import analyze_plan_confirmatory as apc
     dirs = {c.name: cell_dir(root, study.name, c.name) for c in study.cells}
     if not all((d / "raw").exists() for d in dirs.values()):
         print("[studies] confirmatory family: some load directories missing; skipped", flush=True)
         return
     apc.run_family(treatment="E_plan", reference="B5_c", dirs=dirs, expected_n=len(EVAL_SEEDS_30),
-                   out=Path(root) / study.name / "confirmatory_family")
+                   out=Path(root) / study.name / "confirmatory_family", expected_seeds=EVAL_SEEDS_30,
+                   allow_missing=allow_missing, allow_mixed=allow_mixed)
+
+
+# ---------------------------------------------------------------------------
+# Compute estimate
+# ---------------------------------------------------------------------------
+# Wall hours of one 1800 s run, by kind and load.  Measured values only (mean elapsed_s of
+# the raw results under results/testbench, scanned 2026-10-22):
+#   plan     E_plan, 20 runs per load on dev seeds (gate calibration and earlier smoke,
+#            2026-10-18 code): spare 0.13 h, heavy 0.97 h (max 2.64 h).  Overload E_plan was
+#            never completed (the calibration stopped with a MemoryError): UNPRICED.
+#   ordinary B/C/C_gate B4-pipeline variants, 120 runs per load (2026-10 harness, other jobs
+#            running concurrently): spare 0.10 h, heavy 0.13 h, overload 0.18 h.
+# The oracle on ALL candidates of 25% of decisions (confirmed 2026-10-22) and the binding log
+# of A/B postdate these measurements.  TODO(SIM): replace with the simulator agent's measured
+# numbers (wall time including the oracle, peak memory) from the dev-seed sizing smoke.
+RUN_HOURS_1800S = {("plan", "spare"): 0.13, ("plan", "heavy"): 0.97, ("plan", "overload"): None,
+                   ("ordinary", "spare"): 0.10, ("ordinary", "heavy"): 0.13, ("ordinary", "overload"): 0.18}
+
+
+def _load_name(mu: float) -> str:
+    for name, v in LOADS.items():
+        if math.isclose(float(mu), v):
+            return name
+    return f"mu={mu:g}"
+
+
+def compute_estimate(studies: list, root: Path, run_hours: dict = None, plan_concurrency: int = 2,
+                     max_workers: int = 2, pending_only: bool = True) -> dict:
+    """Run counts and wall-time estimate of the scheduled jobs.
+
+    Per stage (trace stage, main stages): plan runs share ``plan_concurrency`` slots and
+    ordinary runs ``max_workers`` slots, overlapping, so the stage takes the longer of
+    plan hours / plan_concurrency and ordinary hours / max_workers.  Isolated runs (timeout
+    study) run one at a time after everything else, so their FULL wall time adds.  A run's
+    hours scale with T_end / 1800 s.  Unknown rates are reported as run counts (``unpriced``),
+    never guessed."""
+    rates = dict(RUN_HOURS_1800S if run_hours is None else run_hours)
+    jobs = [j for st in studies for j in collect_jobs(st, root)]
+    if pending_only:
+        jobs = [j for j in jobs if not Path(j["raw_json"]).exists()]
+    counts, unpriced, stage_h = {}, {}, {}
+    for j in jobs:
+        kind = "plan" if rpc.is_plan_job(j["params"]) else "ordinary"
+        load = _load_name(j["params"]["mu_true"])
+        scale = float(j["params"].get("T_end", 1800.0)) / 1800.0
+        key = f"{j['study']}/{kind}/{load}"
+        counts[key] = counts.get(key, 0) + 1
+        rate = rates.get((kind, load))
+        bucket = "isolated" if j.get("isolated") else f"stage{j['stage']}"
+        sh = stage_h.setdefault(bucket, {"plan": 0.0, "ordinary": 0.0, "longest": 0.0})
+        if rate is None:
+            unpriced[f"{kind}/{load}"] = unpriced.get(f"{kind}/{load}", 0.0) + scale   # in 1800 s run units
+        else:
+            sh[kind] += float(rate) * scale
+            sh["longest"] = max(sh["longest"], float(rate) * scale)
+    wall = {}
+    for bucket, sh in stage_h.items():
+        if bucket == "isolated":
+            wall[bucket] = sh["plan"] + sh["ordinary"]
+        else:   # a stage never ends before its longest single run
+            wall[bucket] = max(sh["plan"] / max(1, plan_concurrency), sh["ordinary"] / max(1, max_workers),
+                               sh["longest"])
+    return {"runs": counts, "n_runs": len(jobs),
+            "n_plan_runs": sum(1 for j in jobs if rpc.is_plan_job(j["params"])),
+            "priced_wall_hours_by_stage": wall, "priced_wall_hours_total": float(sum(wall.values())),
+            "unpriced_run_units_1800s": unpriced, "rates_h_per_1800s_run": {f"{k[0]}/{k[1]}": v for k, v in rates.items()}}
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +614,42 @@ def resolve_overlap(study_arg: str, overlap) -> bool:
 
 def build_studies(names: list, args) -> list:
     return [STUDIES[n](args) for n in names]
+
+
+def schedule(jobs: list) -> list:
+    """(stage label, jobs, isolated) in execution order: the trace stage, the other stages in
+    order, then the isolated jobs (timeout study) last."""
+    out = []
+    normal = [j for j in jobs if not j.get("isolated")]
+    for stage in sorted({j["stage"] for j in normal}):
+        out.append((stage, [j for j in normal if j["stage"] == stage], False))
+    iso = [j for j in jobs if j.get("isolated")]
+    if iso:
+        out.append((ISOLATED_STAGE, iso, True))
+    return out
+
+
+def run_scheduled(jobs: list, args, root: Path) -> None:
+    for stage, stage_jobs, isolated in schedule(jobs):
+        if isolated:
+            # user decision 2026-10-22: isolation = nothing else running, one run at a time
+            print(f"[studies] isolated stage: {len(stage_jobs)} jobs, one at a time, no overlap", flush=True)
+            res = rpc.execute_jobs(stage_jobs, max_workers=1, plan_concurrency=1, plan_stagger_s=0.0,
+                                   min_free_gb=args.min_free_gb, poll_s=args.poll_s, tag="studies-isolated",
+                                   overlap=False, retries=args.retries)
+        else:
+            print(f"[studies] stage {stage}: {len(stage_jobs)} jobs", flush=True)
+            res = rpc.execute_jobs(stage_jobs, max_workers=args.max_workers, plan_concurrency=args.plan_concurrency,
+                                   plan_stagger_s=args.plan_stagger_s, min_free_gb=args.min_free_gb,
+                                   poll_s=args.poll_s, tag="studies", overlap=args.overlap, retries=args.retries)
+        if res["failed"]:
+            with open(root / "failures.jsonl", "a", encoding="utf-8") as fh:
+                for f in res["failed"]:
+                    fh.write(json.dumps(f) + "\n")
+            if stage == 0:
+                print("[studies] stage-0 failures: dependent depleted-start runs will fail", flush=True)
+        if stage == TRACE_STAGE:
+            export_traces(root)
 
 
 def main() -> None:
@@ -451,6 +667,12 @@ def main() -> None:
                    help="ordinary jobs of a stage first, then plan jobs")
     p.add_argument("--min-free-gb", type=float, default=rpc.MIN_FREE_GB)
     p.add_argument("--poll-s", type=float, default=rpc.MEMORY_POLL_S)
+    p.add_argument("--retries", type=int, default=rpc.DEFAULT_RETRIES, help="retries of a failed run")
+    p.add_argument("--allow-missing", action="store_true",
+                   help="report a partial analysis instead of failing on missing seeds (seeds listed)")
+    p.add_argument("--allow-mixed-commits", action="store_true",
+                   help="compare runs from different code versions (default: refuse)")
+    p.add_argument("--estimate", action="store_true", help="print the run counts and compute estimate and exit")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--analyze-only", action="store_true")
     args = p.parse_args()
@@ -467,31 +689,33 @@ def main() -> None:
         for c in st.cells:
             if c.skip_reason:
                 print(f"[studies] {st.name}/{c.name} SKIPPED: {c.skip_reason}", flush=True)
+    if args.estimate:
+        print(json.dumps(compute_estimate(studies, root, plan_concurrency=args.plan_concurrency,
+                                          max_workers=args.max_workers), indent=2))
+        return
 
     if not args.analyze_only:
         jobs = order_jobs([j for st in studies for j in collect_jobs(st, root)], DEFAULT_ORDER)
         if args.dry_run:
-            for j in jobs:
-                state = "done" if Path(j["raw_json"]).exists() else (
-                    "plan" if rpc.is_plan_job(j["params"]) else "ordinary")
-                print(f"stage{j['stage']} {j['study']}/{j['cell']} {j['system']} seed={j['seed']} {state}")
+            for stage, stage_jobs, isolated in schedule(jobs):
+                for j in stage_jobs:
+                    state = "done" if Path(j["raw_json"]).exists() else (
+                        "plan" if rpc.is_plan_job(j["params"]) else "ordinary")
+                    print(f"stage{stage}{' isolated' if isolated else ''} {j['study']}/{j['cell']} {j['system']} "
+                          f"seed={j['seed']} {state}")
             print(f"[studies] {len(jobs)} jobs, {sum(1 for j in jobs if not Path(j['raw_json']).exists())} pending")
             return
-        for stage in sorted({j["stage"] for j in jobs}):
-            stage_jobs = [j for j in jobs if j["stage"] == stage]
-            print(f"[studies] stage {stage}: {len(stage_jobs)} jobs", flush=True)
-            res = rpc.execute_jobs(stage_jobs, max_workers=args.max_workers, plan_concurrency=args.plan_concurrency,
-                                   plan_stagger_s=args.plan_stagger_s, min_free_gb=args.min_free_gb,
-                                   poll_s=args.poll_s, tag="studies", overlap=args.overlap)
-            if res["failed"]:
-                with open(root / "failures.jsonl", "a", encoding="utf-8") as fh:
-                    for f in res["failed"]:
-                        fh.write(json.dumps(f) + "\n")
-                if stage == 0:
-                    print("[studies] stage-0 failures: dependent depleted-start runs will fail", flush=True)
+        run_scheduled(jobs, args, root)
+    errors = []
     for st in studies:
-        analyze_study(st, root)
-        print(f"[studies] analyzed {st.name} -> {root / st.name}", flush=True)
+        try:
+            analyze_study(st, root, args.allow_missing, args.allow_mixed_commits)
+            print(f"[studies] analyzed {st.name} -> {root / st.name}", flush=True)
+        except (rpc.MissingSeedsError, rpc.MixedCommitsError) as exc:
+            errors.append(f"{st.name}: {exc}")
+            print(f"[studies] ANALYSIS ERROR {st.name}: {exc}", flush=True)
+    if errors:
+        raise SystemExit("analysis refused for: " + "; ".join(errors))
 
 
 if __name__ == "__main__":

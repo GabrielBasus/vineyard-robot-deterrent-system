@@ -21,13 +21,19 @@ The intensity-model relays (rows 1-4) are the historical rules and are not
 changed. The habituation record (row 5) is relayed to every robot, because a
 robot may need eta for any cell (the plan procedure's rollout covers the whole
 field), and because decision 17 requires instant full sharing to reproduce the
-shared field exactly. See open question Q1 below on the legacy rule.
+shared field exactly. The two rules stay different by user decision (WS-C
+follow-up, 2026-10-22; former question Q1): the estimator relay stays the
+original lossy rule while the effectiveness records relay completely.
 
 ## 2. Delay and loss (decision 18)
 
 Every message in the table above that goes to a robot other than its sender
 passes through `EventBus._relay`:
 
+* Drop draws are made only for messages that are actually sent (a message the
+  relay rule does not send draws nothing; user decision 2026-10-22), so the
+  drop stream of one message never depends on how many other messages were
+  considered.
 * Drop: the message to recipient r is lost if `u < neighbor_drop_prob`, where
   `u = CoupledRandomStreams(seed).relay_uniform(kind, message id, r)` (purpose
   code `PURPOSE_RELAY` = 14). The message id is the truth event id for a
@@ -95,11 +101,13 @@ field, so callers copy before mutating. In `"shared"` mode it returns
 `planner_hab`.
 
 The shared field `planner_hab` is still maintained in `"per_robot"` mode as
-the union of all interventions (diagnostics, `habituation_eta_*` metrics). Not
-yet switched to per-robot fields (other workstreams' files): the live B5
-candidate scoring (`TaskGenerator.py`, one `stl_hab` for all robots) and the B4
-STL valuation. Until they read `_planner_hab_for_robot`, these decisions still
-use the fleet union.
+the union of all interventions (diagnostics, `habituation_eta_*` metrics). The
+live B5 candidate scoring and the B4 STL valuation read the deciding robot's own
+field (`TaskGenerator.generate(..., stl_hab_for_robot_fn=_planner_hab_for_robot)`,
+commit 4bc5562); in `"shared"` mode the function is None and the fleet field is
+read exactly as before. B4 keeps central visibility of tasks and estimators in
+`"per_robot"` mode (assumption A3); only cue effectiveness is per robot (user
+decision 2026-10-22).
 
 ### Plan procedure with per-robot information sets
 
@@ -124,8 +132,12 @@ centralized). r simulates the whole fleet with ITS OWN beliefs (user answer
   6; same message id, delay and drop as the habituation record), in event-time
   order with the 200-entry cap of `recent_deterrences`;
 * the other robots' poses, goals and tasks: the centralized task state;
-* each robot's own detection history (`Robot.recent_events`, read by B5's
-  detection-cluster seeds): kept as the fleet state (open question Q3 below).
+* the other robots' detection histories (`Robot.recent_events`, read by B5's
+  detection-cluster seeds): r believes only the detections RELAYED to r (user
+  decision 2026-10-22, former question Q3), with the relay's delay and drop.
+  TODO(SIM): at 704722c the snapshot still keeps the fleet state
+  (`scenario_rollout.robot_information_snapshot`); the simulator workstream
+  implements the decided rule.
 
 The oracle keeps the truth world and uses r's policy side. Prop. 2 is reported
 per robot: every robot's own J-hat of the executed policy against the realized
@@ -134,10 +146,14 @@ per-robot information with timed recovery, and with the consistent estimator.
 
 ### Initial state (decision 22)
 
-`initial_hab_state_path` sets the truth field and the shared planner field
-from a file written by `save_final_hab_state_path` at the end of an earlier
-run. In `"per_robot"` mode every robot starts from the file's planner field
-(the end state of the source run's shared field).
+`initial_hab_state_path` sets the TRUTH field from the truth field in a file
+written by `save_final_hab_state_path` at the end of an earlier run (truth from
+truth). The PLANNER starts fresh (eta = 1 for every cell and cue, every robot)
+for every system: the robots did not record the prior use (user decision
+2026-10-22; no informed-planner reference). Thesis wording for the fresh vs
+depleted difference: "startup after unrecorded prior use". TODO(SIM): at
+704722c the file also loads the shared planner field (and every per-robot field
+starts from it); the simulator workstream adds the planner-fresh switch.
 
 ## 4. Other information the robots share (unchanged)
 
@@ -153,16 +169,22 @@ run. In `"per_robot"` mode every robot starts from the file's planner field
   background. The oracle evaluates the truth, so its world includes the burst
   and the step and its truth motion is slower by `travel_speed_error`.
 
-## Open questions
+## Answered questions (user decisions 2026-10-22)
 
-* Q1. Under the legacy estimator the intervention relay to the intensity model
-  is lossy by design (border radius, debounce, min weight), while the
-  per-robot habituation record is relayed to every robot. Should the two
-  share one relay rule, and if so which?
-* Q2. Chronological reconstruction of delayed records (and the legacy
-  late-stamp decay) is implemented as the reading of "reconstructs its own
-  effectiveness from received interventions". Confirm, or specify
-  apply-at-receipt.
-* Q3. In the per-robot plan snapshot, what does r believe about another
-  robot's detection history (`Robot.recent_events`, B5's detection-cluster
-  seeds)? Kept as the fleet state until decided.
+* Q1 (relay rules). The estimator relay stays the original lossy rule (border
+  radius, debounce, minimum weight); the effectiveness records relay completely
+  to every robot. The two rules stay different.
+* Q2 (late records). Chronological reconstruction is confirmed: a late record is
+  inserted at its event time and the field is replayed (legacy late stamps decay
+  by exp(-(t_now - t)/omega)).
+* Q3 (other robots' detections). r believes only the detections relayed to r
+  (section 3; implementation pending in the simulator workstream).
+
+## Unsupported combinations (clear errors)
+
+* Per-robot information sets with timed recovery (`PlanProcedure` raises
+  ValueError).
+* Per-robot information sets with the consistent estimator (the simulator raises
+  ValueError at start).
+
+No communication question is open.

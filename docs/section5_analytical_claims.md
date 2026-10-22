@@ -6,7 +6,7 @@ code locations in `docs/section4_assumptions.md` Section 2), with every assumpti
 It replaces the earlier version written for the B4-pipeline rollout (dropped variants D/E).
 
 Notation. At a decision state x_t: pi_0 = the B5 continuation; pi_a = candidate a first, then
-B5; H = 300 s; J_H(pi) = expected value-weighted exposure over [t, t + H] under the TRUE
+B5; H = 300 s (simulator default `forecast_horizon_s`, see docs/STATED_ASSUMPTIONS.md P6); J_H(pi) = expected value-weighted exposure over [t, t + H] under the TRUE
 model when executing pi (the engine's mirrored B5, see A2 below); J*_H(pi) = the same
 expectation under the PLANNER model (planner world from the robots' estimators);
 J_hat(pi) = mean over the n = 16 common-random-number scenarios of the planner model;
@@ -68,10 +68,20 @@ The error has two parts, neither assumed small:
    robots inflates this, so the gate is not a familywise guarantee.
 
 **Empirical characterization (the substantive claim, Plan Sec. 5).** epsilon is measured by
-the oracle (below), not assumed. Reported per run: bias, mean, 95th percentile and maximum
-of |J0_hat - J0_oracle|, |Ja_hat - Ja_oracle| and |U_hat - U_oracle|; the sign-agreement
-fraction of U_hat and U_oracle; the fraction of admitted deviations with U_oracle > 0;
-Kendall tau between planner U and oracle U over all round-0 candidates (decision 12).
+the oracle (below), not assumed. Because the planner world is in legacy estimator units and
+the oracle in truth units, the two J scales differ by a variable factor, so the reporting is
+split (user decision 2026-10-22, audit round):
+* PRIMARY (scale-free): the sign-agreement fraction of U_hat and U_oracle
+  (`plan_oracle_U_sign_agree_fraction`); Kendall tau between planner U and oracle U over all
+  round-0 candidates of a sampled decision (`plan_oracle_kendall_tau_mean`/`_median`,
+  decision 12); the fraction of admitted deviations with U_oracle > 0
+  (`plan_oracle_admitted_U_oracle_positive_fraction`).
+* SECONDARY (raw, unit-mixed): bias, mean, 95th percentile and maximum of
+  |J0_hat - J0_oracle|, |Ja_hat - Ja_oracle| and |U_hat - U_oracle|, and realized minus
+  predicted J of the executed policy (`plan_pred_err_*`, `plan_realized_minus_pred_*`;
+  final names may carry a `_raw_units` suffix, TODO(SIM)).
+* With per-robot information sets: each robot's own J-hat of the executed policy against the
+  realized J, and the mean and spread across robots (`plan_pr_*`, neighbor study).
 Calibration on dev seeds (2026-10-18) found sign agreement 88-89%, 90% of admitted
 deviations truly beneficial, and corr(U_hat, U_oracle) near 0 because the legacy units are
 off by a variable factor. An error quantile from these runs is a validation statistic, not a
@@ -91,7 +101,10 @@ and outside its runtime budget (`PlanProcedure._oracle`):
   (SeedSequence [seed, 0x0AC1E5, decision index]; decision 31); oracle Monte Carlo standard
   errors are reported (`plan_oracle_J0_se_mean`, `plan_oracle_U_se_mean`).
 * **Policies:** per round, pi_0 (with the earlier rounds' commitments) and that round's top
-  feasible candidate; with `plan_oracle_all_candidates=True`, every round-0 candidate.
+  feasible candidate, and, with `plan_oracle_all_candidates=True` (the evaluation setting),
+  EVERY round-0 candidate: all candidates on 25% of decisions with 64 scenarios (confirmed
+  2026-10-22; it supersedes "top candidate only"; a 5% all-candidate fallback is used only if
+  the dev-seed sizing smoke, wall time and peak memory, shows the 25% rate is over budget).
 * **What it measures:** model error plus planner Monte Carlo error relative to the truth
   model under the engine's B5. It does NOT measure the engine residuals R1-R12 (shared by
   planner and oracle); those were bounded separately by the engine-vs-simulator agreement
@@ -101,7 +114,8 @@ and outside its runtime budget (`PlanProcedure._oracle`):
 
 *Conditional statement.* If a deviation is admitted under service protection then, in every
 one of the 16 planner scenarios, every pending task predicted on time under pi_0 is predicted
-on time under the deviation, and (optional condition, on) no baseline-late task with finite
+on time under the deviation, and (`plan_protect_late_tasks=True`, accepted by the user
+2026-10-22) no baseline-late task with finite
 completion finishes later. This is a property of the planner model's scenarios only:
 * no guarantee for unforecast arrivals, travel-speed error or scenarios not sampled (the
   disturbance study reports F0-protected tasks that still missed, both "at least one
@@ -112,12 +126,29 @@ completion finishes later. This is a property of the planner model's scenarios o
 
 ## Timed recovery (Plan Eq. 4)
 
-Obligations are triggered when a cell's planner forecast exposure exceeds E_high and require
-e_z <= E_low within T_response. Feasibility requires a candidate to satisfy, in each scenario,
-every obligation pi_0 satisfies there. Obligations that no feasible policy satisfies in every
-scenario are kept as bounded violations: the choice minimises the mean exceedance of E_low at
-the deadline and never prefers a policy with a larger exceedance than pi_0 (decision 28). No
-global deadline guarantee follows (Plan Sec. 7); violations and their sizes are reported.
+**Live monitor** (simulator, every step; user decisions 2026-10-22, "as implemented"): the
+monitored unit z is a robot zone (`L["cells"]` partition polygon); e_z = sum over the zone's
+grid nodes of w * lambda_hat under the planner forecast (the same world the rollouts use). An
+obligation is triggered when e_z > E_high and the zone has no active obligation and is not
+latched; it is discharged when e_z <= E_low by its deadline (trigger + T_response) and
+violated at the first step after the deadline otherwise (violation size = last e_z before the
+deadline minus E_low). After a violation the zone is LATCHED: no new obligation until e_z has
+recovered to <= E_low. The live monitor always judges at the REAL deadline.
+
+**Inside a decision.** Feasibility is per-scenario dominance: a candidate must satisfy, in
+each scenario, every obligation pi_0 satisfies there (accepted 2026-10-22). Obligations that
+no feasible policy satisfies in every scenario are kept as bounded violations; the set of
+bounded obligations is fixed in round 0 of the decision (accepted 2026-10-22). The choice
+minimises the mean-over-scenarios exceedance of E_low summed over them and never prefers a
+policy with a larger exceedance than pi_0 (decision 28).
+
+**Deadlines beyond the look-ahead** (confirmed 2026-10-22): an obligation whose deadline lies
+after t0 + H and that is unmet at t0 + H stays OPEN (it is neither satisfied nor violated
+inside the decision). When neither pi_0 nor the candidate meets it by t0 + H, the candidate
+must not leave a higher e_z at t0 + H than pi_0 (else `infeasible_obligation`), and the
+bounded-violation size is the exceedance of E_low at t0 + H (logged as a horizon proxy). The
+live monitor still judges the obligation at its real deadline. No global deadline guarantee
+follows (Plan Sec. 7); violations and their sizes are reported.
 
 ## Claims that are NOT made
 

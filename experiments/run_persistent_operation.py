@@ -4,8 +4,9 @@ run_persistent_operation.py -- Plan §6 persistent operation experiment (EARLIER
 SUPERSEDED for the evaluation by `py -3.10 -m experiments.run_plan_studies --study persistent`,
 which implements decision 22 (production T_rec 1800 s only, 5400 s runs, outcome windows
 [0, 1800) and [1800, 5400], fresh vs depleted-from-B5_c start, demand switch at 2700 s,
-B5_c / D_plan / E_plan, seeds 300-309).  This script is kept for the earlier T_rec sweep;
-its defaults no longer include the dropped rollout variants (decision 4).
+B5_c / D_plan / E_plan, seeds 300-309, planner fresh for every system).  RETIRED (user
+decision 2026-10-22): main() refuses to run so the old design cannot be used by mistake;
+the code below is kept only as the record of the earlier design.
 
 The submitted runs last 1800 s from fresh cues with constant demand. This sweep
 extends evaluation to:
@@ -109,7 +110,18 @@ def analyze(rows, outdir: Path, reference: str, t_end: float) -> None:
     (outdir / "persistent_operation.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+RETIRED_MESSAGE = (
+    "experiments/run_persistent_operation.py implements the OLD persistent design (initial eta 0.3, "
+    "T_rec {600, 1800, 5400}) and is retired (user decision 2026-10-22). The one persistent design "
+    "is: py -3.10 -m experiments.run_plan_studies --study persistent")
+
+
 def main() -> None:
+    # User decision 2026-10-22: this script must not be usable by mistake with the old design.
+    raise SystemExit(RETIRED_MESSAGE)
+
+
+def _old_main() -> None:  # kept for the record of the earlier design; never called
     p = argparse.ArgumentParser(description="Plan §6 persistent operation sweep")
     p.add_argument("--outdir", default="results/testbench/persistent_operation")
     p.add_argument("--systems", default="B5_c,D_plan,E_plan")

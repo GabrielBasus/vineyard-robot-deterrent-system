@@ -127,14 +127,20 @@ model will differ from truth, biasing the e0 snapshot at the next planning episo
 
 ---
 
-## A8. Forward trajectory correction -- implemented as variant C flag
+## A8. Forward trajectory correction -- part of variant B
 
 **Equation reference**: nominal signal e_nom used in U(a,r).
 
-**Status**: IMPLEMENTED and measurable. `Dynamics.forward_trajectory_correction=True`
-(variant C) activates the corrected forward trajectory. Variant B leaves this off.
-The A/B/C comparison experiment (`experiments/run_variant_ab_comparison.py`) runs
-both and reports the incremental effect of this correction (C vs B delta).
+**Status**: IMPLEMENTED and part of variant B. `Dynamics.forward_trajectory_correction=True`
+(simulator flag `stl_forward_trajectory_correction`) activates the corrected forward
+trajectory. Section 6 decision 5 (2026-10-21) put ALL Section 2 items into variant B
+(forecast correction, forward trajectory correction, committed schedule with reactive tasks in
+the pending timeline, queue-aware lead, planner update model; `run_plan_completion._SECTION2`),
+so B, C, C_gate all have it on and the submitted B4 (variant A) has it off. Its separate
+effect is no longer a planned comparison: B vs A measures all Section 2 items together, and
+A's full-set same-state shadow (`stl_shadow_full_*`) measures their effect on the ranking.
+(The earlier experiment that ran it as a separate variant, `run_variant_ab_comparison.py`,
+used the old variant letters and is superseded.)
 
 **What the corrected formula does**: propagates the three components of the SESTPP
 intensity separately over the planning horizon instead of collapsing to e0*exp(-s/omega_e):

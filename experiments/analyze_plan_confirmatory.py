@@ -25,8 +25,10 @@ Supplementary (not part of the decision): one-sided Wilcoxon on (diff - 0.02).
 Everything else (other variants, habituation off, mechanism metrics) is exploratory.
 
 Percent effect = mean paired difference / mean of the reference (B5_c) x 100.
-Pairs: a seed is used only when both systems have a finite value; missing seeds are
-listed and comparisons with fewer than the expected pairs are flagged.
+Missing seeds (user decisions 2026-10-22): the analysis ERRORS if a planned seed of either
+system is missing or has a non-finite primary value; --allow-missing reports the family with
+the dropped seeds and reasons listed.  Runs from different code versions (git commit plus
+uncommitted diff, recorded in every raw result) are refused unless --allow-mixed-commits.
 
 Usage:
   py -3.10 -m experiments.analyze_plan_confirmatory \
@@ -142,26 +144,56 @@ def holm_decisions(tests: list[dict], alpha: float = ALPHA) -> None:
         t["p_holm"] = pa
 
 
-def family_tests(dirs: dict, treatment: str = "E_plan", reference: str = "B5_c") -> list[dict]:
+def _check_rows(rows, load, treatment, reference, expected_seeds, allow_missing, allow_mixed):
+    """User decisions 2026-10-22: error on any missing planned seed or non-finite primary
+    value (unless allow_missing, then they are listed) and on runs from different code
+    versions (unless allow_mixed)."""
+    from experiments import run_plan_completion as rpc
+    sub = [r for r in rows if r.get("variant") in (reference, treatment) and r.get("habituation_condition") == "hab_on"]
+    rpc.check_commits(sub, f"confirmatory {load}", allow_mixed)
+    for metric in ("value_weighted_exposure", "reactive_miss_fraction"):
+        det = rpc.paired_detail(sub, reference, treatment, metric, "hab_on", expected_seeds)
+        if det["dropped"] and not allow_missing:
+            raise rpc.MissingSeedsError(f"confirmatory {load} {metric}: dropped seeds "
+                                        f"{rpc._fmt_dropped(det['dropped'])}; investigate and rerun "
+                                        f"(or pass --allow-missing)")
+
+
+def dropped_reasons(rows, reference, treatment, metric, expected_seeds=None) -> str:
+    from experiments import run_plan_completion as rpc
+    return rpc._fmt_dropped(rpc.paired_detail(rows, reference, treatment, metric, "hab_on", expected_seeds)["dropped"])
+
+
+def family_tests(dirs: dict, treatment: str = "E_plan", reference: str = "B5_c", expected_seeds=None,
+                 allow_missing: bool = False, allow_mixed: bool = False) -> list[dict]:
     tests = []
     for load, path in dirs.items():
         rows = load_rows(Path(path))
+        _check_rows(rows, load, treatment, reference, expected_seeds, allow_missing, allow_mixed)
         a, b, used, missing = paired(rows, reference, treatment, "value_weighted_exposure")
+        if expected_seeds:
+            missing = sorted(set(missing) | (set(int(s) for s in expected_seeds) - set(used)))
         d = b - a
         lo, hi = bootstrap_ci(d)
         p_exp = float(wilcoxon(d).pvalue) if d.size >= 2 and np.any(d != 0) else 1.0
         tests.append({"load": load, "hypothesis": "H1 exposure (two-sided Wilcoxon)", "kind": "wilcoxon",
                       "n": int(d.size), "missing_seeds": missing,
+                      "dropped_reasons": dropped_reasons(rows, reference, treatment, "value_weighted_exposure",
+                                                         expected_seeds),
                       "mean_diff": float(d.mean()) if d.size else float("nan"),
                       "pct_of_ref": float(100 * d.mean() / a.mean()) if d.size and a.mean() else float("nan"),
                       "ci_lo": lo, "ci_hi": hi, "p": p_exp, "diffs": d})
         a, b, used, missing = paired(rows, reference, treatment, "reactive_miss_fraction")
+        if expected_seeds:
+            missing = sorted(set(missing) | (set(int(s) for s in expected_seeds) - set(used)))
         d = b - a
         lo, hi = bootstrap_ci(d)
         p_w = float(wilcoxon(d - NI_MARGIN, alternative="less").pvalue) if d.size >= 2 and np.any(
             d != NI_MARGIN) else 1.0
         tests.append({"load": load, "hypothesis": "H2 service noninferiority (bootstrap UB on mean, +2 pp)",
                       "kind": "ni_bootstrap", "n": int(d.size), "missing_seeds": missing,
+                      "dropped_reasons": dropped_reasons(rows, reference, treatment, "reactive_miss_fraction",
+                                                         expected_seeds),
                       "mean_diff": float(d.mean()) if d.size else float("nan"), "pct_of_ref": float("nan"),
                       "ci_lo": lo, "ci_hi": hi, "p": bootstrap_ni_p(d), "p_wilcoxon_supplementary": p_w,
                       "diffs": d})
@@ -169,13 +201,20 @@ def family_tests(dirs: dict, treatment: str = "E_plan", reference: str = "B5_c")
     return tests
 
 
-def run_family(*, treatment: str, reference: str, dirs: dict, expected_n: int, out: Path) -> list[dict]:
-    tests = family_tests(dirs, treatment, reference)
+def run_family(*, treatment: str, reference: str, dirs: dict, expected_n: int, out: Path,
+               expected_seeds=None, allow_missing: bool = False, allow_mixed: bool = False) -> list[dict]:
+    """Errors (MissingSeedsError) if a planned seed is missing or a primary value is not finite,
+    unless ``allow_missing`` (then the dropped seeds are listed with reasons), and
+    (MixedCommitsError) on runs from different code versions unless ``allow_mixed``
+    (user decisions 2026-10-22).  ``expected_seeds`` default: ``expected_n`` seeds from 300."""
+    if expected_seeds is None:
+        expected_seeds = list(range(300, 300 + int(expected_n)))
+    tests = family_tests(dirs, treatment, reference, expected_seeds, allow_missing, allow_mixed)
     for t in tests:
         t["n_flag"] = "" if t["n"] == expected_n else f"n={t['n']} < expected {expected_n}"
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    fields = ["load", "hypothesis", "n", "missing_seeds", "mean_diff", "pct_of_ref", "ci_lo", "ci_hi", "p",
+    fields = ["load", "hypothesis", "n", "missing_seeds", "dropped_reasons", "mean_diff", "pct_of_ref", "ci_lo", "ci_hi", "p",
               "p_wilcoxon_supplementary", "holm_step", "holm_level", "ub_at_holm_level", "p_holm", "reject",
               "n_flag"]
     with (out / "confirmatory_tests.csv").open("w", newline="", encoding="utf-8") as fh:
@@ -192,8 +231,8 @@ def run_family(*, treatment: str, reference: str, dirs: dict, expected_n: int, o
              "UB at Holm level | Reject H0 | Wilcoxon (suppl.) | Notes |",
              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for t in tests:
-        note = "; ".join(x for x in [t["n_flag"], ("missing seeds " + str(t["missing_seeds"]))
-                                     if t["missing_seeds"] else ""] if x)
+        note = "; ".join(x for x in [t["n_flag"], ("dropped seeds: " + t["dropped_reasons"])
+                                     if t.get("dropped_reasons") else ""] if x)
         ub = t.get("ub_at_holm_level")
         lines.append(f"| {t['load']} | {t['hypothesis']} | {t['n']} | {t['mean_diff']:+.4g} | "
                      f"[{t['ci_lo']:+.4g}, {t['ci_hi']:+.4g}] | {t['pct_of_ref']:+.2f} | {t['p']:.4g} | "
@@ -212,10 +251,16 @@ def main() -> None:
     p.add_argument("--dirs", nargs="+", required=True, help="load=path entries")
     p.add_argument("--expected-n", type=int, default=30)
     p.add_argument("--out", default="results/plan_studies/confirmatory/confirmatory_family")
+    p.add_argument("--seed-start", type=int, default=300)
+    p.add_argument("--allow-missing", action="store_true",
+                   help="report the family with dropped seeds listed instead of failing")
+    p.add_argument("--allow-mixed-commits", action="store_true",
+                   help="compare runs from different code versions (default: refuse)")
     args = p.parse_args()
     dirs = dict(e.split("=", 1) for e in args.dirs)
     run_family(treatment=args.treatment, reference=args.reference, dirs=dirs, expected_n=args.expected_n,
-               out=Path(args.out))
+               out=Path(args.out), expected_seeds=list(range(args.seed_start, args.seed_start + args.expected_n)),
+               allow_missing=args.allow_missing, allow_mixed=args.allow_mixed_commits)
 
 
 if __name__ == "__main__":
