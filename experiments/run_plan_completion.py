@@ -26,9 +26,10 @@ Variants (decisions 3-8, 26):
                B4 reservation FLOOR (reservation_mode "floor", rho 0.25 over 600 s) of A, B, C.
   C_plan       plan procedure with the one-intervention Eq. 3 valuation, NO service
                protection (decision 8 and the WS-B follow-up).
-  Every plan variant (C_plan, D_plan, E_plan, E_plan_tr, E_plan_floor) uses the same
-  submitted B4 reservation FLOOR (rho 0.25 over 600 s), so C -> C_gate -> C_plan -> D_plan
-  differ only in their stated factor (user decision 2026-10-22, audit round).
+  Reservation (final user decision 2026-10-22): the B4-based variants A, B, C, C_gate keep
+  the submitted B4 reservation FLOOR (rho 0.25 over 600 s); the B5-based plan variants
+  (C_plan, D_plan, E_plan, E_plan_tr, E_plan_floor) have NO reservation.  So the step
+  C_gate -> C_plan also changes the reservation (floor -> none).
   D_plan       plan procedure, continuation rollouts, no service protection.
   E_plan       D_plan + pending-service protection (confirmatory E, decision 2).
   E_plan_tr    E_plan + timed recovery (Plan Eq. 4) with the fixed dev-seed thresholds
@@ -161,14 +162,13 @@ _SECTION2 = {
 # schedule, queue-aware lead), reported as stl_shadow_full_*; the full-set shadow score of A
 # must equal B's primary score on the same state.
 SHADOW_B_FULL_SECTION2 = dict(_SECTION2)
-# TODO(SIM): the simulator agent reports the parameter (name and shape) that switches the
-# full-set shadow on, e.g. {"<param>": SHADOW_B_FULL_SECTION2}; put it in this dict.  It is
-# empty until then because the simulator rejects unknown keyword arguments.
-TODO_SIM_A_FULL_SHADOW: dict = {}
+# B's shadows mirror A's: forecast-only off, and the full Section 2 set off (= A's scoring).
+SHADOW_A_SECTION2 = {k: False for k in _SECTION2}
 _A = {"stl_forecast_correction": False,
       "stl_shadow_overrides": {"forecast_correction": True},
-      **TODO_SIM_A_FULL_SHADOW}
-_B = {**_SECTION2, "stl_shadow_overrides": {"forecast_correction": False}}
+      "stl_shadow_full_section2": dict(SHADOW_B_FULL_SECTION2)}
+_B = {**_SECTION2, "stl_shadow_overrides": {"forecast_correction": False},
+      "stl_shadow_full_section2": dict(SHADOW_A_SECTION2)}
 _C = {**_SECTION2, "stl_valuation_mode": "integrated_exposure_eq3"}
 # No ceiling (audit round 2026-10-22): C_gate keeps the ladder B4 reservation floor of A/B/C
 # (dispatch_policy "res", reservation_fraction 0.25, reservation_window_s 600, simulator
@@ -183,16 +183,11 @@ B4_VARIANTS: dict[str, tuple[str, dict]] = {
     "C_gate": ("B4", _C_GATE),
 }
 
-# The submitted B4 reservation FLOOR, rho = 0.25 over 600 s (user decision 2026-10-22, audit
-# round: no ceiling anywhere; C_gate and every plan variant use the floor of A/B/C).
-RESERVATION_FLOOR = {"reservation_mode": "floor", "reservation_fraction": 0.25, "reservation_window_s": 600.0}
-# TODO(SIM): at 704722c the plan procedure still reads reservation_fraction as a CEILING
-# (plan_procedure.py, rejection status "ceiling").  The simulator agent replaces it with the
-# floor and reports any extra plan_* flag the plan variants need to use it; add it HERE.
-TODO_SIM_PLAN_FLOOR_FLAGS: dict = {}
+# Reservation (final user decision 2026-10-22): the plan variants are B5-based and carry NO
+# reservation parameter (no ceiling, no floor); the B4-based variants keep the B4 floor.
 # plan_compute_budget_s=1e9: no wall-clock timeout in evaluation runs (decision 16; the
 # simulator clock is frozen while the planner computes).
-_PLAN = {"planner_procedure": "plan", **RESERVATION_FLOOR, **TODO_SIM_PLAN_FLOOR_FLAGS,
+_PLAN = {"planner_procedure": "plan",
          "plan_compute_budget_s": 1e9,
          # Gate (user decision 2026-10-18): eps_gate = 0 with Monte Carlo significance,
          # admit only if the mean paired U exceeds 2 standard errors over scenarios.
@@ -226,7 +221,8 @@ COMPARISONS = [
     ("A", "B", "B vs A: Section 2 forecast changes"),
     ("B", "C", "C vs B: Eq. 3 objective alignment"),
     ("C", "C_gate", "C_gate vs C: positive-benefit gate (same reservation floor)"),
-    ("C_gate", "C_plan", "C_plan vs C_gate: plan procedure (B5 candidates, unc dispatch, fleet view)"),
+    ("C_gate", "C_plan", "C_plan vs C_gate: plan procedure (B5 candidates, unc dispatch, fleet view) "
+                         "and reservation floor -> none"),
     ("C_plan", "D_plan", "D_plan vs C_plan: continuation valuation"),
     ("C", "D_plan", "D_plan vs C: plan procedure with continuation vs B4-pipeline Eq. 3"),
     ("D_plan", "E_plan", "E_plan vs D_plan: pending-service protection"),
@@ -276,14 +272,6 @@ REPORT_METRICS = [
     "stl_shadow_top1_agree_fraction",
     "stl_shadow_kendall_tau_mean",
     "stl_masked_group_fraction",
-    # dual shadow of A vs B (confirmed 2026-10-22).  TODO(SIM): names to be confirmed by the
-    # simulator agent; absent metrics are skipped by analyze().
-    "stl_shadow_full_top1_agree_fraction",
-    "stl_shadow_full_kendall_tau_mean",
-    "stl_shadow_full_masked_group_fraction",
-    "stl_shadow_forecast_top1_agree_fraction",
-    "stl_shadow_forecast_kendall_tau_mean",
-    "stl_shadow_forecast_masked_group_fraction",
     # B4 forecast: travel-recovery gap of the candidate's cue (user decision 2026-10-22)
     "stl_travel_recovery_gap_mean",
     "stl_travel_recovery_gap_p90",
@@ -302,66 +290,78 @@ REPORT_METRICS = [
     "plan_dev_travel_err_mean_s",
     "plan_F0_protected_missed",
     "plan_F0_protected_all_scen_missed",
-    # fleet argmax ties broken to the lowest index (accepted 2026-10-22); count of exact-U ties
-    # TODO(SIM): name to be confirmed by the simulator agent
+    # fleet argmax ties broken to the lowest index (accepted 2026-10-22): count of exact-U ties
     "plan_exact_u_tie_count",
+    # oracle cost (all candidates on 25% of decisions, 64 scenarios)
+    "plan_oracle_decisions",
+    "plan_oracle_wall_s_total",
 ]
 
-# Candidate rejection reasons of the plan procedure (user decision 2026-10-22: feasibility,
-# gate, floor, obligation, timeout), one metric per final status of
-# habituation_stl/plan_procedure.REJECTION_REASONS, without the dropped "ceiling".
-# TODO(SIM): if the reservation floor of the plan variants adds a rejection status, add its
-# plan_rejected_<status> name here.
-PLAN_REJECTION_METRICS = [
-    "plan_rejected_infeasible_service",      # feasibility (service protection)
-    "plan_rejected_infeasible_late",         # feasibility (baseline-late tasks)
-    "plan_rejected_gate",                    # Monte Carlo gate
-    "plan_rejected_floor",                   # effectiveness floor 0.4 (E_plan_floor)
-    "plan_rejected_infeasible_obligation",   # timed-recovery obligation (dominance)
-    "plan_rejected_obligation_exceedance",   # timed recovery, bounded violation preferred another
-    "plan_rejected_timeout",                 # wall-clock budget (timeout study)
-    "plan_rejected_robot_committed",
-    "plan_rejected_not_selected",
-]
+# Dual same-state shadow of A vs B (confirmed 2026-10-22): forecast-only and full Section 2
+# set, each over all valuations and over first evaluations only (*_first_eval).
+SHADOW_KINDS = ("forecast", "full")
+SHADOW_STATS = ("top1_agree_fraction", "kendall_tau_mean", "masked_group_fraction", "compared_groups")
+SHADOW_METRICS = [f"stl_shadow_{k}_{s}{suf}" for k in SHADOW_KINDS for s in SHADOW_STATS for suf in ("", "_first_eval")]
+
+# Candidate rejection reasons of the plan procedure (user decision 2026-10-22): counts and
+# per-decision means of every final status of habituation_stl/plan_procedure.REJECTION_REASONS
+# (there is no ceiling) plus the groups feasibility (infeasible_service + infeasible_late)
+# and obligation (infeasible_obligation + obligation_exceedance).
+REJECTION_REASONS = ("infeasible_service", "infeasible_late", "gate", "floor", "infeasible_obligation",
+                     "obligation_exceedance", "timeout", "robot_committed", "not_selected",
+                     "feasibility", "obligation")
+PLAN_REJECTION_METRICS = [f"plan_rejected_{r}{suf}" for r in REJECTION_REASONS for suf in ("", "_per_decision_mean")]
 
 # Prop. 2 (user decision 2026-10-22, audit round): scale-free metrics are PRIMARY, raw
-# unit-mixed errors (planner legacy units vs truth units) SECONDARY.
+# unit-mixed errors (planner legacy units vs truth units, suffix _raw_units) SECONDARY.
 PROP2_PRIMARY_METRICS = [
-    "plan_oracle_U_sign_agree_fraction",               # planner vs oracle sign agreement of U
-    "plan_oracle_kendall_tau_mean",                     # planner vs oracle ranking, round-0 candidates
-    "plan_oracle_kendall_tau_median",
-    "plan_oracle_admitted_U_oracle_positive_fraction",  # admitted deviations with oracle U > 0
+    "plan_prop2_sign_agree_fraction",                 # planner vs oracle sign agreement of U
+    "plan_prop2_sign_agree_n",
+    "plan_prop2_kendall_tau_mean",                    # planner vs oracle ranking of the candidates
+    "plan_prop2_kendall_tau_median",
+    "plan_prop2_kendall_tau_n",
+    "plan_prop2_admitted_oracle_U_positive_fraction",  # admitted deviations with oracle U > 0
+    "plan_prop2_admitted_oracle_n",
 ]
-# TODO(SIM): the simulator agent may rename the raw errors (likely suffix "_raw_units"); every
-# metric starting with "plan_" and ending in RAW_UNITS_SUFFIX is added automatically
-# (expand_metrics), so only this list's old names need removing once the names are final.
 RAW_UNITS_SUFFIX = "_raw_units"
 PROP2_SECONDARY_METRICS = [
-    "plan_pred_err_U_bias",
-    "plan_pred_err_U_mean_abs",
-    "plan_pred_err_U_p95_abs",
-    "plan_pred_err_J0_bias",
-    "plan_pred_err_J0_mean_abs",
+    "plan_pred_err_U_bias_raw_units",
+    "plan_pred_err_U_mean_abs_raw_units",
+    "plan_pred_err_U_p95_abs_raw_units",
+    "plan_pred_err_U_max_abs_raw_units",
+    "plan_pred_err_J0_bias_raw_units",
+    "plan_pred_err_J0_mean_abs_raw_units",
+    "plan_pred_err_J0_p95_abs_raw_units",
+    "plan_pred_err_J0_max_abs_raw_units",
     "plan_pred_err_J0_rel_mean",
-    "plan_pred_err_Ja_mean_abs",
-    "plan_realized_minus_pred_mean",
-    "plan_realized_minus_pred_mean_abs",
+    "plan_pred_err_Ja_bias_raw_units",
+    "plan_pred_err_Ja_mean_abs_raw_units",
+    "plan_pred_err_Ja_p95_abs_raw_units",
+    "plan_realized_minus_pred_mean_raw_units",
+    "plan_realized_minus_pred_mean_abs_raw_units",
+    "plan_oracle_J0_se_mean_raw_units",
+    "plan_oracle_U_se_mean_raw_units",
+    "plan_oracle_admitted_U_oracle_mean_raw_units",
+    # C_plan: its J-hat is the one-intervention J (no continuation)
+    "plan_realized_minus_one_intervention_J_windows",
+    "plan_realized_minus_one_intervention_J_mean_raw_units",
 ]
 
 # Per-robot Prop. 2 (per-robot information sets; neighbor study).  The per-robot keys
-# plan_pr_*_<robot id> are added automatically from the rows (PER_ROBOT_PREFIX).
+# plan_pr_prop2_<metric>_<rid> and plan_pr_*_<rid> are added automatically from the rows.
 PER_ROBOT_PREFIX = "plan_pr_"
-PER_ROBOT_METRICS = [
-    "plan_pr_robots",
-    "plan_pr_realized_minus_pred_mean",
-    "plan_pr_realized_minus_pred_mean_abs",
-    "plan_pr_realized_minus_pred_spread_sd",
-    "plan_pr_realized_minus_pred_spread_range",
-]
+PER_ROBOT_METRICS = (
+    ["plan_pr_robots"]
+    + [f"plan_pr_prop2_{m}_robot_{s}" for m in ("sign_agree_fraction", "kendall_tau_mean",
+                                                 "admitted_oracle_U_positive_fraction") for s in ("mean", "spread_sd")]
+    + [f"plan_pr_realized_minus_pred_{m}_raw_units" for m in ("mean", "mean_abs", "spread_sd", "spread_range")]
+)
 
-REPORT_METRICS = REPORT_METRICS + PLAN_REJECTION_METRICS + PROP2_PRIMARY_METRICS + PROP2_SECONDARY_METRICS
+REPORT_METRICS = (REPORT_METRICS + SHADOW_METRICS + PLAN_REJECTION_METRICS + PROP2_PRIMARY_METRICS
+                  + PROP2_SECONDARY_METRICS)
 
 METRIC_GROUPS = {
+    **{m: "B4 dual shadow" for m in SHADOW_METRICS},
     **{m: "plan rejection reason" for m in PLAN_REJECTION_METRICS},
     **{m: "Prop. 2 PRIMARY (scale-free)" for m in PROP2_PRIMARY_METRICS},
     **{m: "Prop. 2 secondary (raw, unit-mixed)" for m in PROP2_SECONDARY_METRICS},
@@ -372,10 +372,10 @@ METRIC_GROUPS = {
 def metric_group(metric: str) -> str:
     if metric in METRIC_GROUPS:
         return METRIC_GROUPS[metric]
-    if metric.startswith("plan_") and metric.endswith(RAW_UNITS_SUFFIX):
-        return "Prop. 2 secondary (raw, unit-mixed)"
     if metric.startswith(PER_ROBOT_PREFIX):
         return "Prop. 2 per robot"
+    if metric.startswith("plan_") and metric.endswith(RAW_UNITS_SUFFIX):
+        return "Prop. 2 secondary (raw, unit-mixed)"
     return ""
 
 
@@ -829,10 +829,16 @@ def bootstrap_ci(diffs: np.ndarray, n_boot: int = 10000, seed: int = 12345):
     return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
 
 
-# Mission and service outcomes: a pair dropped for a non-finite value of these is an error
-# (other metrics are legitimately undefined in some runs, e.g. deviation means without
-# deviations; their dropped seeds are listed per row).
+# Mission and service outcomes (used by the trade-off and the confirmatory family).
 PRIMARY_METRICS = ("value_weighted_exposure", "reactive_miss_fraction")
+
+
+def reports(rows, variant, metric, hab="hab_on") -> bool:
+    """A system REPORTS a metric when at least one of its runs has a finite value (plan
+    metrics of B4 or B5 systems, shadow metrics of plan systems, ... are not reported and
+    are not compared)."""
+    return any(r["variant"] == variant and r["habituation_condition"] == hab and math.isfinite(_f(r.get(metric)))
+               for r in rows)
 
 
 def analyze(rows: list[dict], outdir: Path | None = None, hab: str = "hab_on",
@@ -842,8 +848,10 @@ def analyze(rows: list[dict], outdir: Path | None = None, hab: str = "hab_on",
 
     * With ``expected_seeds``, a missing run of a compared variant raises
       MissingSeedsError unless ``allow_missing`` (then the seeds are listed).
-    * A pair of a PRIMARY metric dropped for a non-finite value also raises unless
-      ``allow_missing``.  Every row lists the seeds dropped and why (``dropped_seeds``).
+    * A metric is compared when both systems report it (``reports``).  Then ANY non-finite
+      value of a planned seed, in ANY metric, raises MissingSeedsError unless
+      ``allow_missing`` (final user decision 2026-10-22); with the flag the seeds are dropped
+      and listed with reasons (``dropped_seeds``).
     * Runs of the two compared variants must come from one code version (git commit and
       uncommitted diff), else MixedCommitsError unless ``allow_mixed``.
     Timeouts are an outcome (plan_timeout_rate), never a drop reason.
@@ -860,13 +868,15 @@ def analyze(rows: list[dict], outdir: Path | None = None, hab: str = "hab_on",
         check_commits([r for r in rows if r["variant"] in (ref, trt) and r["habituation_condition"] == hab],
                       f"{label} ({hab})", allow_mixed)
         for metric in metrics:
+            if not (reports(rows, ref, metric, hab) and reports(rows, trt, metric, hab)):
+                continue   # not reported by both systems (e.g. plan metrics of B4 variants)
             det = paired_detail(rows, ref, trt, metric, hab, expected_seeds)
             a, b = det["ref"], det["trt"]
-            if det["dropped"] and metric in PRIMARY_METRICS and not allow_missing:
+            if det["dropped"] and not allow_missing:
                 raise MissingSeedsError(f"{label} ({hab}) {metric}: dropped seeds {_fmt_dropped(det['dropped'])}; "
                                         f"investigate and rerun (or pass --allow-missing)")
             if a.size == 0:
-                continue   # metric reported by neither system (e.g. plan metrics of B4 variants)
+                continue
             d = b - a
             lo, hi = bootstrap_ci(d)
             ref_mean = float(np.mean(a))
@@ -885,7 +895,8 @@ def analyze(rows: list[dict], outdir: Path | None = None, hab: str = "hab_on",
 
 
 def analyze_did(rows: list[dict], cell_pair: tuple, ref_pair: tuple, label: str, hab: str = "hab_on",
-                metrics=None, expected_seeds=None, allow_mixed: bool = False) -> list[dict]:
+                metrics=None, expected_seeds=None, allow_mixed: bool = False,
+                allow_missing: bool = False) -> list[dict]:
     """Difference of paired differences, per seed:
     (cell_pair[1] - cell_pair[0]) - (ref_pair[1] - ref_pair[0]), e.g. (E_plan - B5_c) in a
     delay/drop cell minus (E_plan - B5_c) in the reference cell; bootstrap over seeds."""
@@ -893,6 +904,8 @@ def analyze_did(rows: list[dict], cell_pair: tuple, ref_pair: tuple, label: str,
                   label, allow_mixed)
     out = []
     for metric in expand_metrics(metrics or REPORT_METRICS, rows):
+        if not all(reports(rows, v, metric, hab) for v in (*cell_pair, *ref_pair)):
+            continue
         dc = paired_detail(rows, cell_pair[0], cell_pair[1], metric, hab, expected_seeds)
         dr = paired_detail(rows, ref_pair[0], ref_pair[1], metric, hab, expected_seeds)
         c = dict(zip(dc["seeds"], dc["trt"] - dc["ref"]))
@@ -904,6 +917,9 @@ def analyze_did(rows: list[dict], cell_pair: tuple, ref_pair: tuple, label: str,
         dropped += [{"seed": x["seed"], "reason": "reference: " + x["reason"]} for x in dr["dropped"]]
         dropped += [{"seed": s, "reason": "no reference pair"} for s in sorted(c) if s not in r]
         dropped += [{"seed": s, "reason": "no cell pair"} for s in sorted(r) if s not in c]
+        if dropped and not allow_missing:
+            raise MissingSeedsError(f"{label} ({hab}) {metric}: dropped seeds {_fmt_dropped(dropped)}; "
+                                    f"investigate and rerun (or pass --allow-missing)")
         d = np.array([c[s] - r[s] for s in seeds])
         lo, hi = bootstrap_ci(d)
         rm = float(np.mean([r[s] for s in seeds]))
@@ -923,7 +939,7 @@ def analyze_did(rows: list[dict], cell_pair: tuple, ref_pair: tuple, label: str,
 # Exposure vs service trade-off (user decision 2026-10-22)
 # ---------------------------------------------------------------------------
 def tradeoff(rows: list[dict], hab: str = "hab_on", reference: str = "B5_c", variants=None,
-             expected_seeds=None, allow_mixed: bool = False) -> list[dict]:
+             expected_seeds=None, allow_mixed: bool = False, allow_missing: bool = False) -> list[dict]:
     """One point per variant: mean exposure as % of the reference (100 + percent effect,
     percent effect = mean paired difference / reference mean x 100, CI = bootstrap CI of
     the mean paired difference on the same scale) against the mean paired reactive
@@ -939,6 +955,9 @@ def tradeoff(rows: list[dict], hab: str = "hab_on", reference: str = "B5_c", var
                       f"trade-off {v} vs {reference} ({hab})", allow_mixed)
         e = paired_detail(rows, reference, v, "value_weighted_exposure", hab, expected_seeds)
         m = paired_detail(rows, reference, v, "reactive_miss_fraction", hab, expected_seeds)
+        if (e["dropped"] or m["dropped"]) and not allow_missing:
+            raise MissingSeedsError(f"trade-off {v} vs {reference} ({hab}): dropped seeds "
+                                    f"{_fmt_dropped(e['dropped'] + m['dropped'])} (or pass --allow-missing)")
         if e["ref"].size == 0 or m["ref"].size == 0:
             continue
         de = e["trt"] - e["ref"]
@@ -1055,7 +1074,8 @@ def write_report(rows, outdir: Path, meta: dict, comparisons=None, expected_seed
         lines += stats_table(stats_rows)
         lines.append("")
         write_tradeoff({f"mu={meta.get('mu')}": tradeoff(rows, hab, expected_seeds=expected_seeds,
-                                                               allow_mixed=allow_mixed)}, outdir,
+                                                               allow_mixed=allow_mixed,
+                                                               allow_missing=allow_missing)}, outdir,
                        f"tradeoff_{hab}", f"({hab})")
         for s in stats_rows:
             if s["reference"] == "B5_c" and s["metric"] == "reactive_miss_fraction" and \

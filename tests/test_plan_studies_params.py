@@ -58,7 +58,7 @@ def test_variant_A_is_submitted_B4_in_plan_env():
     a = rpc.build_params("A", True, MU, None)
     assert a["stl_forecast_correction"] is False
     assert _diff(ladder, a) <= {"estimator_mode", "random_stream_mode", "truth_deterrence_memory",
-                                "stl_forecast_correction", "stl_shadow_overrides"}
+                                "stl_forecast_correction", "stl_shadow_overrides", "stl_shadow_full_section2"}
     for k in NEW_B4_FLAGS:
         assert k not in a or a[k] == ladder.get(k), k
 
@@ -72,9 +72,10 @@ def test_variants_B_C_Cgate_chain():
               "stl_queue_aware_lead", "stl_forecast_planner_update_model"):
         assert b[k] is True and c[k] is True and g[k] is True
     assert _diff(a, b) == {"stl_forecast_correction", "stl_forward_trajectory_correction", "stl_committed_schedule",
-                           "stl_queue_aware_lead", "stl_forecast_planner_update_model", "stl_shadow_overrides"}
+                           "stl_queue_aware_lead", "stl_forecast_planner_update_model", "stl_shadow_overrides",
+                           "stl_shadow_full_section2"}
     assert c["stl_valuation_mode"] == "integrated_exposure_eq3"
-    assert _diff(b, c) == {"stl_valuation_mode", "stl_shadow_overrides"}
+    assert _diff(b, c) == {"stl_valuation_mode", "stl_shadow_overrides", "stl_shadow_full_section2"}
     # no ceiling anywhere (audit round 2026-10-22): C_gate differs from C by the gate only
     assert _diff(c, g) == {"stl_strict_admission", "stl_benefit_gate"}
     assert g["stl_strict_admission"] is True and g["stl_benefit_gate"] == 0.0
@@ -143,7 +144,7 @@ def test_report_metrics_include_service_and_mechanism():
     for m in ("reactive_miss_fraction", "reactive_unfinished_total", "reactive_age_at_completion_p90_s",
               "motion_time_deviation_s", "eta_truth_at_application_deviation_mean",
               "cue_reuse_all_interval_mean_s", "plan_runtime_p99_s", "plan_timeout_rate",
-              "plan_oracle_kendall_tau_mean", "plan_F0_protected_missed", "plan_dev_travel_err_mean_s"):
+              "plan_prop2_kendall_tau_mean", "plan_F0_protected_missed", "plan_dev_travel_err_mean_s"):
         assert m in rpc.REPORT_METRICS, m
 
 
@@ -526,24 +527,28 @@ def test_table_i_and_iv_archive_match_paper():
 
 
 # ======================================================================== 2026-10-22 audit round
-def test_no_ceiling_reservation_floor_everywhere():
+RESERVATION_KEYS = ("reservation_mode", "reservation_fraction", "reservation_window_s")
+
+
+def test_reservation_b4_floor_and_none_for_plan_variants():
+    """Final user decision 2026-10-22: B4-based variants keep the B4 floor; the B5-based plan
+    variants carry NO reservation parameter; no ceiling anywhere."""
     import inspect
     import DeterrentSystem as ds
     sig = inspect.signature(ds.run_simulation_frames_persistent)
     assert sig.parameters["reservation_mode"].default == "floor"   # B4 variants inherit the floor
     for v in rpc.VARIANTS:
-        p = rpc.build_params(v, True, MU, None)
-        assert p.get("reservation_mode", "floor") == "floor", v
-        assert "ceiling" not in json.dumps(p), v
+        assert "ceiling" not in json.dumps(rpc.build_params(v, True, MU, None)), v
     for v in ("A", "B", "C", "C_gate"):
         p = rpc.build_params(v, True, MU, None)
         assert p["dispatch_policy"] == "res" and p["reservation_fraction"] == 0.25
-        assert p["reservation_window_s"] == 600.0
+        assert p["reservation_window_s"] == 600.0 and p.get("reservation_mode", "floor") == "floor"
     for v in ("C_plan", "D_plan", "E_plan", "E_plan_tr", "E_plan_floor"):
         p = rpc.build_params(v, True, MU, None)
-        assert (p["reservation_mode"], p["reservation_fraction"], p["reservation_window_s"]) == ("floor", 0.25, 600.0)
-    assert rpc.RESERVATION_FLOOR == {"reservation_mode": "floor", "reservation_fraction": 0.25,
-                                     "reservation_window_s": 600.0}
+        assert not any(k in p for k in RESERVATION_KEYS), v
+        assert not any(k in rpc._PLAN for k in RESERVATION_KEYS)
+        assert p["dispatch_policy"] == "unc"
+    assert not hasattr(rpc, "RESERVATION_FLOOR") and not hasattr(rpc, "TODO_SIM_PLAN_FLOOR_FLAGS")
 
 
 def test_c_plan_final_params_and_no_stale_todo():
@@ -564,9 +569,23 @@ def test_variant_A_dual_shadow():
         "stl_forecast_correction", "stl_forward_trajectory_correction", "stl_committed_schedule",
         "stl_queue_aware_lead", "stl_forecast_planner_update_model"}
     assert all(v is True for v in rpc.SHADOW_B_FULL_SECTION2.values())
+    assert a["stl_shadow_full_section2"] == rpc.SHADOW_B_FULL_SECTION2
+    b = rpc.build_params("B", True, MU, None)
+    assert b["stl_shadow_overrides"] == {"forecast_correction": False}
+    assert b["stl_shadow_full_section2"] == {k: False for k in rpc._SECTION2}
+    for v in ("C", "C_gate") + tuple(rpc.PLAN_VARIANTS):
+        assert "stl_shadow_full_section2" not in rpc.build_params(v, True, MU, None)
     for kind in ("full", "forecast"):
-        for m in ("top1_agree_fraction", "kendall_tau_mean", "masked_group_fraction"):
-            assert f"stl_shadow_{kind}_{m}" in rpc.REPORT_METRICS
+        for m in ("top1_agree_fraction", "kendall_tau_mean", "masked_group_fraction", "compared_groups"):
+            for suf in ("", "_first_eval"):
+                assert f"stl_shadow_{kind}_{m}{suf}" in rpc.REPORT_METRICS
+    assert not hasattr(rpc, "TODO_SIM_A_FULL_SHADOW")
+
+
+def test_full_shadow_param_accepted_by_simulator():
+    import inspect
+    import DeterrentSystem as ds
+    assert "stl_shadow_full_section2" in inspect.signature(ds.run_simulation_frames_persistent).parameters
 
 
 def test_report_metrics_audit_round():
@@ -574,12 +593,26 @@ def test_report_metrics_audit_round():
     for m in ("stl_travel_recovery_gap_mean", "stl_travel_recovery_gap_p90", "stl_travel_recovery_gap_max",
               "stl_travel_recovery_gap_rel_mean", "plan_exact_u_tie_count"):
         assert m in rpc.REPORT_METRICS, m
-    reasons = {m[len("plan_rejected_"):] for m in rpc.PLAN_REJECTION_METRICS}
-    assert reasons <= set(pp.REJECTION_REASONS) and "ceiling" not in reasons
-    assert {"infeasible_service", "infeasible_late", "gate", "floor", "infeasible_obligation",
-            "obligation_exceedance", "timeout"} <= reasons
-    assert rpc.PROP2_PRIMARY_METRICS[:2] == ["plan_oracle_U_sign_agree_fraction", "plan_oracle_kendall_tau_mean"]
-    assert "plan_oracle_admitted_U_oracle_positive_fraction" in rpc.PROP2_PRIMARY_METRICS
+    for m in ("plan_oracle_decisions", "plan_oracle_wall_s_total"):
+        assert m in rpc.REPORT_METRICS, m
+    reasons = set(rpc.REJECTION_REASONS)
+    assert reasons == set(pp.REJECTION_REASONS) | {"feasibility", "obligation"} and "ceiling" not in reasons
+    for r in reasons:
+        assert f"plan_rejected_{r}" in rpc.REPORT_METRICS and f"plan_rejected_{r}_per_decision_mean" in rpc.REPORT_METRICS
+    assert not any("ceiling" in m for m in rpc.REPORT_METRICS)
+    assert rpc.PROP2_PRIMARY_METRICS == [
+        "plan_prop2_sign_agree_fraction", "plan_prop2_sign_agree_n", "plan_prop2_kendall_tau_mean",
+        "plan_prop2_kendall_tau_median", "plan_prop2_kendall_tau_n", "plan_prop2_admitted_oracle_U_positive_fraction",
+        "plan_prop2_admitted_oracle_n"]
+    for m in rpc.PROP2_SECONDARY_METRICS:
+        assert m.endswith("_raw_units") or m in ("plan_pred_err_J0_rel_mean", "plan_realized_minus_one_intervention_J_windows")
+    for m in ("plan_realized_minus_pred_mean_raw_units", "plan_oracle_J0_se_mean_raw_units",
+              "plan_oracle_U_se_mean_raw_units", "plan_oracle_admitted_U_oracle_mean_raw_units",
+              "plan_realized_minus_one_intervention_J_mean_raw_units"):
+        assert m in rpc.PROP2_SECONDARY_METRICS
+    for m in ("plan_pr_prop2_sign_agree_fraction_robot_mean", "plan_pr_prop2_kendall_tau_mean_robot_spread_sd",
+              "plan_pr_realized_minus_pred_spread_range_raw_units"):
+        assert m in rpc.PER_ROBOT_METRICS
     for m in rpc.PROP2_PRIMARY_METRICS:
         assert rpc.metric_group(m).startswith("Prop. 2 PRIMARY")
     for m in rpc.PROP2_SECONDARY_METRICS:
@@ -588,13 +621,13 @@ def test_report_metrics_audit_round():
 
 
 def test_expand_metrics_raw_units_and_per_robot():
-    rows = [{"plan_pred_err_U_mean_abs_raw_units": 1.0, "plan_pr_realized_minus_pred_mean_r0": 2.0, "x": 1}]
+    rows = [{"plan_new_err_raw_units": 1.0, "plan_pr_prop2_sign_agree_fraction_r0": 2.0, "x": 1}]
     base = ["value_weighted_exposure"]
-    assert rpc.expand_metrics(base, rows) == base + ["plan_pred_err_U_mean_abs_raw_units"]
+    assert rpc.expand_metrics(base, rows) == base + ["plan_new_err_raw_units"]
     pr = rpc.expand_metrics(base, rows, per_robot=True)
-    assert "plan_pr_realized_minus_pred_mean_r0" in pr and all(m in pr for m in rpc.PER_ROBOT_METRICS)
-    assert rpc.metric_group("plan_pred_err_U_mean_abs_raw_units").startswith("Prop. 2 secondary")
-    assert rpc.metric_group("plan_pr_realized_minus_pred_mean_r0") == "Prop. 2 per robot"
+    assert "plan_pr_prop2_sign_agree_fraction_r0" in pr and all(m in pr for m in rpc.PER_ROBOT_METRICS)
+    assert rpc.metric_group("plan_new_err_raw_units").startswith("Prop. 2 secondary")
+    assert rpc.metric_group("plan_pr_prop2_sign_agree_fraction_r0") == "Prop. 2 per robot"
 
 
 def _rows(variants, seeds, **vals):
@@ -630,13 +663,25 @@ def test_analyze_errors_on_missing_seeds_by_default():
     st = rpc.analyze(rows, None, "hab_on", comps, ["value_weighted_exposure"], expected_seeds=[1, 2, 3],
                      allow_missing=True)
     assert st[0]["n"] == 2 and st[0]["dropped_seeds"] == "3: no E_plan run" and st[0]["n_dropped"] == 1
-    # a non-finite PRIMARY value is an error; a non-finite secondary value is listed only
+    # final decision 2026-10-22: a non-finite value of a planned seed in ANY reported metric is
+    # an error; with the flag the seed is dropped and listed with its reason
     rows = _rows(["B5_c", "E_plan"], [1, 2, 3], eta=lambda v, s: float("nan") if s == 2 else 0.5)
-    st = rpc.analyze(rows, None, "hab_on", comps, ["eta"], expected_seeds=[1, 2, 3])
+    with pytest.raises(rpc.MissingSeedsError, match="eta"):
+        rpc.analyze(rows, None, "hab_on", comps, ["eta"], expected_seeds=[1, 2, 3])
+    st = rpc.analyze(rows, None, "hab_on", comps, ["eta"], expected_seeds=[1, 2, 3], allow_missing=True)
     assert st[0]["dropped_seeds"] == "2: B5_c value not finite; E_plan value not finite"
     rows[0]["reactive_miss_fraction"] = float("nan")
     with pytest.raises(rpc.MissingSeedsError, match="reactive_miss_fraction"):
         rpc.analyze(rows, None, "hab_on", comps, ["reactive_miss_fraction"], expected_seeds=[1, 2, 3])
+    # a metric a system does not report at all (no finite value in any run) is not compared
+    rows = _rows(["B5_c", "E_plan"], [1, 2, 3], plan_x=lambda v, s: 1.0 if v == "E_plan" else float("nan"))
+    assert rpc.analyze(rows, None, "hab_on", comps, ["plan_x"], expected_seeds=[1, 2, 3]) == []
+    # the trade-off and the difference of differences also error
+    rows = _rows(["B5_c", "E_plan"], [1, 2, 3])
+    rows[1]["value_weighted_exposure"] = float("nan")
+    with pytest.raises(rpc.MissingSeedsError):
+        rpc.tradeoff(rows, "hab_on", expected_seeds=[1, 2, 3])
+    assert rpc.tradeoff(rows, "hab_on", expected_seeds=[1, 2, 3], allow_missing=True)[0]["n_exposure"] == 2
 
 
 def test_analyze_refuses_mixed_commits():
@@ -859,11 +904,24 @@ def test_persistent_old_design_refuses_to_run():
         rpo.main()
 
 
-def test_persistent_depleted_start_has_planner_fresh_placeholder(jobs_by_study):
+def test_persistent_depleted_start_planner_fresh_no_placeholder(jobs_by_study):
+    """The simulator keeps the planner fresh on a depleted start; no extra parameter."""
     _, jobs = jobs_by_study
+    assert not hasattr(rps, "TODO_SIM_PLANNER_FRESH")
     dep = [j for j in jobs["persistent"] if j["cell"].startswith("depleted")]
-    for k in rps.TODO_SIM_PLANNER_FRESH:
-        assert all(k in j["params"] for j in dep)
+    fresh = {(j["cell"].replace("fresh_", ""), j["variant"], j["seed"]): j["params"]
+             for j in jobs["persistent"] if j["cell"].startswith("fresh")}
+    for j in dep:
+        ref = fresh[(j["cell"].replace("depleted_", ""), j["variant"], j["seed"])]
+        assert _diff(ref, j["params"]) == {"initial_hab_state_path"}
+
+
+def test_compute_estimate_rates():
+    assert math.isclose(rps.ORACLE_WALL_FACTOR, 1.08)
+    assert math.isclose(rps.RUN_HOURS_1800S[("plan", "heavy")], 41.0 / 60.0 * 1.08)
+    assert math.isclose(rps.RUN_HOURS_1800S[("plan", "overload")], 2.0 * 1.08)
+    assert math.isclose(rps.RUN_HOURS_1800S_POOL2[("plan", "heavy")], 3 * 2897.0 / 3600.0)
+    assert all(v is not None for v in rps.RUN_HOURS_1800S.values())
 
 
 def test_compute_estimate(tmp_path):

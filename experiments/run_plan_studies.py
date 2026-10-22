@@ -66,7 +66,7 @@ Measured size (heavy 300 s: about 0.59 MB for A and B; overload 600 s: 2.2 MB fo
 projects to about 1-2 GB for 30 seeds x 3 loads x {A, B}, so plain JSONL is kept.
 
 Analysis (user decisions 2026-10-22): every comparison ERRORS if a planned seed of a compared
-system is missing (or a primary metric is not finite), unless --allow-missing (then the
+system is missing or has a non-finite value in ANY reported metric, unless --allow-missing (then the
 dropped seeds are listed); runs of different code versions (git commit + uncommitted diff,
 recorded in every raw result) are never compared unless --allow-mixed-commits.  A failed run
 is retried --retries times (default 1); every failed attempt is written with its log tail to
@@ -328,9 +328,6 @@ def hab_state_path(root: Path, start_load: str, seed: int) -> Path:
     return Path(root) / "persistent" / "hab_states" / f"B5_c_{start_load}_T{int(DEPLETION_RUN_T_END_S)}_seed_{int(seed)}.json"
 
 
-TODO_SIM_PLANNER_FRESH: dict = {}
-
-
 def study_persistent(args) -> Study:
     root = Path(args.root)
     cells = []
@@ -350,12 +347,9 @@ def study_persistent(args) -> Study:
             per_seed = None
             if start == "depleted":
                 # User decision 2026-10-22: the TRUTH starts from the truth eta at the end of the
-                # B5_c source run; the PLANNER starts fresh (eta = 1) for every system.
-                # TODO(SIM): at 704722c initial_hab_state_path also loads the planner field
-                # (DeterrentSystem.py, planner_eta); the simulator agent adds the switch that
-                # keeps the planner fresh and reports its name; put it in TODO_SIM_PLANNER_FRESH.
-                per_seed = (lambda s, _l=load0: {"initial_hab_state_path": str(hab_state_path(root, _l, s)),
-                                                 **TODO_SIM_PLANNER_FRESH})
+                # B5_c source run; the PLANNER always starts fresh (eta = 1) on a depleted start
+                # (simulator behavior of initial_hab_state_path, no extra parameter).
+                per_seed = (lambda s, _l=load0: {"initial_hab_state_path": str(hab_state_path(root, _l, s))})
             cells.append(Cell(
                 name=f"{start}_{sw}", mu=LOADS[load0], hab_on=True, variants=["B5_c", "D_plan", "E_plan"],
                 seeds=EVAL_SEEDS_10, t_end=PERSISTENT_T_END_S,
@@ -499,6 +493,7 @@ def analyze_study(study: Study, root: Path, allow_missing: bool = False, allow_m
                             allow_missing=allow_missing, allow_mixed=allow_mixed) if cell.comparisons else []
         for cell_pair, ref_pair, label in cell.did:
             stats += rpc.analyze_did(rows, cell_pair, ref_pair, label, hab, cm, expected_seeds=cell.seeds,
+                                     allow_missing=allow_missing,
                                      allow_mixed=allow_mixed)
         n_runs = {v: sum(1 for r in rows if r["variant"] == v) for v in sorted({r["variant"] for r in rows})}
         versions = rpc.check_commits(rows, where, allow_mixed=True) if rows else {}
@@ -513,7 +508,8 @@ def analyze_study(study: Study, root: Path, allow_missing: bool = False, allow_m
             all_stats.append(dict(s, study=study.name, cell=cell.name))
         lines.append("")
         if any(r["variant"] == "B5_c" for r in rows):
-            trade[cell.name] = rpc.tradeoff(rows, hab, "B5_c", expected_seeds=cell.seeds, allow_mixed=allow_mixed)
+            trade[cell.name] = rpc.tradeoff(rows, hab, "B5_c", expected_seeds=cell.seeds, allow_mixed=allow_mixed,
+                                            allow_missing=allow_missing)
     _write_csv(all_stats, out_dir / "paired_stats.csv")
     (out_dir / "analysis.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     if any(trade.values()):
@@ -539,18 +535,29 @@ def _confirmatory_family(study: Study, root: Path, allow_missing: bool = False, 
 # ---------------------------------------------------------------------------
 # Compute estimate
 # ---------------------------------------------------------------------------
-# Wall hours of one 1800 s run, by kind and load.  Measured values only (mean elapsed_s of
-# the raw results under results/testbench, scanned 2026-10-22):
-#   plan     E_plan, 20 runs per load on dev seeds (gate calibration and earlier smoke,
-#            2026-10-18 code): spare 0.13 h, heavy 0.97 h (max 2.64 h).  Overload E_plan was
-#            never completed (the calibration stopped with a MemoryError): UNPRICED.
-#   ordinary B/C/C_gate B4-pipeline variants, 120 runs per load (2026-10 harness, other jobs
-#            running concurrently): spare 0.10 h, heavy 0.13 h, overload 0.18 h.
-# The oracle on ALL candidates of 25% of decisions (confirmed 2026-10-22) and the binding log
-# of A/B postdate these measurements.  TODO(SIM): replace with the simulator agent's measured
-# numbers (wall time including the oracle, peak memory) from the dev-seed sizing smoke.
-RUN_HOURS_1800S = {("plan", "spare"): 0.13, ("plan", "heavy"): 0.97, ("plan", "overload"): None,
+# Wall hours of one 1800 s run, by kind and load (measured; reconciliation round 2026-10-22).
+# ORACLE: all candidates on 25% of decisions with 64 scenarios costs +8% wall time and about
+# 0 extra memory (simulator agent's measurement), applied as a factor 1.08 to the plan rates
+# measured before the all-candidate oracle.
+ORACLE_WALL_FACTOR = 1.08
+# Default ("12 workers"): an 1800 s heavy E_plan run took about 41 min with a 12-worker
+# rollout pool, an overload run about 120 min (12 workers); spare 0.13 h (mean of 20 E_plan
+# dev-seed runs under results/testbench, 2026-10-18 code).  Each x 1.08 for the oracle.
+# Ordinary runs: mean of 120 runs per load of the B/C/C_gate B4-pipeline variants (2026-10
+# harness): spare 0.10 h, heavy 0.13 h, overload 0.18 h.
+RUN_HOURS_1800S = {("plan", "spare"): 0.13 * ORACLE_WALL_FACTOR,
+                   ("plan", "heavy"): 41.0 / 60.0 * ORACLE_WALL_FACTOR,
+                   ("plan", "overload"): 120.0 / 60.0 * ORACLE_WALL_FACTOR,
                    ("ordinary", "spare"): 0.10, ("ordinary", "heavy"): 0.13, ("ordinary", "overload"): 0.18}
+# Pessimistic ("pool 2"): a 600 s heavy E_plan run with a 2-worker pool and the oracle on took
+# 2897 s, i.e. 3 x 2897 s = 2.41 h per 1800 s heavy run.  Spare and overload scaled by the
+# same factor relative to the 12-worker heavy rate (an extrapolation, not a measurement).
+_POOL2_HEAVY_H = 3.0 * 2897.0 / 3600.0
+_POOL2_FACTOR = _POOL2_HEAVY_H / RUN_HOURS_1800S[("plan", "heavy")]
+RUN_HOURS_1800S_POOL2 = {**RUN_HOURS_1800S,
+                         ("plan", "spare"): RUN_HOURS_1800S[("plan", "spare")] * _POOL2_FACTOR,
+                         ("plan", "heavy"): _POOL2_HEAVY_H,
+                         ("plan", "overload"): RUN_HOURS_1800S[("plan", "overload")] * _POOL2_FACTOR}
 
 
 def _load_name(mu: float) -> str:
@@ -690,8 +697,10 @@ def main() -> None:
             if c.skip_reason:
                 print(f"[studies] {st.name}/{c.name} SKIPPED: {c.skip_reason}", flush=True)
     if args.estimate:
-        print(json.dumps(compute_estimate(studies, root, plan_concurrency=args.plan_concurrency,
-                                          max_workers=args.max_workers), indent=2))
+        est = {name: compute_estimate(studies, root, rates, plan_concurrency=args.plan_concurrency,
+                                      max_workers=args.max_workers)
+               for name, rates in (("12_workers", RUN_HOURS_1800S), ("pool_2", RUN_HOURS_1800S_POOL2))}
+        print(json.dumps(est, indent=2))
         return
 
     if not args.analyze_only:

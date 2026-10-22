@@ -28,8 +28,8 @@ mirrors (DS:8236-8255): `dispatch_policy="unc"`, lane-projection motion, local m
 orchestration, mixed predictive topology, no deferred action selection, pass-through
 pre-assignment, ground truth on, no idle roaming, background events stamped at the step start.
 
-Variants (RPC, `PLAN_VARIANTS`; all with the submitted B4 reservation floor, rho 0.25 over
-600 s): `D_plan` (no service protection), `E_plan` (service
+Variants (RPC, `PLAN_VARIANTS`; all B5-based with NO reservation, final user decision
+2026-10-22): `D_plan` (no service protection), `E_plan` (service
 protection; confirmatory system, decision 2), `E_plan_tr` (+ timed recovery, Plan Eq. 4,
 exploratory), `E_plan_floor` (+ effectiveness floor 0.4, decision 26), `C_plan` (one-intervention
 Eq. 3 valuation, no service protection, decision 8). All run in `PLAN_ENV` (legacy estimator,
@@ -62,12 +62,11 @@ evaluation).
 **Step 3. Candidates and their continuations.** Candidates are every (robot, preventive seed,
 cue) pair that B5's own generation scores at t (`SR.generation_details`, SR:3926;
 `PP.generate_candidates`, PP:537). Before evaluation a candidate is excluded if its robot
-already executes a deviation (`robot_committed`). Reservation (user decision 2026-10-22,
-audit round): NO ceiling anywhere; every plan variant uses the submitted B4 reservation FLOOR,
-rho = 0.25 over 600 s (share = `Robot.predictive_share`, which counts patrol time as
-predictive, user decision 2026-10-15), the same as A, B, C and C_gate. At 704722c the code
-still applies the earlier ceiling (status `ceiling`, PP:604-619); the simulator workstream
-replaces it with the floor (TODO(SIM)), and this paragraph describes the decided design. pi_0 and all remaining candidates are
+already executes a deviation (`robot_committed`). Reservation (final user decision
+2026-10-22): there is NO reservation in the plan variants (no ceiling, no floor; the
+predictive share is only logged with each decision). The B4-based variants A, B, C, C_gate
+keep the submitted B4 floor, so the step C_gate -> C_plan also changes the reservation
+(floor -> none). Code at `e3ec247`. pi_0 and all remaining candidates are
 evaluated by `SR.evaluate` (SR:3240; via `PP.RolloutEngine`, PP:181) with **16 Monte Carlo
 scenarios and common random numbers**: one scenario tree of exogenous events per scenario
 (`SR._sample_scenario_tree`, SR:684), shared by every policy; action-dependent intensities,
@@ -161,9 +160,9 @@ All of them are also listed in `docs/STATED_ASSUMPTIONS.md`.
 3. **16 scenarios with common random numbers** (user decision 2026-10-21 after the
    scenario-count test): J_hat is a Monte Carlo mean, not the planner-model expectation.
 4. **Gate**: eps_gate = 0 with a 2-standard-error Monte Carlo significance margin.
-5. **Reservation floor that counts patrols** (no ceiling anywhere, user decision 2026-10-22):
-   the submitted B4 floor, rho = 0.25 over 600 s, share including patrol time; the same
-   reservation as A, B, C and C_gate, so the progression isolates one factor per step.
+5. **No reservation** (final user decision 2026-10-22): no ceiling and no floor in the plan
+   variants; the B4 variants keep the B4 floor (rho = 0.25 over 600 s), so C_gate -> C_plan
+   changes the reservation (floor -> none) as well as the procedure.
 6. **Finite horizon, no terminal cost**: J_H stops at t + H; a pending task not completed by
    t + H has completion time +inf in every comparison (decision 30); the terminal summary
    is logged, not costed.
@@ -180,10 +179,11 @@ All of them are also listed in `docs/STATED_ASSUMPTIONS.md`.
 12. **Information**: instant full sharing by default; per-robot information sets via the
     information provider (decision 17) with relays as in `docs/communication_assumptions.md`.
 13. **No coverage requirement** in D/E (decision 25); A/B keep the original uniform coverage clause.
-14. **Oracle** (diagnostic, Section 5 doc): truth snapshot, 64 independent scenarios, all
-    round-0 candidates on 25% of decisions (confirmed 2026-10-22).
+14. **Oracle** (diagnostic, Section 5 doc): truth snapshot, 64 independent scenarios, every
+    candidate of every round on 25% of decisions (confirmed 2026-10-22; measured cost +8% wall
+    time, about 0 extra memory).
 15. **Ties**: the fleet argmax breaks exact-U ties to the lowest candidate index (PP:787,
-    accepted 2026-10-22); the tie count is reported (`plan_exact_u_tie_count`, TODO(SIM)).
+    accepted 2026-10-22); the tie count is reported (`plan_exact_u_tie_count`).
 16. **Obligations past the horizon** (confirmed 2026-10-22): see the Timed recovery section of
     `docs/section5_analytical_claims.md`.
 
@@ -192,13 +192,13 @@ All of them are also listed in `docs/STATED_ASSUMPTIONS.md`.
 | Parameter | Value | Source |
 |---|---|---|
 | `plan_n_scenarios` | 16 | decision 2026-10-21 |
-| `plan_horizon_s` | `forecast_horizon_s` = 300 s | simulator default (DS:2613, since c74a629); no user decision, see STATED_ASSUMPTIONS P6 |
+| `plan_horizon_s` | `forecast_horizon_s` = 300 s | simulator default; accepted by the user 2026-10-22 (STATED_ASSUMPTIONS P6) |
 | `reactive_override_slack_s` (deadline) | 90 s | paper config |
 | `plan_eps_gate`, `plan_gate_se_multiplier` | 0.0, 2.0 | decision 2026-10-18 |
-| `reservation_mode`, `reservation_fraction`, `reservation_window_s` | floor, 0.25, 600 s | paper rho; no ceiling (2026-10-22) |
+| `reservation_mode`, `reservation_fraction`, `reservation_window_s` | not set (no reservation) | final user decision 2026-10-22 |
 | `plan_compute_budget_s` | 1e9 (none); 45 s in the timeout study | decision 16 |
 | `plan_oracle_fraction`, `plan_oracle_scenarios` | 0.25, 64 | decision 31; confirmed 2026-10-22 |
-| `plan_oracle_all_candidates` | True (all candidates on the sampled 25%) | decision 12; confirmed 2026-10-22 (5% fallback only if the sizing smoke is over budget) |
+| `plan_oracle_all_candidates` | True (every candidate on the sampled 25%) | decision 12; confirmed 2026-10-22 (+8% wall time, about 0 memory) |
 | `plan_protect_late_tasks` | True | accepted by the user 2026-10-22 |
 | `plan_obligation_relaxation` | `bounded_violation` | decision 28 |
 | `plan_E_high`, `plan_E_low`, `plan_T_response_s` | 323.8, 29.1, 300 s (E_plan_tr) | 2026-10-17 |

@@ -76,12 +76,20 @@ split (user decision 2026-10-22, audit round):
   round-0 candidates of a sampled decision (`plan_oracle_kendall_tau_mean`/`_median`,
   decision 12); the fraction of admitted deviations with U_oracle > 0
   (`plan_oracle_admitted_U_oracle_positive_fraction`).
-* SECONDARY (raw, unit-mixed): bias, mean, 95th percentile and maximum of
-  |J0_hat - J0_oracle|, |Ja_hat - Ja_oracle| and |U_hat - U_oracle|, and realized minus
-  predicted J of the executed policy (`plan_pred_err_*`, `plan_realized_minus_pred_*`;
-  final names may carry a `_raw_units` suffix, TODO(SIM)).
-* With per-robot information sets: each robot's own J-hat of the executed policy against the
-  realized J, and the mean and spread across robots (`plan_pr_*`, neighbor study).
+  The primary metrics are `plan_prop2_{sign_agree_fraction, sign_agree_n, kendall_tau_mean,
+  kendall_tau_median, kendall_tau_n, admitted_oracle_U_positive_fraction, admitted_oracle_n}`.
+* SECONDARY (raw, unit-mixed, suffix `_raw_units`): bias, mean, 95th percentile and maximum
+  of |J0_hat - J0_oracle|, |Ja_hat - Ja_oracle| and |U_hat - U_oracle|
+  (`plan_pred_err_{J0,Ja,U}_*_raw_units`), realized minus predicted J of the executed policy
+  (`plan_realized_minus_pred_mean[_abs]_raw_units`) and the oracle standard errors
+  (`plan_oracle_{J0,U}_se_mean_raw_units`, `plan_oracle_admitted_U_oracle_mean_raw_units`);
+  `plan_pred_err_J0_rel_mean` keeps its name.
+* C_plan has no continuation: its J-hat is the one-intervention J, compared with the realized
+  exposure as `plan_realized_minus_one_intervention_J_{windows, mean_raw_units}`.
+* With per-robot information sets: per robot `plan_pr_prop2_<metric>_<rid>` and their mean and
+  spread across robots (`plan_pr_prop2_*_robot_{mean, spread_sd}`), plus each robot's own
+  J-hat of the executed policy against the realized J
+  (`plan_pr_realized_minus_pred_{mean, mean_abs, spread_sd, spread_range}_raw_units`).
 Calibration on dev seeds (2026-10-18) found sign agreement 88-89%, 90% of admitted
 deviations truly beneficial, and corr(U_hat, U_oracle) near 0 because the legacy units are
 off by a variable factor. An error quantile from these runs is a validation statistic, not a
@@ -100,11 +108,11 @@ and outside its runtime budget (`PlanProcedure._oracle`):
 * **Scenarios:** 64, drawn from a seed stream independent of the planner's
   (SeedSequence [seed, 0x0AC1E5, decision index]; decision 31); oracle Monte Carlo standard
   errors are reported (`plan_oracle_J0_se_mean`, `plan_oracle_U_se_mean`).
-* **Policies:** per round, pi_0 (with the earlier rounds' commitments) and that round's top
-  feasible candidate, and, with `plan_oracle_all_candidates=True` (the evaluation setting),
-  EVERY round-0 candidate: all candidates on 25% of decisions with 64 scenarios (confirmed
-  2026-10-22; it supersedes "top candidate only"; a 5% all-candidate fallback is used only if
-  the dev-seed sizing smoke, wall time and peak memory, shows the 25% rate is over budget).
+* **Policies:** with `plan_oracle_all_candidates=True` (the evaluation setting), every
+  candidate of every round together with that round's pi_0 (with the earlier rounds'
+  commitments), on 25% of decisions with 64 scenarios (confirmed 2026-10-22; it supersedes
+  "top candidate only"). Measured cost: +8% wall time, about 0 extra memory
+  (`plan_oracle_decisions`, `plan_oracle_wall_s_total`).
 * **What it measures:** model error plus planner Monte Carlo error relative to the truth
   model under the engine's B5. It does NOT measure the engine residuals R1-R12 (shared by
   planner and oracle); those were bounded separately by the engine-vs-simulator agreement

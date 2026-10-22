@@ -30,10 +30,10 @@ original lossy rule while the effectiveness records relay completely.
 Every message in the table above that goes to a robot other than its sender
 passes through `EventBus._relay`:
 
-* Drop draws are made only for messages that are actually sent (a message the
-  relay rule does not send draws nothing; user decision 2026-10-22), so the
-  drop stream of one message never depends on how many other messages were
-  considered.
+* Message ids (and so drop draws) are drawn only for records that are
+  actually relayed (a record the relay rule does not send draws nothing; user
+  decision 2026-10-22), so the drop stream of one message never depends on how
+  many other messages were considered.
 * Drop: the message to recipient r is lost if `u < neighbor_drop_prob`, where
   `u = CoupledRandomStreams(seed).relay_uniform(kind, message id, r)` (purpose
   code `PURPOSE_RELAY` = 14). The message id is the truth event id for a
@@ -133,11 +133,10 @@ centralized). r simulates the whole fleet with ITS OWN beliefs (user answer
   order with the 200-entry cap of `recent_deterrences`;
 * the other robots' poses, goals and tasks: the centralized task state;
 * the other robots' detection histories (`Robot.recent_events`, read by B5's
-  detection-cluster seeds): r believes only the detections RELAYED to r (user
-  decision 2026-10-22, former question Q3), with the relay's delay and drop.
-  TODO(SIM): at 704722c the snapshot still keeps the fleet state
-  (`scenario_rollout.robot_information_snapshot`); the simulator workstream
-  implements the decided rule.
+  detection-cluster seeds): r's belief of q's detections = q's in-zone
+  detections relayed to r under the estimator relay rule (border radius,
+  partition neighbours only, delay, drop) (user decision 2026-10-22, former
+  question Q3; `scenario_rollout.robot_information_snapshot` at `e3ec247`).
 
 The oracle keeps the truth world and uses r's policy side. Prop. 2 is reported
 per robot: every robot's own J-hat of the executed policy against the realized
@@ -151,9 +150,8 @@ written by `save_final_hab_state_path` at the end of an earlier run (truth from
 truth). The PLANNER starts fresh (eta = 1 for every cell and cue, every robot)
 for every system: the robots did not record the prior use (user decision
 2026-10-22; no informed-planner reference). Thesis wording for the fresh vs
-depleted difference: "startup after unrecorded prior use". TODO(SIM): at
-704722c the file also loads the shared planner field (and every per-robot field
-starts from it); the simulator workstream adds the planner-fresh switch.
+depleted difference: "startup after unrecorded prior use". Implemented at
+`e3ec247`: the planner fields are never loaded from the file.
 
 ## 4. Other information the robots share (unchanged)
 
@@ -177,8 +175,9 @@ starts from it); the simulator workstream adds the planner-fresh switch.
 * Q2 (late records). Chronological reconstruction is confirmed: a late record is
   inserted at its event time and the field is replayed (legacy late stamps decay
   by exp(-(t_now - t)/omega)).
-* Q3 (other robots' detections). r believes only the detections relayed to r
-  (section 3; implementation pending in the simulator workstream).
+* Q3 (other robots' detections). Resolved: r's belief of q's detections = q's
+  in-zone detections relayed to r (border radius, neighbours only, delay, drop;
+  section 3).
 
 ## Unsupported combinations (clear errors)
 
