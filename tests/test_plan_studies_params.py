@@ -701,6 +701,26 @@ def test_analyze_refuses_mixed_commits():
         rpc.check_commits(rows)
 
 
+def test_analyze_refuses_mixed_machines():
+    rows = _rows(["B5_c", "E_plan"], [1, 2])
+    for r in rows:
+        r.update({"git_commit": "aaa", "git_dirty": False, "git_diff_sha1": "", "machine_id": "m1"})
+    rpc.check_commits(rows)
+    rows[-1]["machine_id"] = "m2"   # same commit, other machine
+    assert rpc.code_key(rows[-1]) != rpc.code_key(rows[0])
+    with pytest.raises(rpc.MixedCommitsError):
+        rpc.check_commits(rows)
+    assert rpc.check_commits(rows, allow_mixed=True)
+
+
+def test_machine_identity_recorded():
+    v = rpc.code_version()
+    for k in ("machine_id", "machine_host", "machine_platform", "machine_python", "machine_numpy",
+              "machine_scipy"):
+        assert v[k]
+    assert v["machine_id"] == rpc.machine_identity()["machine_id"]
+
+
 def test_run_job_records_code_version(monkeypatch):
     import DeterrentSystem as ds
     monkeypatch.setattr(ds, "run_simulation_frames_persistent",

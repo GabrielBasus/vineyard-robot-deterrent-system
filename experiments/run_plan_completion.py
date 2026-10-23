@@ -476,15 +476,35 @@ def code_version(root: Path = _root) -> dict:
         commit = _git("rev-parse", "HEAD").strip()
         diff = _git("diff", "HEAD")
     except (OSError, subprocess.CalledProcessError):
-        return {"git_commit": "unknown", "git_dirty": None, "git_diff_sha1": ""}
+        return {"git_commit": "unknown", "git_dirty": None, "git_diff_sha1": "", **machine_identity()}
     return {"git_commit": commit, "git_dirty": bool(diff.strip()),
-            "git_diff_sha1": hashlib.sha1(diff.encode("utf-8")).hexdigest() if diff.strip() else ""}
+            "git_diff_sha1": hashlib.sha1(diff.encode("utf-8")).hexdigest() if diff.strip() else "",
+            **machine_identity()}
+
+
+def machine_identity() -> dict:
+    """The machine and numerical stack that ran the job (user decision 2026-10-23: runs from
+    different machines are never mixed within a comparison, since CPU and library differences
+    can change floating-point results).  ``machine_id`` hashes host, OS, architecture and the
+    Python/numpy/scipy versions."""
+    import hashlib
+    import platform
+
+    import numpy
+    import scipy
+    info = {"machine_host": platform.node(), "machine_platform": platform.platform(),
+            "machine_arch": platform.machine(), "machine_python": platform.python_version(),
+            "machine_numpy": numpy.__version__, "machine_scipy": scipy.__version__}
+    blob = "|".join(info[k] for k in sorted(info) if k != "machine_platform") + "|" + platform.system()
+    info["machine_id"] = hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+    return info
 
 
 def code_key(row: dict) -> str:
-    """Identity of the code that produced ``row`` (commit plus uncommitted-diff hash)."""
+    """Identity of the code and machine that produced ``row`` (commit, uncommitted-diff hash, machine_id)."""
     c = str(row.get("git_commit") or "unknown")
-    return c + (f"+dirty:{row['git_diff_sha1'][:12]}" if row.get("git_dirty") else "")
+    c += f"+dirty:{row['git_diff_sha1'][:12]}" if row.get("git_dirty") else ""
+    return c + (f"@{row['machine_id']}" if row.get("machine_id") else "")
 
 
 class MixedCommitsError(RuntimeError):
@@ -498,8 +518,9 @@ def check_commits(rows: list, where: str = "", allow_mixed: bool = False) -> dic
     for r in rows:
         keys[code_key(r)] = keys.get(code_key(r), 0) + 1
     if len(keys) > 1 and not allow_mixed:
-        raise MixedCommitsError(f"{where}: runs from different code versions {json.dumps(keys)}; rerun every "
-                                f"affected system on one commit (or pass --allow-mixed-commits)")
+        raise MixedCommitsError(f"{where}: runs from different code versions or machines {json.dumps(keys)}; rerun "
+                                f"every affected system on one commit and one machine (or pass "
+                                f"--allow-mixed-commits)")
     return keys
 
 
