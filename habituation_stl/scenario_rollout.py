@@ -3114,7 +3114,9 @@ class RolloutPool:
     # the pool is sized from AVAILABLE memory, keeping a reserve free for the user,
     # and evaluate() shrinks it before a call if available memory falls below the
     # reserve.  Results do not depend on the worker count (parallel equals serial).
-    WORKER_MEM_GB = float(os.environ.get("ROLLOUT_WORKER_MEM_GB", "1.5"))
+    # 0.75 GB per worker (user decision 2026-10-23): measured peak 0.52 GB per worker on an
+    # overload E_plan run (dev seed 200, 600 s, 2 workers) plus about 45% margin.
+    WORKER_MEM_GB = float(os.environ.get("ROLLOUT_WORKER_MEM_GB", "0.75"))
     RESERVE_FRACTION = float(os.environ.get("ROLLOUT_RESERVE_FRACTION", "0.30"))
     MAX_WORKERS = int(os.environ.get("ROLLOUT_MAX_WORKERS", "12"))
 

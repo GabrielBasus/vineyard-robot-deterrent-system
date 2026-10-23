@@ -137,8 +137,8 @@ obligations persist across replans (`PP.monitor`, PP:488, called every step at D
   every candidate not decided gets status `timeout`; the worker pool is killed and restarted
   so the next decision gets its full budget (PP:199-205). Reported: `plan_timeouts`,
   `plan_timeout_rate`.
-* **Memory:** the rollout pool is sized from available memory (30% reserve, 1.5 GB per
-  worker, cap 12; SR:3106-3146) and shrinks or stops (MemoryError) if available memory falls
+* **Memory:** the rollout pool is sized from available memory (30% reserve, 0.75 GB per
+  worker: measured overload peak 0.52 GB plus about 45% margin, user decision 2026-10-23; cap 12; SR:3106-3146) and shrinks or stops (MemoryError) if available memory falls
   below the reserve. A memory stop ends the run; the harness records it as a failed job and
   never substitutes results.
 
