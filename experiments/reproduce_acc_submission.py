@@ -324,11 +324,13 @@ def main() -> None:
     p.add_argument("--poll-s", type=float, default=rpc.MEMORY_POLL_S)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--analyze-only", action="store_true")
+    p.add_argument("--seed-sets", nargs="+", default=list(SEED_SETS), choices=list(SEED_SETS),
+                   help="seed sets to run (Table VII cells always run); analysis covers whatever exists")
     args = p.parse_args()
 
     root = Path(args.root).resolve()
     tb = Path(args.testbench) if args.testbench else find_testbench()
-    jobs = build_jobs(root)
+    jobs = build_jobs(root, seed_sets=tuple(args.seed_sets))
     if args.dry_run:
         pending = [j for j in jobs if not Path(j["raw_json"]).exists()]
         print(f"[repro] {len(jobs)} jobs, {len(pending)} pending; archive {tb}")
