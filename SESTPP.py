@@ -14,6 +14,38 @@ from tracking_export import summarize_ndarray
 DEFAULT_INTERVENTION_MODE = "default"
 
 
+LEGACY_STAMP_UNITS_DENSITY = "density"
+LEGACY_STAMP_UNITS_MASS = "mass_per_cell"
+LEGACY_STAMP_UNITS = (LEGACY_STAMP_UNITS_DENSITY, LEGACY_STAMP_UNITS_MASS)
+
+
+def canonical_legacy_stamp_units(units: Optional[str]) -> str:
+    """Validate the legacy stamp-unit flag (2026-10-27 unit fix).
+
+    "density" (historical, ACC): a stamp amp * G (kernel G normalised to sum 1,
+      so a node mass) is added to the grids as if it were a density per m^2.
+    "mass_per_cell": the stamp is an amount per cell, i.e. a density of
+      amp * G / (dx * dy); every reader of the grids keeps its density reading.
+    """
+    u = LEGACY_STAMP_UNITS_DENSITY if units is None else str(units).strip().lower()
+    if u not in LEGACY_STAMP_UNITS:
+        raise ValueError(f"legacy_stamp_units must be one of {LEGACY_STAMP_UNITS}, got {units!r}")
+    return u
+
+
+def legacy_stamp_scale(model) -> float:
+    """1.0 ("density") or 1/(dx*dy) ("mass_per_cell") for a legacy model.
+
+    Multiply any amplitude that a consumer stamps itself with the model's
+    normalised kernel (counterfactual suppression, Eq. 3 candidate stamp) by
+    this factor so it is in the same units as the model grids.  Models without
+    the attribute (consistent estimator, older objects) read "density".
+    """
+    if getattr(model, "legacy_stamp_units", LEGACY_STAMP_UNITS_DENSITY) == LEGACY_STAMP_UNITS_MASS:
+        return 1.0 / float(model.dx * model.dy)
+    return 1.0
+
+
 class OnlineSESTPP:
     """Grid-based online SESTPP with persistent mode-aware inhibition.
 
@@ -39,7 +71,7 @@ class OnlineSESTPP:
     def __init__(self, x_min, x_max, y_min, y_max, nx, ny,
                  sigma=15.0, omega=600.0, omega_inhib=600.0,
                  alpha_in=0.25, alpha_cross=0.10, alpha_inhib=0.20,
-                 mu_base=1e-4, bg_ema=1e-6):
+                 mu_base=1e-4, bg_ema=1e-6, legacy_stamp_units: str = "density"):
         self.nx, self.ny = nx, ny
         self.x_min, self.x_max = x_min, x_max
         self.y_min, self.y_max = y_min, y_max
@@ -60,6 +92,7 @@ class OnlineSESTPP:
         self.lam = np.full((ny, nx), mu_base, float)
         self.bg_ema = float(bg_ema)
         self.t_now = 0.0
+        self.legacy_stamp_units = canonical_legacy_stamp_units(legacy_stamp_units)
         self._build_coords()
         self._rebuild_kernel()
 
@@ -166,7 +199,21 @@ class OnlineSESTPP:
     def _stamp(self, x, y, amp: float):
         self._stamp_to(self.trigger_mass, x, y, amp)
 
+    @property
+    def stamp_density_scale(self) -> float:
+        """Factor turning one stamp amplitude into the density the grids hold.
+
+        See ``legacy_stamp_scale``: 1.0 for "density" (historical), 1/(dx*dy) for
+        "mass_per_cell".
+        """
+        return legacy_stamp_scale(self)
+
     def _stamp_to(self, grid, x, y, amp: float, sigma: Optional[float] = None):
+        if getattr(self, "legacy_stamp_units", LEGACY_STAMP_UNITS_DENSITY) == LEGACY_STAMP_UNITS_MASS:
+            # 2026-10-27 unit fix: the stamp amp * G (sum G = 1) is an amount per
+            # cell; the grids are read as densities, so store amp * G / (dx * dy).
+            # (same expression as legacy_stamp_scale, so every consumer rounds alike)
+            amp = float(amp) * legacy_stamp_scale(self)
         if sigma is None:
             k_rad, kernel = self.k_rad, self.G
         else:

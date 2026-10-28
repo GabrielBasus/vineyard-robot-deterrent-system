@@ -94,6 +94,9 @@ if _ROOT not in sys.path:
 from scipy.special import ndtr  # noqa: E402
 
 from ZonePartitioner import point_in_polygon, point_to_poly_distance, polygon_area  # noqa: E402
+from SESTPP import (  # noqa: E402
+    LEGACY_STAMP_UNITS_DENSITY, LEGACY_STAMP_UNITS_MASS, canonical_legacy_stamp_units, legacy_stamp_scale,
+)
 from action_schema import (  # noqa: E402
     task_action,
     task_action_kind,
@@ -386,8 +389,9 @@ class IntensityForecast:
         the background density over the node's cell).
     form="legacy":
         lambda_n(t) = clip(mu_n m(t) + T_n(t) - I_n(t), 0) per m^2 with
-        node-mass stamps as in SESTPP.OnlineSESTPP (alpha_in self excitation,
-        alpha_inhib * weight inhibition channels).  bg_node_rate is mu (per m^2).
+        stamps as in SESTPP.OnlineSESTPP (alpha_in self excitation,
+        alpha_inhib * weight inhibition channels; divided by the node area when
+        legacy_stamp_units == "mass_per_cell").  bg_node_rate is mu (per m^2).
     """
 
     form: str
@@ -410,6 +414,12 @@ class IntensityForecast:
     # expected offspring count is supercritical (alpha_in * omega >> 1) and exploded
     # the event trees (13 GB arrays, 2026-10-16).  True re-enables it for diagnostics.
     legacy_future_offspring: bool = False
+    # 2026-10-27 unit fix (SESTPP.canonical_legacy_stamp_units): "density" keeps the
+    # historical reading of every stamp amp * G (sum G = 1) as a density; with
+    # "mass_per_cell" the world's own stamps (rollout-event offspring when
+    # legacy_future_offspring, planner-world inhibition) are amp * G / node_area, the
+    # units the live estimators then hold.  Set from the robots' estimators.
+    legacy_stamp_units: str = LEGACY_STAMP_UNITS_DENSITY
 
 
 @dataclass
@@ -591,6 +601,13 @@ def _sestpp_mass_kernel(sigma, dx, dy):
     G = np.exp(-0.5 * ((KX * dx) ** 2 + (KY * dy) ** 2) / (sigma ** 2))
     s = G.sum()
     return rad, G / (s if s > 0 else 1.0)
+
+
+def _units_stamp_scale(units, dx, dy):
+    """SESTPP.legacy_stamp_scale for a world grid (same expression, same rounding)."""
+    if canonical_legacy_stamp_units(units) == LEGACY_STAMP_UNITS_MASS:
+        return 1.0 / float(dx * dy)
+    return 1.0
 
 
 def _stamp(grid, iy, ix, amp, rad, kernel):
@@ -812,7 +829,8 @@ def _sample_scenario_tree(snap: RolloutSnapshot, seed: int, scenario: int) -> _S
                 x0 = max(0, ix0 - rad); x1 = min(nx, ix0 + rad + 1)
                 ky0 = y0 - (iy0 - rad); kx0 = x0 - (ix0 - rad)
                 inb[iy0, ix0] = G[ky0:ky0 + (y1 - y0), kx0:kx0 + (x1 - x0)].sum()
-        child_mean_node = fc.legacy_alpha_in * node_area * fc.omega * inb.ravel()
+        stamp_scale = _units_stamp_scale(getattr(fc, "legacy_stamp_units", LEGACY_STAMP_UNITS_DENSITY), dxc, dyc)
+        child_mean_node = fc.legacy_alpha_in * stamp_scale * node_area * fc.omega * inb.ravel()
     gen_lo, gen_hi = 0, t_all.size
     if legacy and not getattr(fc, "legacy_future_offspring", False):
         gen_hi = gen_lo  # Eq. 20: no future offspring in the legacy world
@@ -915,6 +933,9 @@ class _World:
             self.I = {k: (np.asarray(g, float).copy(), float(om)) for k, (g, om) in fc.legacy_inhib_channels.items()}
             self.krad, self.kern = _sestpp_mass_kernel(fc.sigma, self.dx, self.dy)
             self.node_area = self.dx * self.dy
+            self.stamp_scale = _units_stamp_scale(getattr(fc, "legacy_stamp_units", LEGACY_STAMP_UNITS_DENSITY),
+                                                  self.dx, self.dy)
+            self.future_offspring = bool(getattr(fc, "legacy_future_offspring", False))
         self.profile = fc.bg_time_profile
 
     # -- suppression terms (consistent form) are the recent_deterrences deque
@@ -1016,9 +1037,17 @@ class _World:
             self.J_exc += float(self.alpha * np.sum((1.0 - dec) * self.M.ravel()[n]))
             np.add.at(self.A.ravel(), n, dec)
         else:
+            # Paper Eq. 20 (user decision 2026-10-27): the legacy forecast advances the
+            # existing excitation by passive decay only; an accepted rollout event does
+            # not stamp future offspring into T unless legacy_future_offspring is set
+            # (diagnostics).  Events born from the existing trigger mass stay in the
+            # tree: they realise the existing intensity and drive detections.
+            if not self.future_offspring:
+                return
             iy, ix = np.divmod(n, self.nx)
+            amp = self.alpha_in * self.stamp_scale
             for a, b in zip(iy, ix):
-                _stamp(self.T, int(a), int(b), self.alpha_in, self.krad, self.kern)
+                _stamp(self.T, int(a), int(b), amp, self.krad, self.kern)
 
     def end_step(self):
         """Decay the legacy state to the next step (consistent form integrates in begin_step)."""
@@ -1039,7 +1068,7 @@ class _World:
         self.I[key] = (g, float(omega))
         rad, kern = _sestpp_mass_kernel(sigma, self.dx, self.dy)
         iy, ix = _world_to_idx_vec(x, y, self.W, self.H, self.nx, self.ny)
-        _stamp(g, int(iy), int(ix), self.alpha_inhib * float(weight), rad, kern)
+        _stamp(g, int(iy), int(ix), self.alpha_inhib * float(weight) * self.stamp_scale, rad, kern)
 
     def residual_rate(self, t):
         if self.form == "consistent":
@@ -2510,7 +2539,7 @@ def fast_counterfactual_reduction(m, x, y, *, beta_u, sigma_u, omega_u, horizon_
     ky0 = y0 - (iy - rad); kx0 = x0 - (ix - rad)
     pk = kern[ky0:ky0 + (y1 - y0), kx0:kx0 + (x1 - x0)]
     sf = _time_integral_factor(omega_u, horizon_s)
-    amp = float(m.alpha_inhib) * float(beta_u)
+    amp = float(m.alpha_inhib) * float(beta_u) * legacy_stamp_scale(m)
     w = weight_grid[y0:y1, x0:x1]
     av = available_integral_grid[y0:y1, x0:x1]
     msk = mask_grid[y0:y1, x0:x1] if mask_grid is not None else np.ones(av.shape, bool)
@@ -3617,6 +3646,15 @@ def truth_world_cues(L) -> dict:
     return out
 
 
+def _model_stamp_units(models):
+    """The legacy estimators' stamp units (they must agree)."""
+    units = {canonical_legacy_stamp_units(getattr(m, "legacy_stamp_units", LEGACY_STAMP_UNITS_DENSITY))
+             for m in models}
+    if len(units) != 1:
+        raise ValueError(f"planner models disagree on legacy_stamp_units: {sorted(units)}")
+    return units.pop()
+
+
 def planner_forecast_from_sim_locals(L, *, t0: float, horizon_s: float, robot_id: Optional[str] = None):
     """The fleet's planner belief of the bird process (no truth state).
 
@@ -3659,7 +3697,8 @@ def planner_forecast_from_sim_locals(L, *, t0: float, horizon_s: float, robot_id
         fc = IntensityForecast(form="legacy", bg_node_rate=np.array(m.mu, float, copy=True), sigma=float(m.sigma),
                                omega=float(m.omega), legacy_trigger_mass=np.array(m.trigger_mass, float, copy=True),
                                legacy_inhib_channels=chans, legacy_alpha_in=float(m.alpha_in),
-                               legacy_alpha_inhib=float(m.alpha_inhib))
+                               legacy_alpha_inhib=float(m.alpha_inhib),
+                               legacy_stamp_units=_model_stamp_units([m]))
         return fc, None
     if mode == "consistent":
         m0 = models[0]
@@ -3709,7 +3748,8 @@ def planner_forecast_from_sim_locals(L, *, t0: float, horizon_s: float, robot_id
         chans[key] = (_by_owner(grids), float(om[0]))
     fc = IntensityForecast(form="legacy", bg_node_rate=mu, sigma=float(m0.sigma), omega=float(m0.omega),
                            legacy_trigger_mass=trig, legacy_inhib_channels=chans,
-                           legacy_alpha_in=float(m0.alpha_in), legacy_alpha_inhib=float(m0.alpha_inhib))
+                           legacy_alpha_in=float(m0.alpha_in), legacy_alpha_inhib=float(m0.alpha_inhib),
+                           legacy_stamp_units=_model_stamp_units(models))
     return fc, None
 
 

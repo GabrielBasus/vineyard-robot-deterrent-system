@@ -6,6 +6,8 @@ from typing import List
 
 import numpy as np
 
+from SESTPP import legacy_stamp_scale
+
 from habituation_stl.mission_spec import SpecParams
 from habituation_stl.task_value import (
     CellState,
@@ -84,7 +86,9 @@ def estimate_counterfactual_reduction(
     patch_kernel = footprint_kernel[ky0:ky1, kx0:kx1]
 
     delta_a = float(model.dx * model.dy)
-    suppression_amp = float(model.alpha_inhib) * float(beta_u)
+    # legacy_stamp_scale: 1.0 historically; 1/(dx*dy) with legacy_stamp_units
+    # "mass_per_cell" (the stamp alpha_inhib * beta * K is an amount per cell).
+    suppression_amp = float(model.alpha_inhib) * float(beta_u) * legacy_stamp_scale(model)
     predicted_reduction_raw = 0.0
     available_weighted = 0.0
     suppression_weighted = 0.0
@@ -371,7 +375,7 @@ def eq3_counterfactual_value(model, x, y, *, cells, cell_polys, weight_fn, hab, 
     omega_c = float(cue_omega) * float(getattr(dynamics, "feedback_omega_scale", 1.0))
     _rad, kernel = model._build_kernel(sigma_c)
     iy, ix = model.world_to_idx(float(x), float(y))
-    amp = float(model.alpha_inhib) * float(q_hat) * beta_c
+    amp = float(model.alpha_inhib) * float(q_hat) * beta_c * legacy_stamp_scale(model)
     out = integrated_exposure_eq3(
         base_grid=model.mu * float(model.time_multiplier(float(now_t))),
         trigger_grid=model.trigger_mass,

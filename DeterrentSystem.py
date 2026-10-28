@@ -42,7 +42,7 @@ from ZonePartitioner import (
     point_to_poly_distance,
     power_cells,
 )
-from SESTPP import ConsistentOnlineSESTPP, OnlineSESTPP, canonical_estimator_mode
+from SESTPP import ConsistentOnlineSESTPP, OnlineSESTPP, canonical_estimator_mode, canonical_legacy_stamp_units
 from random_streams import (
     RANDOM_STREAM_MODES,
     RELAY_KIND_DETECTION,
@@ -2687,6 +2687,12 @@ def run_simulation_frames_persistent(
     # matches the truth: [mu_hat w(x) m(t) + excitation] * exp(-S_hat), with
     # footprint-based relay of every detection / intervention (no debounce).
     estimator_mode="legacy",
+    # 2026-10-27 unit fix (legacy estimator only). "density" (historical, ACC
+    # bit-for-bit): trigger / inhibition stamps amp * G (sum G = 1) are added to
+    # grids read as densities.  "mass_per_cell": each stamp is an amount per cell,
+    # i.e. density amp * G / (dx * dy), in the live estimators and in every consumer
+    # that stamps with the model kernel (B2/B5 counterfactual, Eq. 3, rollout world).
+    legacy_stamp_units="density",
     # Planner parameters for the consistent estimator (kept separate from the
     # truth's). None = nominal match with the corresponding truth value, the
     # same convention as planner_habituation_* (mismatch studies override).
@@ -3259,6 +3265,7 @@ def run_simulation_frames_persistent(
     direct_detection_habituation_mode = str(direct_detection_habituation_mode or "direct_detection").strip()
     estimator_mode = canonical_estimator_mode(estimator_mode)
     consistent_estimator = estimator_mode == "consistent"
+    legacy_stamp_units = canonical_legacy_stamp_units(legacy_stamp_units)
     planner_alpha = float(alpha_true if planner_alpha is None else planner_alpha)
     planner_sigma = float(sigma_true if planner_sigma is None else planner_sigma)
     planner_omega = float(omega_true if planner_omega is None else planner_omega)
@@ -3663,7 +3670,8 @@ def run_simulation_frames_persistent(
             m = OnlineSESTPP(X_MIN, X_MAX, Y_MIN, Y_MAX, NX, NY,
                 sigma=sigma, omega=omega, omega_inhib=omega_inhib,
                 alpha_in=alpha_in, alpha_cross=alpha_cross, alpha_inhib=alpha_inhib,
-                mu_base=mu_base, bg_ema=bg_ema)
+                mu_base=mu_base, bg_ema=bg_ema,
+                legacy_stamp_units=legacy_stamp_units)
 
         neighbors = partitioner.neighbors_for_id(rid)  # returns [] for UAVs if you applied the ZonePartitioner fix
         zone = id_to_cell.get(rid, [])                 # UAVs get an empty zone
@@ -3724,6 +3732,7 @@ def run_simulation_frames_persistent(
             alpha_inhib=alpha_inhib,
             mu_base=mu_base,
             bg_ema=bg_ema,
+            legacy_stamp_units=legacy_stamp_units,
         )
     if centralized_predictive_topology_enabled:
         centralized_planning_robots = {}
