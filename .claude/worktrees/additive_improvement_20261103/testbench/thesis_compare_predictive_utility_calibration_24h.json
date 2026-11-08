@@ -1,0 +1,355 @@
+{
+  "scenario": {
+    "num_runs": 5,
+    "seed_start": 123,
+    "duration_s": 86400.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 1800.0,
+    "warmup_s": 21600.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "use_split_task_extraction_selection_pipeline": true,
+      "preassignment_selection_policy": "pass_through",
+      "enable_predictive_lead_time": true,
+      "predictive_lead_time_min_s": 30.0,
+      "predictive_lead_time_max_eta_s": 120.0,
+      "predictive_lead_time_buffer_s": 15.0,
+      "predictive_lead_time_risk_power": 1.0,
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_compare_predictive_utility_calibration_24h",
+    "reference_system": "unc",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_reactive_mean_response_time_s",
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_completed_total",
+      "native_predictive_completed_fraction",
+      "native_predictive_completion_ratio",
+      "native_predictive_confidence_mean",
+      "native_predictive_confidence_completed_mean",
+      "native_predictive_expected_deltaJ_total",
+      "native_predictive_raw_deltaJ_total",
+      "native_predictive_success_ratio",
+      "native_predictive_false_positive_ratio",
+      "native_predictive_success_proxy_evaluated_total",
+      "native_robot_predictive_fraction_mean",
+      "native_urgent_reactive_override_total",
+      "native_reactive_completed_fraction"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_reactive_mean_response_time_s",
+      "native_predictive_completion_ratio",
+      "native_predictive_success_ratio",
+      "native_predictive_false_positive_ratio",
+      "native_urgent_reactive_override_total"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completion_ratio",
+      "native_predictive_confidence_mean",
+      "native_predictive_success_ratio",
+      "native_robot_predictive_fraction_mean",
+      "native_urgent_reactive_override_total",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "UNC Legacy Predictive Utility",
+      "description": "Unconstrained dispatch baseline with TaskGenerator's legacy predictive utility.",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "legacy"
+      }
+    },
+    {
+      "key": "react",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reactive Only",
+      "description": "Reactive-only negative control over the same proposed workload.",
+      "params": {
+        "dispatch_policy": "react",
+        "predictive_utility_mode": "legacy"
+      }
+    },
+    {
+      "key": "unc_deltaJ",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "UNC Deterministic DeltaJ Utility",
+      "description": "Unconstrained dispatch ranking predictive work by raw predicted_deltaJ.",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "deltaJ",
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_confidence_power": 1.0
+      }
+    },
+    {
+      "key": "bern_product_p05",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV Product Confidence p=0.5",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_confidence_power": 0.5
+      }
+    },
+    {
+      "key": "bern_product_p10",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV Product Confidence p=1.0",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_confidence_power": 1.0
+      }
+    },
+    {
+      "key": "bern_product_p20",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV Product Confidence p=2.0",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_confidence_power": 2.0
+      }
+    },
+    {
+      "key": "bern_pevent_p05",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV p_event p=0.5",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "p_event",
+        "predictive_confidence_power": 0.5
+      }
+    },
+    {
+      "key": "bern_pevent_p10",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV p_event p=1.0",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "p_event",
+        "predictive_confidence_power": 1.0
+      }
+    },
+    {
+      "key": "bern_pevent_p20",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV p_event p=2.0",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "p_event",
+        "predictive_confidence_power": 2.0
+      }
+    },
+    {
+      "key": "bern_riskconf_p05",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV risk_conf p=0.5",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "risk_conf",
+        "predictive_confidence_power": 0.5
+      }
+    },
+    {
+      "key": "bern_riskconf_p10",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV risk_conf p=1.0",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "risk_conf",
+        "predictive_confidence_power": 1.0
+      }
+    },
+    {
+      "key": "bern_riskconf_p20",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV risk_conf p=2.0",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "risk_conf",
+        "predictive_confidence_power": 2.0
+      }
+    },
+    {
+      "key": "bern_selweight_p05",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV selection_weight p=0.5",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "selection_weight",
+        "predictive_confidence_power": 0.5
+      }
+    },
+    {
+      "key": "bern_selweight_p10",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV selection_weight p=1.0",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "selection_weight",
+        "predictive_confidence_power": 1.0
+      }
+    },
+    {
+      "key": "bern_selweight_p20",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV selection_weight p=2.0",
+      "params": {
+        "dispatch_policy": "unc",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "selection_weight",
+        "predictive_confidence_power": 2.0
+      }
+    },
+    {
+      "key": "bern_res_confidence_product_p10",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV + Confidence Reservation",
+      "params": {
+        "dispatch_policy": "res-confidence",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "confidence-weighted",
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_confidence_power": 1.0
+      }
+    },
+    {
+      "key": "bern_res_feasible_product_p10",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV + Feasible Reservation",
+      "params": {
+        "dispatch_policy": "res-feasible",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "predictive_slack_min_s": 15.0,
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_confidence_power": 1.0
+      }
+    },
+    {
+      "key": "bern_res_idle_feasible_product_p10",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Bernoulli EV + Idle Feasible Reservation",
+      "params": {
+        "dispatch_policy": "res-idle-feasible",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "predictive_slack_min_s": 15.0,
+        "reactive_pressure_max_for_predictive": 0.5,
+        "predictive_utility_mode": "bernoulli_expected_deltaJ",
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_confidence_power": 1.0
+      }
+    }
+  ],
+  "metadata": {
+    "comparison": "predictive_utility_calibration",
+    "load_regime": "nominal",
+    "horizon": "24h",
+    "baseline_policy": "unc",
+    "calibration_note": "Expanded system list implements sweeps because the testbench runner accepts explicit systems rather than a sweep DSL.",
+    "sweeps": {
+      "predictive_utility_mode": [
+        "deltaJ",
+        "bernoulli_expected_deltaJ"
+      ],
+      "confidence_source": [
+        "p_event_times_selection_weight",
+        "p_event",
+        "risk_conf",
+        "selection_weight"
+      ],
+      "confidence_power": [
+        0.5,
+        1.0,
+        2.0
+      ]
+    }
+  }
+}

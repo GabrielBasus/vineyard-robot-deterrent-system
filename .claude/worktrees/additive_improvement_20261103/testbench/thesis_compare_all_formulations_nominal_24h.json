@@ -1,0 +1,454 @@
+{
+  "scenario": {
+    "num_runs": 5,
+    "seed_start": 123,
+    "duration_s": 86400.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 1800.0,
+    "warmup_s": 21600.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_compare_all_formulations_nominal_24h",
+    "reference_system": "unc",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_urgent_reactive_override_total",
+      "native_reactive_completed_fraction",
+      "native_predictive_deadline_feasible_fraction",
+      "native_predictive_risk_adjusted_candidates_total",
+      "native_predictive_risk_adjusted_rejected_confidence_total",
+      "native_predictive_risk_adjusted_rejected_slack_total",
+      "native_predictive_risk_adjusted_rejected_utility_total",
+      "native_predictive_risk_adjusted_rejected_cost_ratio_total",
+      "native_predictive_risk_adjusted_mean_confidence",
+      "native_predictive_risk_adjusted_mean_utility",
+      "native_predictive_risk_adjusted_rho_eff_mean",
+      "native_predictive_risk_adjusted_reactive_pressure_mean",
+      "native_predictive_risk_adjusted_reactive_age_norm_mean",
+      "native_robot_idle_fraction_mean",
+      "native_reactive_generated_total",
+      "native_predictive_generated_total",
+      "native_reactive_admitted_total",
+      "native_predictive_admitted_total",
+      "native_reactive_completed_total",
+      "native_predictive_completed_total"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_urgent_reactive_override_total",
+      "native_reactive_completed_fraction",
+      "native_predictive_deadline_feasible_fraction"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_predictive_generated_total",
+      "native_robot_predictive_fraction_mean",
+      "native_predictive_risk_adjusted_rho_eff",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "react",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reactive Only 24h",
+      "params": {
+        "dispatch_policy": "react"
+      }
+    },
+    {
+      "key": "reactive_first",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reactive First 24h",
+      "params": {
+        "dispatch_policy": "reactive-first"
+      }
+    },
+    {
+      "key": "unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Greedy UNC 24h",
+      "params": {
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Hard Reservation 24h",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": false
+      }
+    },
+    {
+      "key": "res_rand_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Random Reservation 24h",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "random",
+        "enable_predictive_lead_time": false
+      }
+    },
+    {
+      "key": "res_soft_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Soft Reservation 24h",
+      "params": {
+        "dispatch_policy": "res-soft",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "reservation_softening_alpha": 2.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": false
+      }
+    },
+    {
+      "key": "res_adaptive_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Adaptive Reservation 24h",
+      "params": {
+        "dispatch_policy": "res-adaptive",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "reservation_softening_alpha": 2.0,
+        "reservation_age_softening_beta": 2.0,
+        "reservation_age_gate": 0.5,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": false
+      }
+    },
+    {
+      "key": "res_0p25_leadtime",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Lead-Time Hard Reservation 24h",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0
+      }
+    },
+    {
+      "key": "res_adaptive_leadtime_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Lead-Time Adaptive Reservation 24h",
+      "params": {
+        "dispatch_policy": "res-adaptive",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "reservation_softening_alpha": 2.0,
+        "reservation_age_softening_beta": 5.0,
+        "reservation_age_gate": 0.25,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0
+      }
+    },
+    {
+      "key": "res_feasible_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Feasible Reservation 24h",
+      "params": {
+        "dispatch_policy": "res-feasible",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_slack_min_s": 15.0
+      }
+    },
+    {
+      "key": "res_idle_feasible_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Idle Feasible Reservation 24h",
+      "params": {
+        "dispatch_policy": "res-idle-feasible",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_slack_min_s": 15.0,
+        "reactive_pressure_max_for_predictive": 0.5
+      }
+    },
+    {
+      "key": "res_confidence_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Confidence Weighted Reservation 24h",
+      "params": {
+        "dispatch_policy": "res-confidence",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "confidence-weighted",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight"
+      }
+    },
+    {
+      "key": "res_idle_feasible_confidence_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Idle Feasible Confidence 24h",
+      "params": {
+        "dispatch_policy": "res-idle-feasible-confidence",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "confidence-weighted",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_slack_min_s": 15.0,
+        "reactive_pressure_max_for_predictive": 0.5,
+        "predictive_confidence_min": 0.25,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight"
+      }
+    },
+    {
+      "key": "res_time_score_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Time-Aware Reservation 24h",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "time-aware",
+        "enable_predictive_lead_time": true,
+        "predictive_timing_mode": "arrival_offset",
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_time_score_deadline_scale_s": 120.0,
+        "predictive_time_score_reactive_pressure_weight": 5.0,
+        "predictive_time_score_infeasible_penalty": 25.0
+      }
+    },
+    {
+      "key": "res_time_score_v2_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Time-Aware V2 Reservation 24h",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "time-aware-v2",
+        "enable_predictive_lead_time": true,
+        "predictive_timing_mode": "arrival_offset",
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_expiry_grace_s": 0.0,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_time_score_deadline_scale_s": 120.0,
+        "predictive_time_score_reactive_pressure_weight": 5.0,
+        "predictive_time_score_infeasible_penalty": 25.0
+      }
+    },
+    {
+      "key": "res_deferred_time_score_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Deferred Time-Aware Reservation 24h",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "time-aware",
+        "enable_predictive_lead_time": true,
+        "predictive_timing_mode": "arrival_offset",
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_time_score_deadline_scale_s": 120.0,
+        "predictive_time_score_reactive_pressure_weight": 5.0,
+        "predictive_time_score_infeasible_penalty": 25.0,
+        "defer_predictive_action_selection": true,
+        "assignment_switch_penalty": 1.0
+      }
+    },
+    {
+      "key": "res_centralized_global_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Centralized Global Predictive 24h",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "time-aware",
+        "predictive_planning_topology": "centralized_global",
+        "zone_assignment_mode": "soft",
+        "enable_predictive_lead_time": true,
+        "predictive_timing_mode": "arrival_offset",
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "predictive_time_score_deadline_scale_s": 120.0,
+        "predictive_time_score_reactive_pressure_weight": 5.0,
+        "predictive_time_score_infeasible_penalty": 25.0,
+        "defer_predictive_action_selection": true,
+        "assignment_switch_penalty": 1.0
+      }
+    },
+    {
+      "key": "res_risk_adjusted_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Risk-Adjusted Reservation 24h",
+      "params": {
+        "dispatch_policy": "res-risk-adjusted",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "reservation_age_gate": 0.5,
+        "predictive_selection_policy": "risk-adjusted",
+        "enable_predictive_lead_time": true,
+        "predictive_timing_mode": "arrival_offset",
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_slack_min_s": 15.0,
+        "predictive_confidence_min": 0.25,
+        "predictive_utility_min": 0.0,
+        "predictive_cost_ratio_min": 1.0,
+        "predictive_opportunity_cost_weight": 0.1,
+        "predictive_eta_cost_weight": 0.1,
+        "predictive_service_cost_weight": 0.05,
+        "risk_adjusted_reservation_alpha": 2.0,
+        "risk_adjusted_reservation_beta": 2.0,
+        "predictive_confidence_source": "p_event_times_selection_weight"
+      }
+    }
+  ],
+  "metadata": {
+    "comparison": "all_formulations_nominal_24h",
+    "load_regime": "nominal",
+    "horizon": "24h",
+    "baseline_policy": "unc"
+  }
+}

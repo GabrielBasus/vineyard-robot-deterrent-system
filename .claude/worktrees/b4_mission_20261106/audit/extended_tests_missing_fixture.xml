@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="2" failures="0" skipped="0" tests="87" time="3.153" timestamp="2026-11-06T11:42:21.539313-08:00" hostname="Jubiloo"><properties><property name="additive_source_sha256" value="234e93a50427422c48b6c0d9a7d52a4b8ccc61c43841cc6a1eb777c8670b6976" /></properties><testcase classname="tests.test_mission_stl_dispatch" name="test_original_deadline_not_restarted_at_decision" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_reactive_service_consequence_changes_selection" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_effectiveness_floor_applies_to_both_deterrence_streams[True]" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_effectiveness_floor_applies_to_both_deterrence_streams[False]" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_patrol_has_no_suppression_or_deterrence_recency_reset" time="0.000" /><testcase classname="tests.test_mission_stl_dispatch" name="test_future_deter_completion_resets_coverage_and_reduces_exposure" time="0.000" /><testcase classname="tests.test_mission_stl_dispatch" name="test_holds_cannot_be_interrupted_even_by_urgent_reactive_work" time="0.000" /><testcase classname="tests.test_mission_stl_dispatch" name="test_unfinished_due_task_has_finite_negative_margin" time="0.000" /><testcase classname="tests.test_mission_stl_dispatch" name="test_task_not_due_within_horizon_is_not_falsely_declared_late" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_current_task_wins_exact_ties_and_inputs_stay_unchanged" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_candidate_forecasts_use_identical_sampling_grid" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_task_input_permutation_does_not_change_result" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_other_robot_pending_work_is_present_in_deadline_clause" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_coverage_requirement_can_change_choice_between_predictive_actions" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_exposure_requirement_can_change_choice_between_predictive_actions" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_simulator_adapter_has_no_private_truth_inputs" time="0.095" /><testcase classname="tests.test_mission_stl_dispatch" name="test_non_habituating_control_keeps_other_three_clauses" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_invalid_spec_fails_closed[changes0]" time="0.001" /><testcase classname="tests.test_mission_stl_dispatch" name="test_invalid_spec_fails_closed[changes1]" time="0.000" /><testcase classname="tests.test_mission_stl_dispatch" name="test_invalid_spec_fails_closed[changes2]" time="0.000" /><testcase classname="tests.test_mission_stl_dispatch" name="test_invalid_spec_fails_closed[changes3]" time="0.000" /><testcase classname="tests.test_mission_stl_dispatch" name="test_duplicate_task_ids_rejected" time="0.000" /><testcase classname="tests.test_mission_stl_dispatch" name="test_profile_changes_only_mission_enable_and_fourth_clause" time="0.001" /><testcase classname="tests.test_dispatch_priority_ordering.DispatchPriorityOrderingTests" name="test_deadline_urgency_tightens_as_now_advances" time="0.000" /><testcase classname="tests.test_dispatch_priority_ordering.DispatchPriorityOrderingTests" name="test_direct_detection_stays_first_and_preventive_beats_low_patrol" time="0.000" /><testcase classname="tests.test_dispatch_priority_ordering.DispatchPriorityOrderingTests" name="test_regular_order_uses_eta_after_value_and_delta_terms" time="0.000" /><testcase classname="tests.test_dispatch_priority_ordering.DispatchPriorityOrderingTests" name="test_regular_order_uses_tighter_predictive_deadline_before_eta" time="0.000" /><testcase classname="tests.test_dispatch_priority_ordering.DispatchPriorityOrderingTests" name="test_weaker_preventive_does_not_displace_existing_patrol" time="0.000" /><testcase classname="tests.test_robot_dispatch_time_tracker.SlidingWindowTimeTrackerTests" name="test_robot_wrapper_exposes_predictive_share" time="0.000" /><testcase classname="tests.test_robot_dispatch_time_tracker.SlidingWindowTimeTrackerTests" name="test_tracker_prunes_partial_segments_and_reports_fractions" time="0.000" /><testcase classname="tests.test_action_schema.ActionSchemaTests" name="test_make_detection_action" time="0.000" /><testcase classname="tests.test_action_schema.ActionSchemaTests" name="test_make_deterring_mode_action_uses_mode_params" time="0.000" /><testcase classname="tests.test_action_schema.ActionSchemaTests" name="test_make_patrol_action_maps_origin_to_name" time="0.000" /><testcase classname="tests.test_action_schema.ActionSchemaTests" name="test_task_action_accessors_are_compatibility_stable" time="0.000" /><testcase classname="tests.test_action_schema.ActionSchemaTests" name="test_task_action_reconstructs_direct_detection" time="0.000" /><testcase classname="tests.test_action_schema.ActionSchemaTests" name="test_task_action_reconstructs_model_deterring" time="0.000" /><testcase classname="tests.test_action_schema.ActionSchemaTests" name="test_task_action_reconstructs_patrol" time="0.000" /><testcase classname="tests.test_task_generator_counterfactual_scoring.TaskGeneratorCounterfactualScoringTests" name="test_direct_detection_enqueue_behavior_is_unchanged" time="0.000" /><testcase classname="tests.test_task_generator_counterfactual_scoring.TaskGeneratorCounterfactualScoringTests" name="test_higher_eta_lowers_utility_but_not_raw_predicted_deltaj" time="0.003" /><testcase classname="tests.test_task_generator_counterfactual_scoring.TaskGeneratorCounterfactualScoringTests" name="test_higher_local_risk_yields_higher_predicted_deltaj" time="0.002" /><testcase classname="tests.test_task_generator_counterfactual_scoring.TaskGeneratorCounterfactualScoringTests" name="test_hotspot_origin_can_generate_without_recent_detection_support" time="0.003" /><testcase classname="tests.test_task_generator_counterfactual_scoring.TaskGeneratorCounterfactualScoringTests" name="test_larger_sigma_only_helps_when_there_is_risk_in_the_footprint" time="0.004" /><testcase classname="tests.test_task_generator_counterfactual_scoring.TaskGeneratorCounterfactualScoringTests" name="test_legacy_habituation_mode_chooses_fresh_cue_without_stl_value" time="0.002" /><testcase classname="tests.test_task_generator_counterfactual_scoring.TaskGeneratorCounterfactualScoringTests" name="test_predicted_reduction_tracks_realized_suppression_in_small_run" time="0.004" /><testcase classname="tests.test_task_generator_counterfactual_scoring.TaskGeneratorCounterfactualScoringTests" name="test_shared_patrol_scoring_emits_nonzero_predicted_deltaj" time="0.002" /><testcase classname="tests.test_task_generator_counterfactual_scoring.TaskGeneratorCounterfactualScoringTests" name="test_stl_robustness_mode_uses_stl_value_for_dispatch_fields" time="0.008" /><testcase classname="tests.test_additive_intensity" name="test_acceptance_realizes_additive_rate_and_saturates_without_mutation" time="0.027" /><testcase classname="tests.test_additive_intensity" name="test_overlapping_inhibition_is_added_before_clipping" time="0.001" /><testcase classname="tests.test_additive_intensity" name="test_invalid_rate_fails_closed[-1.0]" time="0.000" /><testcase classname="tests.test_additive_intensity" name="test_invalid_rate_fails_closed[nan]" time="0.000" /><testcase classname="tests.test_additive_intensity" name="test_invalid_rate_fails_closed[inf]" time="0.000" /><testcase classname="tests.test_additive_intensity" name="test_gaussian_cell_mass_matches_independent_quadrature" time="0.002" /><testcase classname="tests.test_additive_intensity" name="test_boundary_mass_lost_and_grid_refinement_preserves_integral" time="0.001" /><testcase classname="tests.test_additive_intensity" name="test_preserves_existing_physical_background_demand[2e-05]" time="0.000" /><testcase classname="tests.test_additive_intensity" name="test_preserves_existing_physical_background_demand[0.0001]" time="0.001" /><testcase classname="tests.test_additive_intensity" name="test_preserves_existing_physical_background_demand[0.0004]" time="0.000" /><testcase classname="tests.test_additive_intensity" name="test_temporal_conversion_preserves_branching_count_and_converges" time="0.000" /><testcase classname="tests.test_additive_intensity" name="test_invalid_geometry_rejected[kwargs0]" time="0.000" /><testcase classname="tests.test_additive_intensity" name="test_invalid_geometry_rejected[kwargs1]" time="0.000" /><testcase classname="tests.test_additive_intensity" name="test_invalid_geometry_rejected[kwargs2]" time="0.000" /><testcase classname="tests.test_additive_grid_truth" name="test_truth_and_estimator_same_supplied_inhibition_and_excitation" time="0.098" /><testcase classname="tests.test_additive_grid_truth" name="test_pending_intervention_timing_zero_strength_and_additive_overlap" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_pre_depletion_effectiveness_is_immutable_and_time_decay_correct" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_accepted_events_alone_excite_and_new_excitation_is_next_step" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_background_and_uniforms_coupled_across_different_endogenous_histories" time="0.006" /><testcase classname="tests.test_additive_grid_truth" name="test_zero_excitation_zero_suppression_sample_count_matches_poisson" time="0.048" /><testcase classname="tests.test_additive_grid_truth" name="test_step_lifecycle_rejects_repeated_or_skipped_times" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_runtime_new_mode_and_warmup_use_the_same_engine" time="0.027" /><testcase classname="tests.test_additive_grid_truth" name="test_runtime_rejects_unverified_combinations[overrides0]" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_runtime_rejects_unverified_combinations[overrides1]" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_runtime_rejects_unverified_combinations[overrides2]" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_runtime_rejects_unverified_combinations[overrides3]" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_runtime_rejects_unverified_combinations[overrides4]" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_runtime_rejects_unverified_combinations[overrides5]" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_continuation_entry_points_reject_additive_states_instead_of_using_thinning" time="0.035" /><testcase classname="tests.test_additive_grid_truth" name="test_counterfactual_uses_the_same_cell_kernel_and_area" time="0.001" /><testcase classname="tests.test_additive_grid_truth" name="test_additive_record_and_replay_preserve_the_live_field" time="0.200" /><testcase classname="tests.test_additive_grid_truth" name="test_paper_baseline_hierarchy_uses_additive_runtime_without_hidden_overrides[B1]" time="0.084" /><testcase classname="tests.test_additive_grid_truth" name="test_paper_baseline_hierarchy_uses_additive_runtime_without_hidden_overrides[B2]" time="0.088" /><testcase classname="tests.test_additive_grid_truth" name="test_paper_baseline_hierarchy_uses_additive_runtime_without_hidden_overrides[B3]" time="0.084" /><testcase classname="tests.test_additive_grid_truth" name="test_paper_baseline_hierarchy_uses_additive_runtime_without_hidden_overrides[B4]" time="0.085" /><testcase classname="tests.test_additive_grid_truth" name="test_paper_baseline_hierarchy_uses_additive_runtime_without_hidden_overrides[B5]" time="0.082" /><testcase classname="tests.test_additive_grid_truth" name="test_historical_truth_is_default_and_explicit_flag_preserves_that_path" time="0.016" /><testcase classname="tests.test_additive_grid_truth" name="test_truth_mode_changes_job_identity_and_cannot_reuse_historical_checkpoint" time="0.039" /><testcase classname="tests.test_additive_grid_truth" name="test_additive_recording_validator_rejects_wrong_environment_before_replaying" time="0.028" /><testcase classname="tests.test_service_mechanism_metrics.ServiceAndMechanism" name="test_decision11_no_double_counting_of_waiting_reactive_tasks" time="0.003"><error message="failed on setup with &quot;FileNotFoundError: No calibration source was found. Provide --calibration-ranking-path, --calibration-manifest-path, or run the sweep to create results\sestpp_calibration_sweep.&quot;">cls = &lt;class 'test_service_mechanism_metrics.ServiceAndMechanism'&gt;
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.state_path = os.path.join(cls.tmp.name, "hab_end.json")
+&gt;       cls.m, cls.L = _run(_b5c_params(600.0, outcome_window_boundaries_s=[300.0],
+                                        save_final_hab_state_path=cls.state_path), keep_locals=True)
+
+tests\test_service_mechanism_metrics.py:46: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_service_mechanism_metrics.py:34: in _run
+    for fr in gen:
+DeterrentSystem.py:3581: in run_simulation_frames_persistent
+    calibration_resolution = _resolve_calibration_runtime_overrides(
+DeterrentSystem.py:2107: in _resolve_calibration_runtime_overrides
+    selected_config = load_frozen_sestpp_calibration(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def load_frozen_sestpp_calibration(
+        *,
+        ranking_path: str | Path | None = None,
+        manifest_path: str | Path | None = None,
+        config_id: str | None = None,
+    ) -&gt; FrozenCalibrationConfig:
+        """Load a frozen SESTPP calibration result from ranking CSV or sweep manifest."""
+    
+        resolved_ranking, resolved_manifest = _resolve_default_source_paths(ranking_path, manifest_path)
+        if resolved_ranking is not None:
+            return _load_ranking_row(resolved_ranking, config_id=config_id)
+    
+        if resolved_manifest is not None:
+            manifest = _load_manifest_payload(resolved_manifest)
+            manifest_ranking = _resolve_manifest_ranking_path(resolved_manifest, manifest)
+            if manifest_ranking is not None:
+                return _load_ranking_row(manifest_ranking, config_id=config_id)
+            return _load_from_manifest_only(resolved_manifest, manifest, config_id=config_id)
+    
+&gt;       raise FileNotFoundError(
+            "No calibration source was found. Provide --calibration-ranking-path, "
+            "--calibration-manifest-path, or run the sweep to create "
+            f"{DEFAULT_CALIBRATION_DIR}."
+        )
+E       FileNotFoundError: No calibration source was found. Provide --calibration-ranking-path, --calibration-manifest-path, or run the sweep to create results\sestpp_calibration_sweep.
+
+calibration_config.py:425: FileNotFoundError</error></testcase><testcase classname="tests.test_service_mechanism_metrics.ServiceAndMechanism" name="test_decision13_motion_time" time="0.016"><error message="failed on setup with &quot;FileNotFoundError: No calibration source was found. Provide --calibration-ranking-path, --calibration-manifest-path, or run the sweep to create results\sestpp_calibration_sweep.&quot;">cls = &lt;class 'test_service_mechanism_metrics.ServiceAndMechanism'&gt;
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.state_path = os.path.join(cls.tmp.name, "hab_end.json")
+&gt;       cls.m, cls.L = _run(_b5c_params(600.0, outcome_window_boundaries_s=[300.0],
+                                        save_final_hab_state_path=cls.state_path), keep_locals=True)
+
+tests\test_service_mechanism_metrics.py:46: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_service_mechanism_metrics.py:34: in _run
+    for fr in gen:
+DeterrentSystem.py:3581: in run_simulation_frames_persistent
+    calibration_resolution = _resolve_calibration_runtime_overrides(
+DeterrentSystem.py:2107: in _resolve_calibration_runtime_overrides
+    selected_config = load_frozen_sestpp_calibration(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def load_frozen_sestpp_calibration(
+        *,
+        ranking_path: str | Path | None = None,
+        manifest_path: str | Path | None = None,
+        config_id: str | None = None,
+    ) -&gt; FrozenCalibrationConfig:
+        """Load a frozen SESTPP calibration result from ranking CSV or sweep manifest."""
+    
+        resolved_ranking, resolved_manifest = _resolve_default_source_paths(ranking_path, manifest_path)
+        if resolved_ranking is not None:
+            return _load_ranking_row(resolved_ranking, config_id=config_id)
+    
+        if resolved_manifest is not None:
+            manifest = _load_manifest_payload(resolved_manifest)
+            manifest_ranking = _resolve_manifest_ranking_path(resolved_manifest, manifest)
+            if manifest_ranking is not None:
+                return _load_ranking_row(manifest_ranking, config_id=config_id)
+            return _load_from_manifest_only(resolved_manifest, manifest, config_id=config_id)
+    
+&gt;       raise FileNotFoundError(
+            "No calibration source was found. Provide --calibration-ranking-path, "
+            "--calibration-manifest-path, or run the sweep to create "
+            f"{DEFAULT_CALIBRATION_DIR}."
+        )
+E       FileNotFoundError: No calibration source was found. Provide --calibration-ranking-path, --calibration-manifest-path, or run the sweep to create results\sestpp_calibration_sweep.
+
+calibration_config.py:425: FileNotFoundError</error></testcase></testsuite></testsuites>

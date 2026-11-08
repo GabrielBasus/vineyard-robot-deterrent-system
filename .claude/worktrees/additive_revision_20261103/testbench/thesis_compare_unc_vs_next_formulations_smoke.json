@@ -1,0 +1,169 @@
+{
+  "scenario": {
+    "num_runs": 2,
+    "seed_start": 123,
+    "duration_s": 900.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 300.0,
+    "warmup_s": 300.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_compare_unc_vs_next_formulations_smoke",
+    "reference_system": "unc",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_urgent_reactive_override_total",
+      "native_reactive_completed_fraction",
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_completed_total"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_urgent_reactive_override_total",
+      "native_reactive_completed_fraction"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_predictive_generated_total",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Greedy UNC Smoke",
+      "params": {
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_feasible_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Feasible Reservation Smoke",
+      "params": {
+        "dispatch_policy": "res-feasible",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_slack_min_s": 15.0
+      }
+    },
+    {
+      "key": "res_idle_feasible_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Idle Feasible Smoke",
+      "params": {
+        "dispatch_policy": "res-idle-feasible",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_slack_min_s": 15.0,
+        "reactive_pressure_max_for_predictive": 0.5
+      }
+    },
+    {
+      "key": "res_confidence_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Confidence Weighted Smoke",
+      "params": {
+        "dispatch_policy": "res-confidence",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "confidence-weighted",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight"
+      }
+    },
+    {
+      "key": "res_idle_feasible_confidence_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Idle Feasible Confidence Smoke",
+      "params": {
+        "dispatch_policy": "res-idle-feasible-confidence",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "confidence-weighted",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_slack_min_s": 15.0,
+        "reactive_pressure_max_for_predictive": 0.5,
+        "predictive_confidence_min": 0.25,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight"
+      }
+    }
+  ],
+  "metadata": {
+    "comparison": "unc_vs_next_formulations_smoke",
+    "load_regime": "nominal",
+    "horizon": "smoke",
+    "baseline_policy": "unc"
+  }
+}

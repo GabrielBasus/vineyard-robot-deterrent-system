@@ -1,0 +1,378 @@
+{
+  "scenario": {
+    "num_runs": 2,
+    "seed_start": 123,
+    "duration_s": 3600.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 2,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 120.0,
+    "warmup_s": 3600.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "enable_patrolling": true,
+      "include_fallback_patrol": false,
+      "enable_intervention_feedback": true,
+      "use_ground_truth": true,
+      "mu_true": 5e-06,
+      "alpha_true": 0.3,
+      "bird_detection_prob": 1.0,
+      "detect_range_m": 30.0,
+      "reactive_load_factor_window_s": 120.0,
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results\\testbench\\task_mechanism_ablation_pilot",
+    "reference_system": "unc__reactive_patrol",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_reactive_mean_response_time_s",
+      "total_robot_distance_m",
+      "native_reactive_completed_fraction",
+      "native_predictive_completed_fraction",
+      "native_reactive_load_factor_truth",
+      "native_reactive_load_factor_observable",
+      "native_reactive_load_factor_observed",
+      "native_reactive_load_factor_estimate",
+      "native_truth_accepted_events",
+      "native_truth_detections_observed",
+      "native_reactive_generated_total",
+      "native_reactive_admitted_total",
+      "native_reactive_dispatched_total",
+      "native_reactive_completed_total",
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_dispatched_total",
+      "native_predictive_completed_total",
+      "native_predictive_expected_deltaJ_total",
+      "native_predictive_raw_deltaJ_total",
+      "native_predictive_success_ratio",
+      "native_predictive_false_positive_ratio",
+      "native_model_deterring_candidates_total",
+      "native_model_deterring_generated",
+      "native_model_deterring_accepted",
+      "native_model_deterring_not_selected",
+      "native_model_deterring_rejected_budget",
+      "native_deterring_actions_completed_direct_detection",
+      "native_deterring_actions_completed_model_scored",
+      "native_suppression_per_direct_deterring_action",
+      "native_suppression_per_model_deterring_action",
+      "native_direct_detection_task_response_matches",
+      "native_robot_idle_fraction_mean",
+      "native_robot_reactive_fraction_mean",
+      "native_robot_predictive_fraction_mean",
+      "native_urgent_reactive_override_total"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_reactive_mean_response_time_s",
+      "total_robot_distance_m",
+      "native_reactive_completed_fraction",
+      "native_predictive_completed_fraction",
+      "native_predictive_raw_deltaJ_total",
+      "native_model_deterring_generated",
+      "native_deterring_actions_completed_model_scored"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_reactive_mean_response_time_s",
+      "native_reactive_load_factor_observed",
+      "native_reactive_load_factor_estimate",
+      "native_reactive_completed_fraction",
+      "native_predictive_completed_fraction",
+      "native_reactive_generated_total",
+      "native_predictive_generated_total",
+      "native_model_deterring_generated",
+      "native_urgent_reactive_override_total",
+      "active_tasks",
+      "completed_deterring_total",
+      "completed_patrolling_total"
+    ]
+  },
+  "systems": [
+    {
+      "key": "unc__reactive_patrol",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "UNC R+P",
+      "description": "Direct-detection reactive deterrence plus predictive patrol positioning.",
+      "params": {
+        "enable_direct_detection_tasks": true,
+        "enable_predictive_patrol_tasks": true,
+        "enable_model_scored_deterring": false,
+        "preventive_policy": "off",
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_0p25__reactive_patrol",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "RES rho=0.25 R+P",
+      "description": "Direct-detection reactive deterrence plus predictive patrol positioning.",
+      "params": {
+        "enable_direct_detection_tasks": true,
+        "enable_predictive_patrol_tasks": true,
+        "enable_model_scored_deterring": false,
+        "preventive_policy": "off",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility"
+      }
+    },
+    {
+      "key": "res_rand_0p25__reactive_patrol",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "RES-RAND rho=0.25 R+P",
+      "description": "Direct-detection reactive deterrence plus predictive patrol positioning.",
+      "params": {
+        "enable_direct_detection_tasks": true,
+        "enable_predictive_patrol_tasks": true,
+        "enable_model_scored_deterring": false,
+        "preventive_policy": "off",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "random"
+      }
+    },
+    {
+      "key": "unc__reactive_model_deterring",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "UNC R+D",
+      "description": "Direct-detection reactive deterrence plus model-scored predictive deterrence.",
+      "params": {
+        "enable_direct_detection_tasks": true,
+        "enable_predictive_patrol_tasks": false,
+        "enable_model_scored_deterring": true,
+        "preventive_policy": "heuristic",
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_0p25__reactive_model_deterring",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "RES rho=0.25 R+D",
+      "description": "Direct-detection reactive deterrence plus model-scored predictive deterrence.",
+      "params": {
+        "enable_direct_detection_tasks": true,
+        "enable_predictive_patrol_tasks": false,
+        "enable_model_scored_deterring": true,
+        "preventive_policy": "heuristic",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility"
+      }
+    },
+    {
+      "key": "res_rand_0p25__reactive_model_deterring",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "RES-RAND rho=0.25 R+D",
+      "description": "Direct-detection reactive deterrence plus model-scored predictive deterrence.",
+      "params": {
+        "enable_direct_detection_tasks": true,
+        "enable_predictive_patrol_tasks": false,
+        "enable_model_scored_deterring": true,
+        "preventive_policy": "heuristic",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "random"
+      }
+    },
+    {
+      "key": "unc__patrol_model_deterring",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "UNC P+D",
+      "description": "Predictive patrol positioning plus model-scored predictive deterrence, with direct detections used for learning but not turned into reactive tasks.",
+      "params": {
+        "enable_direct_detection_tasks": false,
+        "enable_predictive_patrol_tasks": true,
+        "enable_model_scored_deterring": true,
+        "preventive_policy": "heuristic",
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_0p25__patrol_model_deterring",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "RES rho=0.25 P+D",
+      "description": "Predictive patrol positioning plus model-scored predictive deterrence, with direct detections used for learning but not turned into reactive tasks.",
+      "params": {
+        "enable_direct_detection_tasks": false,
+        "enable_predictive_patrol_tasks": true,
+        "enable_model_scored_deterring": true,
+        "preventive_policy": "heuristic",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility"
+      }
+    },
+    {
+      "key": "res_rand_0p25__patrol_model_deterring",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "RES-RAND rho=0.25 P+D",
+      "description": "Predictive patrol positioning plus model-scored predictive deterrence, with direct detections used for learning but not turned into reactive tasks.",
+      "params": {
+        "enable_direct_detection_tasks": false,
+        "enable_predictive_patrol_tasks": true,
+        "enable_model_scored_deterring": true,
+        "preventive_policy": "heuristic",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "random"
+      }
+    },
+    {
+      "key": "unc__reactive_patrol_model_deterring",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "UNC R+P+D",
+      "description": "All three concrete task mechanisms enabled.",
+      "params": {
+        "enable_direct_detection_tasks": true,
+        "enable_predictive_patrol_tasks": true,
+        "enable_model_scored_deterring": true,
+        "preventive_policy": "heuristic",
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_0p25__reactive_patrol_model_deterring",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "RES rho=0.25 R+P+D",
+      "description": "All three concrete task mechanisms enabled.",
+      "params": {
+        "enable_direct_detection_tasks": true,
+        "enable_predictive_patrol_tasks": true,
+        "enable_model_scored_deterring": true,
+        "preventive_policy": "heuristic",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility"
+      }
+    },
+    {
+      "key": "res_rand_0p25__reactive_patrol_model_deterring",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "RES-RAND rho=0.25 R+P+D",
+      "description": "All three concrete task mechanisms enabled.",
+      "params": {
+        "enable_direct_detection_tasks": true,
+        "enable_predictive_patrol_tasks": true,
+        "enable_model_scored_deterring": true,
+        "preventive_policy": "heuristic",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "random"
+      }
+    }
+  ],
+  "metadata": {
+    "experiment": "task_mechanism_ablation",
+    "task_mechanisms": [
+      {
+        "key": "reactive_patrol",
+        "label": "R+P",
+        "description": "Direct-detection reactive deterrence plus predictive patrol positioning.",
+        "params": {
+          "enable_direct_detection_tasks": true,
+          "enable_predictive_patrol_tasks": true,
+          "enable_model_scored_deterring": false,
+          "preventive_policy": "off"
+        }
+      },
+      {
+        "key": "reactive_model_deterring",
+        "label": "R+D",
+        "description": "Direct-detection reactive deterrence plus model-scored predictive deterrence.",
+        "params": {
+          "enable_direct_detection_tasks": true,
+          "enable_predictive_patrol_tasks": false,
+          "enable_model_scored_deterring": true,
+          "preventive_policy": "heuristic"
+        }
+      },
+      {
+        "key": "patrol_model_deterring",
+        "label": "P+D",
+        "description": "Predictive patrol positioning plus model-scored predictive deterrence, with direct detections used for learning but not turned into reactive tasks.",
+        "params": {
+          "enable_direct_detection_tasks": false,
+          "enable_predictive_patrol_tasks": true,
+          "enable_model_scored_deterring": true,
+          "preventive_policy": "heuristic"
+        }
+      },
+      {
+        "key": "reactive_patrol_model_deterring",
+        "label": "R+P+D",
+        "description": "All three concrete task mechanisms enabled.",
+        "params": {
+          "enable_direct_detection_tasks": true,
+          "enable_predictive_patrol_tasks": true,
+          "enable_model_scored_deterring": true,
+          "preventive_policy": "heuristic"
+        }
+      }
+    ],
+    "policies": [
+      "unc",
+      "res_0p25",
+      "res_rand_0p25"
+    ],
+    "legend": {
+      "R": "direct-detection reactive deterrence",
+      "P": "predictive patrol positioning",
+      "D": "model-scored predictive deterrence"
+    },
+    "include_fallback_patrol": false
+  }
+}

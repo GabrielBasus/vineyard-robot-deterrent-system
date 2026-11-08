@@ -1,0 +1,307 @@
+{
+  "scenario": {
+    "num_runs": 5,
+    "seed_start": 123,
+    "duration_s": 86400.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 1800.0,
+    "warmup_s": 21600.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_compare_reactivefirst_unc_vs_capacity_formulations_nominal_24h",
+    "reference_system": "reactive_first",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_urgent_reactive_override_total",
+      "native_reactive_completed_fraction",
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_completed_total"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_urgent_reactive_override_total",
+      "native_reactive_completed_fraction",
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_completed_total"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_predictive_generated_total",
+      "native_robot_predictive_fraction_mean",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "react",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reactive Only 24h",
+      "params": {
+        "dispatch_policy": "react"
+      }
+    },
+    {
+      "key": "reactive_first",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reactive First 24h",
+      "params": {
+        "dispatch_policy": "reactive-first"
+      }
+    },
+    {
+      "key": "unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "True Mixed Greedy UNC 24h",
+      "params": {
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_0p1",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Hard Reservation 0.10 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.1
+      }
+    },
+    {
+      "key": "res_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Hard Reservation 0.25 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25
+      }
+    },
+    {
+      "key": "res_0p4",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Hard Reservation 0.40 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.4
+      }
+    },
+    {
+      "key": "res_rand_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Random Predictive Reservation 0.25 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "dispatch_policy": "res-rand",
+        "reservation_fraction": 0.25
+      }
+    },
+    {
+      "key": "res_soft_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Soft Reservation 0.25 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "dispatch_policy": "res-soft",
+        "reservation_fraction": 0.25,
+        "reservation_softening_alpha": 2.0
+      }
+    },
+    {
+      "key": "res_adaptive_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Adaptive Reservation 0.25 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "dispatch_policy": "res-adaptive",
+        "reservation_fraction": 0.25,
+        "reservation_softening_alpha": 2.0,
+        "reservation_age_softening_beta": 2.0,
+        "reservation_age_gate": 0.5
+      }
+    },
+    {
+      "key": "res_adaptive_leadtime_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Adaptive Lead-Time Reservation 0.25 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "dispatch_policy": "res-adaptive",
+        "reservation_fraction": 0.25,
+        "reservation_softening_alpha": 2.0,
+        "reservation_age_softening_beta": 5.0,
+        "reservation_age_gate": 0.25
+      }
+    },
+    {
+      "key": "res_feasible_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Feasible Reservation 0.25 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "dispatch_policy": "res-feasible",
+        "reservation_fraction": 0.25,
+        "predictive_slack_min_s": 15.0
+      }
+    },
+    {
+      "key": "res_idle_feasible_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Idle Feasible Reservation 0.25 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "dispatch_policy": "res-idle-feasible",
+        "reservation_fraction": 0.25,
+        "predictive_slack_min_s": 15.0,
+        "reactive_pressure_max_for_predictive": 0.5
+      }
+    },
+    {
+      "key": "res_confidence_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Confidence Weighted Reservation 0.25 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "confidence-weighted",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "dispatch_policy": "res-confidence",
+        "reservation_fraction": 0.25
+      }
+    },
+    {
+      "key": "res_idle_feasible_confidence_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Idle Feasible Confidence Reservation 0.25 24h",
+      "params": {
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "confidence-weighted",
+        "enable_predictive_lead_time": true,
+        "predictive_lead_time_min_s": 30.0,
+        "predictive_lead_time_max_eta_s": 120.0,
+        "predictive_lead_time_buffer_s": 15.0,
+        "predictive_lead_time_risk_power": 1.0,
+        "predictive_deadline_weight": 2.0,
+        "predictive_eta_penalty_weight": 0.1,
+        "predictive_confidence_source": "p_event_times_selection_weight",
+        "dispatch_policy": "res-idle-feasible-confidence",
+        "reservation_fraction": 0.25,
+        "predictive_slack_min_s": 15.0,
+        "reactive_pressure_max_for_predictive": 0.5,
+        "predictive_confidence_min": 0.25
+      }
+    }
+  ],
+  "metadata": {
+    "comparison": "reactivefirst_unc_vs_capacity_formulations_nominal_24h",
+    "load_regime": "nominal",
+    "horizon": "24h",
+    "baseline_policy": "reactive_first",
+    "secondary_baseline_policy": "unc",
+    "purpose": "Compare old reactive-first unc behavior, corrected true mixed greedy unc, and capacity-aware reservation formulations.",
+    "requires_code_change": "dispatch_policy reactive-first must be added; dispatch_policy unc should mean true mixed greedy while preserving urgent reactive override.",
+    "source_config": "thesis_compare_unc_vs_next_formulations_nominal_24h.json"
+  }
+}

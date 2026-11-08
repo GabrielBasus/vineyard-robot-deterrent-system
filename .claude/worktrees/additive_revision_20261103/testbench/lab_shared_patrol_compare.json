@@ -1,0 +1,83 @@
+{
+  "scenario": {
+    "num_runs": 5,
+    "seed_start": 123,
+    "duration_s": 1200.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 180.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": false,
+      "enable_model_scored_deterring": true,
+      "planner_profile": "thesis_confirm",
+      "patrol_point_generation_mode": "monte_carlo",
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    },
+    "warmup_s": 600.0
+  },
+  "outputs": {
+    "outdir": "results/testbench/lab_shared_patrol_compare",
+    "reference_system": "lab_patrol_legacy",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "completed_tasks_total",
+      "completed_patrolling_total",
+      "completed_deterring_total",
+      "tasks_per_km_travel",
+      "mean_active_tasks"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "completed_deterring_total",
+      "completed_patrolling_total"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "completed_deterring_total",
+      "completed_patrolling_total",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "lab_patrol_legacy",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "labs.DeterrentSystem_assignment_lab",
+      "title": "Lab Patrol Legacy",
+      "description": "Current lab patrol scoring based on local field benefit.",
+      "params": {
+        "patrol_scoring_mode": "legacy_field_benefit"
+      }
+    },
+    {
+      "key": "lab_patrol_shared",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "labs.DeterrentSystem_assignment_lab",
+      "title": "Lab Patrol Shared",
+      "description": "Shared patrol scorer using indirect exposure reduction from observation coverage and follow-up response.",
+      "params": {
+        "patrol_scoring_mode": "shared_response_reduction",
+        "patrol_shared_followup_success_prob": 0.75
+      }
+    }
+  ]
+}

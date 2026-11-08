@@ -1,0 +1,2537 @@
+{
+  "reference_schema_version": 1,
+  "metadata": {
+    "seed": 123,
+    "t_end": 10.0,
+    "dt": 1.0,
+    "fps": 1,
+    "simulation_mode": "proposed"
+  },
+  "frame_count": 11,
+  "final_metrics_compact": {
+    "boundary_bytes_sent": 0,
+    "boundary_message_count": 0,
+    "completed_tasks_total": 4,
+    "deterring_action_precision": "NaN",
+    "deterring_action_precision_direct_detection": "NaN",
+    "deterring_action_precision_model_scored": "NaN",
+    "deterring_actions_completed_direct_detection": 0,
+    "deterring_actions_completed_model_scored": 0,
+    "deterring_actions_completed_total": 0,
+    "fleet_idle_no_task_fraction_so_far": 0.242424242424,
+    "fleet_moving_fraction_so_far": 0.757575757576,
+    "fleet_task_engagement_fraction_so_far": 0.757575757576,
+    "forecast_lead_time_s": "NaN",
+    "forecast_precision_at_k": 0.0,
+    "forecast_recall_at_k": "NaN",
+    "intervention_msg_dropped_debounce": 0,
+    "intervention_msg_dropped_low_weight": 0,
+    "mean_response_time_s": "NaN",
+    "model_deterring_accepted": 0,
+    "model_deterring_budget_mode": "count_per_hour",
+    "model_deterring_candidates_total": 0,
+    "model_deterring_generated": 0,
+    "model_deterring_not_selected": 0,
+    "model_deterring_pass_field": 0,
+    "model_deterring_pass_predicted_deltaJ": 0,
+    "model_deterring_pass_risk": 0,
+    "model_deterring_pass_support": 0,
+    "model_deterring_rejected_budget": 0,
+    "model_deterring_rejected_budget_count_mode": 0,
+    "model_deterring_rejected_budget_utility_mode": 0,
+    "model_deterring_rejected_busy": 0,
+    "model_deterring_rejected_cooldown": 0,
+    "model_deterring_rejected_eta": 0,
+    "model_deterring_rejected_field": 0,
+    "model_deterring_rejected_margin": 0,
+    "model_deterring_rejected_persistence": 0,
+    "model_deterring_rejected_predicted_deltaJ": 0,
+    "model_deterring_rejected_repeat_no_new_support": 0,
+    "model_deterring_rejected_risk": 0,
+    "model_deterring_rejected_support": 0,
+    "model_vs_direct_suppression_yield_ratio": "NaN",
+    "planner_rejected_model_det_cap": 0,
+    "planner_rejected_patrol_cap": 0,
+    "planner_rejected_task_cap": 0,
+    "planner_rejected_unassigned": 0,
+    "planner_replaced_patrol": 0,
+    "robot_idle_fraction_mean": 0.242424242424,
+    "robot_longest_idle_s_max": 9.0,
+    "robot_moving_with_task_fraction_mean": 0.757575757576,
+    "robot_tail_idle_s_max": 9.0,
+    "robot_task_utilization_mean": 0.757575757576,
+    "robots_zero_distance_count": 0,
+    "stale_goal_clears": 0,
+    "suppression_per_deterring_action": "NaN",
+    "suppression_per_direct_deterring_action": "NaN",
+    "suppression_per_model_deterring_action": "NaN",
+    "travel_distance_total": 139.210897855062,
+    "truth_accepted_events": 0,
+    "truth_candidate_events": 0,
+    "truth_suppressed_events": 0,
+    "truth_suppression_effect_mean": "NaN",
+    "truth_suppression_effect_sum": 0.0,
+    "truth_suppression_rate": "NaN",
+    "value_weighted_exposure": 0.0
+  },
+  "frames": [
+    {
+      "t": 0.0,
+      "poses": {
+        "r1": [
+          140.682118,
+          26.293459
+        ],
+        "r2": [
+          58.794921,
+          38.145813
+        ],
+        "r3": [
+          177.790391,
+          47.947382
+        ],
+        "r4": [
+          172.64216,
+          71.188435
+        ],
+        "r5": [
+          157.340276,
+          41.757164
+        ],
+        "r6": [
+          127.421272,
+          112.119121
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "moving",
+        "r6": "moving"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": [
+          149.800382,
+          40.043917
+        ],
+        "r6": [
+          115.419399,
+          113.895333
+        ]
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            138.082187,
+            26.27446
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            61.393259,
+            38.238778
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            46.0
+          ],
+          "current_pose": [
+            175.19513,
+            48.104291
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            170.043475,
+            71.271105
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 5,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            149.800382,
+            40.043917
+          ],
+          "effective_goal": [
+            149.800382,
+            41.2
+          ],
+          "current_pose": [
+            159.933206,
+            41.94877
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 6,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            115.419399,
+            113.895333
+          ],
+          "effective_goal": [
+            115.419399,
+            113.2
+          ],
+          "current_pose": [
+            130.010792,
+            111.885911
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 6,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": true,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 4,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 1.0,
+      "poses": {
+        "r1": [
+          143.282048,
+          26.312458
+        ],
+        "r2": [
+          56.196584,
+          38.052849
+        ],
+        "r3": [
+          180.385652,
+          47.790474
+        ],
+        "r4": [
+          175.240845,
+          71.105765
+        ],
+        "r5": [
+          154.747345,
+          41.565558
+        ],
+        "r6": [
+          124.831752,
+          112.352331
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "moving",
+        "r6": "moving"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": [
+          149.800382,
+          40.043917
+        ],
+        "r6": [
+          115.419399,
+          113.895333
+        ]
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "done_task_ids": [],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            140.682118,
+            26.293459
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            58.794921,
+            38.145813
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            46.0
+          ],
+          "current_pose": [
+            177.790391,
+            47.947382
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            172.64216,
+            71.188435
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 5,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            149.800382,
+            40.043917
+          ],
+          "effective_goal": [
+            149.800382,
+            41.2
+          ],
+          "current_pose": [
+            157.340276,
+            41.757164
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 6,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            115.419399,
+            113.895333
+          ],
+          "effective_goal": [
+            115.419399,
+            113.2
+          ],
+          "current_pose": [
+            127.421272,
+            112.119121
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 6,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 2.0,
+      "poses": {
+        "r1": [
+          145.881979,
+          26.331457
+        ],
+        "r2": [
+          53.598246,
+          37.959884
+        ],
+        "r3": [
+          182.980913,
+          47.633565
+        ],
+        "r4": [
+          177.839531,
+          71.023095
+        ],
+        "r5": [
+          152.154415,
+          41.373953
+        ],
+        "r6": [
+          122.242232,
+          112.585541
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "idle",
+        "r6": "moving"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": null,
+        "r6": [
+          115.419399,
+          113.895333
+        ]
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4,
+        6
+      ],
+      "done_task_ids": [
+        5
+      ],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            143.282048,
+            26.312458
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            56.196584,
+            38.052849
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            46.0
+          ],
+          "current_pose": [
+            180.385652,
+            47.790474
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            175.240845,
+            71.105765
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 5,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            149.800382,
+            40.043917
+          ],
+          "effective_goal": [
+            149.800382,
+            41.2
+          ],
+          "current_pose": [
+            154.747345,
+            41.565558
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 6,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            115.419399,
+            113.895333
+          ],
+          "effective_goal": [
+            115.419399,
+            113.2
+          ],
+          "current_pose": [
+            124.831752,
+            112.352331
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 5,
+        "completed_patrolling_this_step": 1,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 3.0,
+      "poses": {
+        "r1": [
+          148.481909,
+          26.350456
+        ],
+        "r2": [
+          50.999909,
+          37.866919
+        ],
+        "r3": [
+          185.576174,
+          47.476656
+        ],
+        "r4": [
+          180.438216,
+          70.940425
+        ],
+        "r5": [
+          152.154415,
+          41.373953
+        ],
+        "r6": [
+          119.652712,
+          112.818751
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "idle",
+        "r6": "moving"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": null,
+        "r6": [
+          115.419399,
+          113.895333
+        ]
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4,
+        6
+      ],
+      "done_task_ids": [
+        5
+      ],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            145.881979,
+            26.331457
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            53.598246,
+            37.959884
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            46.0
+          ],
+          "current_pose": [
+            182.980913,
+            47.633565
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            177.839531,
+            71.023095
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            152.154415,
+            41.373953
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 6,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            115.419399,
+            113.895333
+          ],
+          "effective_goal": [
+            115.419399,
+            113.2
+          ],
+          "current_pose": [
+            122.242232,
+            112.585541
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 5,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 4.0,
+      "poses": {
+        "r1": [
+          151.08184,
+          26.369455
+        ],
+        "r2": [
+          48.401572,
+          37.773954
+        ],
+        "r3": [
+          188.171435,
+          47.319748
+        ],
+        "r4": [
+          183.036902,
+          70.857755
+        ],
+        "r5": [
+          152.154415,
+          41.373953
+        ],
+        "r6": [
+          117.063192,
+          113.051961
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "done_task_ids": [
+        5,
+        6
+      ],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            148.481909,
+            26.350456
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            50.999909,
+            37.866919
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            46.0
+          ],
+          "current_pose": [
+            185.576174,
+            47.476656
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            180.438216,
+            70.940425
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            152.154415,
+            41.373953
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 6,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            115.419399,
+            113.895333
+          ],
+          "effective_goal": [
+            115.419399,
+            113.2
+          ],
+          "current_pose": [
+            119.652712,
+            112.818751
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 4,
+        "completed_patrolling_this_step": 1,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 5.0,
+      "poses": {
+        "r1": [
+          153.68177,
+          26.388454
+        ],
+        "r2": [
+          45.803234,
+          37.680989
+        ],
+        "r3": [
+          190.766696,
+          47.162839
+        ],
+        "r4": [
+          185.635587,
+          70.775085
+        ],
+        "r5": [
+          152.154415,
+          41.373953
+        ],
+        "r6": [
+          117.063192,
+          113.051961
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "done_task_ids": [
+        5,
+        6
+      ],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            151.08184,
+            26.369455
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            48.401572,
+            37.773954
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            46.0
+          ],
+          "current_pose": [
+            188.171435,
+            47.319748
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            183.036902,
+            70.857755
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            152.154415,
+            41.373953
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            117.063192,
+            113.051961
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 4,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 6.0,
+      "poses": {
+        "r1": [
+          156.281701,
+          26.407453
+        ],
+        "r2": [
+          43.204897,
+          37.588024
+        ],
+        "r3": [
+          193.361957,
+          47.005931
+        ],
+        "r4": [
+          188.234272,
+          70.692415
+        ],
+        "r5": [
+          152.154415,
+          41.373953
+        ],
+        "r6": [
+          117.063192,
+          113.051961
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "done_task_ids": [
+        5,
+        6
+      ],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            153.68177,
+            26.388454
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            45.803234,
+            37.680989
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            46.0
+          ],
+          "current_pose": [
+            190.766696,
+            47.162839
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            185.635587,
+            70.775085
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            152.154415,
+            41.373953
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            117.063192,
+            113.051961
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 4,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 7.0,
+      "poses": {
+        "r1": [
+          158.881632,
+          26.426452
+        ],
+        "r2": [
+          40.606559,
+          37.49506
+        ],
+        "r3": [
+          195.957218,
+          46.849022
+        ],
+        "r4": [
+          190.832958,
+          70.609746
+        ],
+        "r5": [
+          152.154415,
+          41.373953
+        ],
+        "r6": [
+          117.063192,
+          113.051961
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "done_task_ids": [
+        5,
+        6
+      ],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            156.281701,
+            26.407453
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            43.204897,
+            37.588024
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            46.0
+          ],
+          "current_pose": [
+            193.361957,
+            47.005931
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            188.234272,
+            70.692415
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            152.154415,
+            41.373953
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            117.063192,
+            113.051961
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 4,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 8.0,
+      "poses": {
+        "r1": [
+          161.481562,
+          26.445451
+        ],
+        "r2": [
+          38.008222,
+          37.402095
+        ],
+        "r3": [
+          198.552479,
+          46.692113
+        ],
+        "r4": [
+          193.431643,
+          70.527076
+        ],
+        "r5": [
+          152.154415,
+          41.373953
+        ],
+        "r6": [
+          117.063192,
+          113.051961
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "done_task_ids": [
+        5,
+        6
+      ],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            158.881632,
+            26.426452
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            40.606559,
+            37.49506
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            46.0
+          ],
+          "current_pose": [
+            195.957218,
+            46.849022
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            190.832958,
+            70.609746
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            152.154415,
+            41.373953
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            117.063192,
+            113.051961
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 4,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 9.0,
+      "poses": {
+        "r1": [
+          164.081493,
+          26.46445
+        ],
+        "r2": [
+          35.409884,
+          37.30913
+        ],
+        "r3": [
+          201.14774,
+          46.535205
+        ],
+        "r4": [
+          196.030329,
+          70.444406
+        ],
+        "r5": [
+          152.154415,
+          41.373953
+        ],
+        "r6": [
+          117.063192,
+          113.051961
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "done_task_ids": [
+        5,
+        6
+      ],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 1,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            161.481562,
+            26.445451
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 2,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            38.008222,
+            37.402095
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 3,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            41.2
+          ],
+          "current_pose": [
+            198.552479,
+            46.692113
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 4,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            193.431643,
+            70.527076
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            152.154415,
+            41.373953
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "idle",
+          "source": "idle",
+          "assigned_task_id": null,
+          "assigned_task_type": null,
+          "assigned_task_mode": null,
+          "goal": null,
+          "effective_goal": null,
+          "current_pose": [
+            117.063192,
+            113.051961
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 6,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 6,
+        "accepted_count": 6,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 4,
+        "completed_patrolling_this_step": 0,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    },
+    {
+      "t": 10.0,
+      "poses": {
+        "r1": [
+          166.681423,
+          26.483449
+        ],
+        "r2": [
+          32.811547,
+          37.216165
+        ],
+        "r3": [
+          203.37457,
+          45.193107
+        ],
+        "r4": [
+          198.629014,
+          70.361736
+        ],
+        "r5": [
+          149.800382,
+          41.2
+        ],
+        "r6": [
+          115.419399,
+          113.2
+        ]
+      },
+      "robot_states": {
+        "r1": "moving",
+        "r2": "moving",
+        "r3": "moving",
+        "r4": "moving",
+        "r5": "idle",
+        "r6": "idle"
+      },
+      "robot_goals": {
+        "r1": [
+          123.24112,
+          23.571352
+        ],
+        "r2": [
+          46.318799,
+          60.462227
+        ],
+        "r3": [
+          194.467368,
+          41.799218
+        ],
+        "r4": [
+          187.654822,
+          100.798138
+        ],
+        "r5": null,
+        "r6": null
+      },
+      "active_task_ids": [
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "done_task_ids": [
+        5,
+        6,
+        15,
+        16
+      ],
+      "motion_commands": [
+        {
+          "robot_id": "r1",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 7,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            123.24112,
+            23.571352
+          ],
+          "effective_goal": [
+            210.0,
+            26.8
+          ],
+          "current_pose": [
+            164.081493,
+            26.46445
+          ]
+        },
+        {
+          "robot_id": "r2",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 8,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            46.318799,
+            60.462227
+          ],
+          "effective_goal": [
+            10.0,
+            36.4
+          ],
+          "current_pose": [
+            35.409884,
+            37.30913
+          ]
+        },
+        {
+          "robot_id": "r3",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 9,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            194.467368,
+            41.799218
+          ],
+          "effective_goal": [
+            210.0,
+            41.2
+          ],
+          "current_pose": [
+            201.14774,
+            46.535205
+          ]
+        },
+        {
+          "robot_id": "r4",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 10,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            187.654822,
+            100.798138
+          ],
+          "effective_goal": [
+            210.0,
+            70.0
+          ],
+          "current_pose": [
+            196.030329,
+            70.444406
+          ]
+        },
+        {
+          "robot_id": "r5",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 15,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            149.800382,
+            40.043917
+          ],
+          "effective_goal": [
+            149.800382,
+            41.2
+          ],
+          "current_pose": [
+            152.154415,
+            41.373953
+          ]
+        },
+        {
+          "robot_id": "r6",
+          "command_type": "move",
+          "source": "existing_goal",
+          "assigned_task_id": 16,
+          "assigned_task_type": "patrolling",
+          "assigned_task_mode": null,
+          "goal": [
+            115.419399,
+            113.895333
+          ],
+          "effective_goal": [
+            115.419399,
+            113.2
+          ],
+          "current_pose": [
+            117.063192,
+            113.051961
+          ]
+        }
+      ],
+      "task_generation_structured": {
+        "candidate_count": 10,
+        "patrolling_enabled": true
+      },
+      "dispatch_structured": {
+        "candidate_count": 10,
+        "accepted_count": 10,
+        "rejected_counts": {
+          "budget": 0,
+          "model_det_cap": 0,
+          "patrol_cap": 0,
+          "task_cap": 0,
+          "unassigned": 0
+        }
+      },
+      "motion_execution_structured": {
+        "motion_orchestration_mode": "local",
+        "motion_execution_backend": "internal_sim",
+        "external_feedback_applied": false,
+        "external_pose_updates_this_step": 0,
+        "goals_active_count": 4,
+        "completed_patrolling_this_step": 2,
+        "completed_deterring_this_step": 0,
+        "stale_goal_clears_this_step": 0
+      },
+      "truth_generation_structured": {
+        "truth_events_added_this_step": 0,
+        "detections_added_this_step": 0,
+        "truth_candidate_events_total": 0,
+        "truth_accepted_events_total": 0,
+        "truth_suppressed_events_total": 0
+      },
+      "forecast_model_structured": {
+        "forecast_eval_ran_this_step": false,
+        "forecast_future_event_count": 0,
+        "forecast_hotspot_count": 0,
+        "forecast_hit_count": 0,
+        "forecast_covered_event_count": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "scenario": {
+    "num_runs": 3,
+    "seed_start": 123,
+    "duration_s": 3600.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 300.0
+  },
+  "outputs": {
+    "outdir": "results/testbench/example",
+    "reference_system": "outline_core",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_birds_deterred_pct_last_hour",
+      "completed_tasks_total",
+      "completed_deterring_total",
+      "tasks_per_km_travel",
+      "native_boundary_message_count"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_birds_deterred_pct_last_hour",
+      "completed_tasks_total",
+      "native_boundary_message_count"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_birds_deterred_pct_last_hour",
+      "completed_deterring_total",
+      "completed_tasks_total",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "outline_core",
+      "type": "simplification_stage",
+      "stage": "s1_risk_open_core",
+      "title": "Outline Core"
+    },
+    {
+      "key": "exploration_local_queue",
+      "type": "exploration_variant",
+      "variant": "row_local_priority_queue",
+      "title": "Exploration Local Queue"
+    },
+    {
+      "key": "current_prediction",
+      "type": "current_mode",
+      "mode": "prediction_only",
+      "title": "Current Prediction Only"
+    },
+    {
+      "key": "current_reactive",
+      "type": "current_mode",
+      "mode": "reactive",
+      "title": "Current Reactive"
+    }
+  ]
+}

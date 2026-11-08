@@ -1,0 +1,52 @@
+runner:
+  seeds: [2000, 2001, 2002, 2003, 2004]
+  outdir: results/field_divergence_filter_sweep_from_yaml
+
+simulation:
+  t_end: 3600
+  dt: 5.0
+
+analysis:
+  sample_period_s: 300
+  hotspot_top_k: 5
+  hotspot_match_radius_m: 25.0
+  patrol_match_radius_m: 25.0
+  recent_deterrence_window_s: 300.0
+  recent_deterrence_radius_m: 25.0
+  local_patch_radius_m: 20.0
+
+planner:
+  assignment_method: hungarian
+  assignment_distance_cost_per_m: 0.006
+  assignment_switch_penalty: 1.0
+  assigner_w_task_value: 0.0
+
+patrol_filter:
+  patrol_min_hotspot_score: 0.0001
+  patrol_hotspot_score_percentile: 97
+  patrol_hotspot_keep_top_k: 6
+
+gating:
+  model_deterring_window_s: 90.0
+  model_deterring_sprt_alpha: 0.05
+  model_deterring_sprt_beta: 0.20
+  model_deterring_chance_threshold: 0.20
+  model_deterring_min_deltaj_per_cost: 0.15
+
+sweep:
+  patrol_filter_modes: [percentile, top_k]
+  patrol_percentiles: [92, 95, 97]
+  patrol_keep_top_k_values: [4, 5, 6]
+  task_replan_period_values: [60, 75, 90]
+  model_deterring_gate_policies: [heuristic, sprt_capacity]
+  model_deterring_sprt_alpha_values: [0.05, 0.10]
+  model_deterring_chance_threshold_values: [0.15, 0.20]
+  model_deterring_min_deltaj_per_cost_values: [0.10, 0.15]
+
+ground_truth:
+  truth_beta_scale: 1.0
+  truth_omega_scale: 1.0
+  truth_sigma_scale: 1.0
+
+model:
+  model_beta_scale: 1.0

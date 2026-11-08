@@ -1,0 +1,408 @@
+"""
+run_variant_ab_comparison.py -- A/B/C/B_ie/C_ie/D/E controlled comparison experiment.
+
+Runs B4_res_stl_full_multicue under seven forecast/valuation settings:
+
+Plan-variant mapping (code variants vs. improvement-plan variants):
+  variant_A    : Plan A -- both corrections off  (original submitted system)
+  variant_B    : Plan B -- fc=True  (Eqs 1,2 + pending + eta-weighted suppression)
+  variant_C    : Plan B + ftc -- fc=True + forward trajectory correction
+  variant_B_ie : Plan C -- fc=True, valuation=integrated_exposure  (no ftc)
+  variant_C_ie : Plan C + ftc -- fc=True + ftc, valuation=integrated_exposure
+  variant_D    : Plan D -- fc=True, valuation=continuation_rollout, benefit_gate=0
+  variant_E    : Plan E -- Plan D + service_protection=True
+  variant_D_cue: Plan D + stl_rollout_cue_dynamics=True
+  variant_E_cue: Plan E + stl_rollout_cue_dynamics=True
+
+Note: "code variant C" (ftc) is a sub-variant of Plan B; "Plan variant C"
+(integrated exposure) is what the code calls "B_ie" and "C_ie".
+
+Uses 30 fresh evaluation seeds (155-184) to keep confirmatory seeds 125-154
+frozen as published results.  All variants run on the same seed set and
+identical configuration so comparisons are paired.
+
+Paired comparisons in the output:
+  B vs A    : effect of Eqs 1,2 + pending events + eta-weighted suppression
+  C vs B    : effect of forward trajectory correction specifically
+  B_ie vs B : effect of integrated-exposure valuation (Plan §3.1)
+  C_ie vs C : integrated exposure + ftc
+  D vs B    : effect of continuation rollout + benefit gate (Plan §4)
+  E vs D    : effect of service protection (Plan §4E)
+  D_cue vs D, E_cue vs E : effect of carrying cue depletion and recovery
+              through the continuation rollout (Plan Section 3)
+
+Output: results/testbench/variant_abc/
+  per_run_metrics.csv, summary_by_system.csv, variant_abc_comparison.md
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import math
+import statistics as stats
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+
+# Make project root importable when run as a script.
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+from experiments.run_habituation_stl_production_ladder import (
+    METRIC_FIELDS,
+    _run_one,
+    _write_csv,
+)
+
+
+SEED_START = 155
+SEED_COUNT = 30
+
+# Base simulation config matching the B4 confirmatory setup.
+_COMMON = {
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 60,
+    "NY": 48,
+    "Nrobots": 4,
+    "T_end": 1800.0,
+    "dt": 1.0,
+    "fps": 1,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "mu_true": 2e-5,
+    "alpha_true": 0.3,
+    "beta_true": 0.25,
+    "sigma_true": 12.0,
+    "omega_true": 600.0,
+    "planner_profile": "thesis_calibrated_selective_proposed",
+    "use_split_task_extraction_selection_pipeline": True,
+    "preassignment_selection_policy": "pass_through",
+    "enable_predictive_lead_time": True,
+    "predictive_lead_time_min_s": 30.0,
+    "predictive_lead_time_max_eta_s": 120.0,
+    "predictive_lead_time_buffer_s": 15.0,
+    "predictive_lead_time_risk_power": 1.0,
+    "report_metrics_end": False,
+    "telemetry_clear_on_start": False,
+    "telemetry_prompt_save": False,
+    "warmup_s": 300.0,
+    "stl_E_star": 5.0,
+    "stl_T_cov_s": 1200.0,
+    "stl_W_s": 600.0,
+    "stl_eta_min": 0.4,
+    "stl_horizon_s": 300.0,
+    "stl_theta": 12.0,
+    "habituation_kappa": 0.5,
+    "reservation_fraction": 0.25,
+}
+
+_B4_SYS = {
+    "simulation_mode": "proposed",
+    "enable_patrolling": True,
+    "enable_intervention_feedback": True,
+    "include_fallback_patrol": True,
+    "enable_model_scored_deterring": True,
+    "dispatch_policy": "res",
+    "reservation_fraction": 0.25,
+    "reservation_window_s": 600.0,
+    "reactive_override_slack_s": 90.0,
+    "predictive_selection_policy": "utility",
+    "predictive_fixed_deterring_mode": None,
+    "predictive_utility_mode": "stl_robustness",
+    "stl_active_clauses": ("exp", "cov", "hab"),
+}
+
+
+def _hab_params(enabled: bool) -> dict:
+    if enabled:
+        return {
+            "enable_habituation": True,
+            "habituation_condition": "hab_on",
+        }
+    return {
+        "enable_habituation": False,
+        "habituation_condition": "hab_off",
+    }
+
+
+_VARIANTS = [
+    # (name, stl_forecast_correction, stl_forward_trajectory_correction, stl_valuation_mode, extra_params)
+    ("variant_A",    False, False, "stl_robustness",      {}),  # original submitted system
+    ("variant_B",    True,  False, "stl_robustness",      {}),  # Plan B: Eqs 1,2 + pending + eta-suppression
+    ("variant_C",    True,  True,  "stl_robustness",      {}),  # Plan B + ftc
+    ("variant_B_ie", True,  False, "integrated_exposure", {}),  # Plan C: Plan B + integrated-exposure valuation
+    ("variant_C_ie", True,  True,  "integrated_exposure", {}),  # Plan C + ftc
+    ("variant_D",    True,  False, "continuation_rollout",
+     {"stl_benefit_gate": 0.0, "stl_service_protection": False}),  # Plan D: rollout + benefit gate
+    ("variant_E",    True,  False, "continuation_rollout",
+     {"stl_benefit_gate": 0.0, "stl_service_protection": True}),   # Plan E: Plan D + service protection
+    # Plan Section 3 ("value future cue use"): D/E with cue depletion and recovery
+    # carried through the greedy continuation rollout.
+    ("variant_D_cue", True, False, "continuation_rollout",
+     {"stl_benefit_gate": 0.0, "stl_service_protection": False,
+      "stl_rollout_cue_dynamics": True}),
+    ("variant_E_cue", True, False, "continuation_rollout",
+     {"stl_benefit_gate": 0.0, "stl_service_protection": True,
+      "stl_rollout_cue_dynamics": True}),
+]
+
+
+def _select_variants(names: str | None) -> list[tuple]:
+    """Return the _VARIANTS entries named in a comma-separated list (None = all)."""
+    if not names:
+        return list(_VARIANTS)
+    wanted = [n.strip() for n in str(names).split(",") if n.strip()]
+    known = {v[0]: v for v in _VARIANTS}
+    unknown = [n for n in wanted if n not in known]
+    if unknown:
+        raise SystemExit(f"Unknown variant(s): {', '.join(unknown)}. "
+                         f"Known: {', '.join(known)}")
+    return [known[n] for n in wanted]
+
+
+def _build_jobs(seed_start: int, seed_count: int,
+                variants: list[tuple] | None = None) -> list[dict]:
+    jobs = []
+    for seed in range(seed_start, seed_start + seed_count):
+        for variant, fc, ftc, val_mode, extra in (_VARIANTS if variants is None else variants):
+            for hab_enabled in (True, False):
+                hab = _hab_params(hab_enabled)
+                params = dict(_COMMON)
+                params.update(_B4_SYS)
+                params.update(hab)
+                params["stl_forecast_correction"] = fc
+                params["stl_forward_trajectory_correction"] = ftc
+                params["stl_valuation_mode"] = val_mode
+                params.update(extra)
+                system = f"{variant}_{hab['habituation_condition']}"
+                jobs.append({
+                    "system": system,
+                    "baseline": variant,
+                    "habituation_condition": hab["habituation_condition"],
+                    "seed": seed,
+                    "params": params,
+                })
+    return jobs
+
+
+def _safe_float(v) -> float:
+    try:
+        f = float(v)
+        return f if math.isfinite(f) else float("nan")
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def _paired_deltas(rows: list[dict], sys_a: str, sys_b: str, metric: str) -> list[float]:
+    """Return B - A deltas for seeds that appear in both systems under hab_on."""
+    a_by_seed = {
+        r["seed"]: _safe_float(r.get(metric))
+        for r in rows
+        if r["baseline"] == sys_a and r["habituation_condition"] == "hab_on"
+    }
+    b_by_seed = {
+        r["seed"]: _safe_float(r.get(metric))
+        for r in rows
+        if r["baseline"] == sys_b and r["habituation_condition"] == "hab_on"
+    }
+    deltas = []
+    for seed in sorted(a_by_seed):
+        if seed in b_by_seed:
+            a, b = a_by_seed[seed], b_by_seed[seed]
+            if math.isfinite(a) and math.isfinite(b):
+                deltas.append(b - a)
+    return deltas
+
+
+def _summarize(rows: list[dict]) -> list[dict]:
+    from collections import defaultdict
+    groups: dict[tuple, list] = defaultdict(list)
+    for row in rows:
+        key = (row["baseline"], row["habituation_condition"])
+        for field in METRIC_FIELDS:
+            val = _safe_float(row.get(field))
+            if math.isfinite(val):
+                groups[key].append((field, val))
+
+    summary = []
+    field_by_key: dict[tuple, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        key = (row["baseline"], row["habituation_condition"])
+        for field in METRIC_FIELDS:
+            val = _safe_float(row.get(field))
+            if math.isfinite(val):
+                field_by_key[key][field].append(val)
+
+    for (baseline, hab_cond), fields in field_by_key.items():
+        srow = {"baseline": baseline, "habituation_condition": hab_cond,
+                "n_seeds": len(rows)}
+        for field, vals in fields.items():
+            if vals:
+                srow[f"{field}_mean"] = stats.mean(vals)
+                srow[f"{field}_stdev"] = stats.stdev(vals) if len(vals) > 1 else float("nan")
+        summary.append(srow)
+    return sorted(summary, key=lambda r: (r["baseline"], r["habituation_condition"]))
+
+
+def _mean_exposure(rows: list[dict], baseline: str) -> float:
+    vals = [
+        _safe_float(r.get("value_weighted_exposure"))
+        for r in rows
+        if r["baseline"] == baseline and r["habituation_condition"] == "hab_on"
+        and math.isfinite(_safe_float(r.get("value_weighted_exposure")))
+    ]
+    return stats.mean(vals) if vals else float("nan")
+
+
+def _write_comparison_md(rows: list[dict], outdir: Path) -> None:
+    metric = "value_weighted_exposure"
+    comparisons = [
+        ("variant_A",    "variant_B",    "B vs A (Plan B: Eqs 1,2 + pending + eta-suppression)"),
+        ("variant_B",    "variant_C",    "C vs B (forward trajectory correction only)"),
+        ("variant_A",    "variant_C",    "C vs A (all §2 corrections combined)"),
+        ("variant_B",    "variant_B_ie", "B_ie vs B (Plan C: integrated-exposure valuation, no ftc)"),
+        ("variant_C",    "variant_C_ie", "C_ie vs C (Plan C + ftc: integrated-exposure valuation)"),
+        ("variant_B_ie", "variant_C_ie", "C_ie vs B_ie (ftc under integrated-exposure)"),
+        ("variant_B",    "variant_D",    "D vs B (Plan D: continuation rollout + benefit gate)"),
+        ("variant_D",    "variant_E",    "E vs D (Plan E: Plan D + service protection)"),
+        ("variant_D",    "variant_D_cue", "D_cue vs D (Plan Section 3: cue dynamics in rollout)"),
+        ("variant_E",    "variant_E_cue", "E_cue vs E (Plan Section 3: cue dynamics in rollout)"),
+    ]
+
+    lines = [
+        "# Variant A / B / C / B_ie / C_ie / D / E Comparison",
+        "",
+        "Plan-variant mapping:",
+        "- variant_A    : Plan A -- all corrections off (submitted B4)",
+        "- variant_B    : Plan B -- fc=True (Eqs 1,2 + pending events + eta-weighted suppression)",
+        "- variant_C    : Plan B+ftc -- variant_B + corrected e_nom forward trajectory",
+        "- variant_B_ie : Plan C -- variant_B + integrated-exposure valuation",
+        "- variant_C_ie : Plan C+ftc -- variant_C + integrated-exposure valuation",
+        "- variant_D    : Plan D -- fc=True, valuation=continuation_rollout, benefit_gate=0",
+        "- variant_E    : Plan E -- Plan D + service_protection=True",
+        "- variant_D_cue: Plan D + rollout cue dynamics (depletion/recovery carried through rollout)",
+        "- variant_E_cue: Plan E + rollout cue dynamics",
+        f"- Seeds: {SEED_START}-{SEED_START + SEED_COUNT - 1}",
+        "",
+        "## Primary Metric: value_weighted_exposure (hab_on)",
+        "(negative delta = lower exposure = improvement)",
+        "",
+    ]
+
+    any_data = False
+    for sys_a, sys_b, label in comparisons:
+        deltas = _paired_deltas(rows, sys_a, sys_b, metric)
+        n = len(deltas)
+        if n == 0:
+            lines += [f"### {label}", "", "  (no paired data)", ""]
+            continue
+        any_data = True
+        mean_d = stats.mean(deltas)
+        base_mean = _mean_exposure(rows, sys_a)
+        mean_pct = (mean_d / base_mean * 100.0) if math.isfinite(base_mean) and base_mean != 0 else float("nan")
+        lines += [
+            f"### {label}",
+            "",
+            f"n = {n} paired seeds",
+            f"Mean delta = {mean_d:+.4f} ({mean_pct:+.1f}% of {sys_a} mean)",
+            "",
+        ]
+
+    if not any_data:
+        lines += ["No paired data available."]
+
+    raw_sections = [
+        ("B - A",    "variant_A",    "variant_B"),
+        ("C - B",    "variant_B",    "variant_C"),
+        ("B_ie - B", "variant_B",    "variant_B_ie"),
+        ("C_ie - C", "variant_C",    "variant_C_ie"),
+        ("D - B",    "variant_B",    "variant_D"),
+        ("E - D",    "variant_D",    "variant_E"),
+        ("D_cue - D", "variant_D",   "variant_D_cue"),
+        ("E_cue - E", "variant_E",   "variant_E_cue"),
+    ]
+    for label, sys_a, sys_b in raw_sections:
+        lines += ["", f"## Raw Deltas ({label})", ""]
+        deltas = _paired_deltas(rows, sys_a, sys_b, metric)
+        lines += [f"- seed {SEED_START + i}: {d:+.4f}" for i, d in enumerate(deltas)]
+
+    (outdir / "variant_abc_comparison.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def run(args: argparse.Namespace) -> None:
+    outdir = Path(args.outdir).resolve()
+    raw_dir = outdir / "raw"
+    outdir.mkdir(parents=True, exist_ok=True)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    mu_override = getattr(args, "mu", None)
+    if mu_override is not None:
+        _COMMON["mu_true"] = float(mu_override)
+
+    jobs = _build_jobs(int(args.seed_start), int(args.num_runs),
+                       _select_variants(getattr(args, "variants", None)))
+    print(f"[ab] jobs={len(jobs)} outdir={outdir}", flush=True)
+    started = time.time()
+
+    rows: list[dict] = []
+    max_workers = max(1, min(int(args.max_workers), len(jobs))) if jobs else 1
+    if max_workers == 1:
+        for idx, job in enumerate(jobs, start=1):
+            print(f"[ab] {idx}/{len(jobs)} {job['system']} seed={job['seed']}", flush=True)
+            row = _run_one(job)
+            rows.append(row)
+            (raw_dir / f"{row['system']}_seed_{row['seed']}.json").write_text(
+                json.dumps(row, indent=2, allow_nan=True), encoding="utf-8"
+            )
+    else:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {executor.submit(_run_one, job): job for job in jobs}
+            for idx, future in enumerate(as_completed(future_map), start=1):
+                job = future_map[future]
+                row = future.result()
+                rows.append(row)
+                (raw_dir / f"{row['system']}_seed_{row['seed']}.json").write_text(
+                    json.dumps(row, indent=2, allow_nan=True), encoding="utf-8"
+                )
+                print(
+                    f"[ab] done {idx}/{len(jobs)} {row['system']} seed={row['seed']} "
+                    f"elapsed={row['elapsed_s']:.1f}s Jexp={row['value_weighted_exposure']:.3f}",
+                    flush=True,
+                )
+
+    rows.sort(key=lambda r: (r["baseline"], r["habituation_condition"], int(r["seed"])))
+    _write_csv(rows, outdir / "per_run_metrics.csv")
+    _write_csv(_summarize(rows), outdir / "summary_by_system.csv")
+    _write_comparison_md(rows, outdir)
+    (outdir / "manifest.json").write_text(
+        json.dumps({"elapsed_s": time.time() - started, "seed_start": args.seed_start,
+                    "num_runs": args.num_runs, "mu_true": _COMMON["mu_true"]}, indent=2),
+        encoding="utf-8",
+    )
+    print(f"[ab] wrote {outdir}", flush=True)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Paired A/B/C/D/E comparison on seeds 155-184."
+    )
+    parser.add_argument("--outdir", default="results/testbench/variant_abc")
+    parser.add_argument("--num-runs", type=int, default=SEED_COUNT,
+                        help="Number of seeds (default 30, starting at --seed-start).")
+    parser.add_argument("--seed-start", type=int, default=SEED_START)
+    parser.add_argument("--max-workers", type=int, default=1)
+    parser.add_argument("--mu", type=float, default=None,
+                        help="Override mu_true (default 2e-5). Use 1e-4 or 4e-4 for higher loads.")
+    parser.add_argument("--variants", default=None,
+                        help="Comma-separated variant names to run (default: all), "
+                             "e.g. variant_D,variant_D_cue.")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    run(parse_args())

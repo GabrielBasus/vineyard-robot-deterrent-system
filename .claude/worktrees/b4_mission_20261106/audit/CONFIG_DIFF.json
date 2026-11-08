@@ -1,0 +1,27 @@
+{
+  "stl_active_clauses": {
+    "parent": [
+      "exp",
+      "cov",
+      "hab"
+    ],
+    "B4_mission": [
+      "exp",
+      "cov",
+      "hab",
+      "react"
+    ]
+  },
+  "stl_mission_wide": {
+    "parent": null,
+    "B4_mission": false
+  },
+  "stl_proposal_predictive_dispatch": {
+    "parent": null,
+    "B4_mission": true
+  },
+  "stl_T_react_s": {
+    "parent": null,
+    "B4_mission": 90.0
+  }
+}

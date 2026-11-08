@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="1.141" timestamp="2026-11-06T11:43:55.247248-08:00" hostname="Jubiloo"><testcase classname="tests.test_service_mechanism_metrics.ServiceAndMechanism" name="test_decision11_no_double_counting_of_waiting_reactive_tasks" time="0.012"><error message="failed on setup with &quot;FileNotFoundError: No calibration source was found. Provide --calibration-ranking-path, --calibration-manifest-path, or run the sweep to create results\sestpp_calibration_sweep.&quot;">tests\test_service_mechanism_metrics.py:46: in setUpClass
+    cls.m, cls.L = _run(_b5c_params(600.0, outcome_window_boundaries_s=[300.0],
+tests\test_service_mechanism_metrics.py:34: in _run
+    for fr in gen:
+DeterrentSystem.py:3565: in run_simulation_frames_persistent
+    calibration_resolution = _resolve_calibration_runtime_overrides(
+DeterrentSystem.py:2104: in _resolve_calibration_runtime_overrides
+    selected_config = load_frozen_sestpp_calibration(
+calibration_config.py:425: in load_frozen_sestpp_calibration
+    raise FileNotFoundError(
+E   FileNotFoundError: No calibration source was found. Provide --calibration-ranking-path, --calibration-manifest-path, or run the sweep to create results\sestpp_calibration_sweep.</error></testcase></testsuite></testsuites>

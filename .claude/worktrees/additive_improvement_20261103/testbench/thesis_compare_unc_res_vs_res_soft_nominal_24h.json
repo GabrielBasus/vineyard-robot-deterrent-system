@@ -1,0 +1,122 @@
+{
+  "scenario": {
+    "num_runs": 5,
+    "seed_start": 123,
+    "duration_s": 86400.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 1800.0,
+    "warmup_s": 21600.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_compare_unc_res_vs_res_soft_nominal_24h",
+    "reference_system": "unc",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_reactive_generated_total",
+      "native_predictive_generated_total",
+      "native_reactive_admitted_total",
+      "native_predictive_admitted_total",
+      "native_reactive_completed_total",
+      "native_predictive_completed_total",
+      "native_urgent_reactive_override_total",
+      "native_robot_idle_fraction_mean",
+      "native_reactive_completed_fraction"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_reactive_completed_fraction",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Nominal Load UNC 24h",
+      "description": "Current proposed workload with unconstrained thesis dispatch as the previous-system baseline over a full diurnal cycle.",
+      "params": {
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Nominal Load Hard Res rho=0.25 24h",
+      "description": "Hard reserved-capacity policy using the original threshold reservation rule over a full diurnal cycle.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "predictive_selection_policy": "utility"
+      }
+    },
+    {
+      "key": "res_soft_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Nominal Load Soft Res rho=0.25 24h",
+      "description": "Soft reserved-capacity policy that shrinks the effective reservation target as reactive pressure rises over a full diurnal cycle.",
+      "params": {
+        "dispatch_policy": "res-soft",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0,
+        "reactive_override_slack_s": 90.0,
+        "reservation_softening_alpha": 2.0,
+        "predictive_selection_policy": "utility"
+      }
+    }
+  ],
+  "metadata": {
+    "comparison": "unc_vs_hard_res_vs_soft_res",
+    "load_regime": "nominal",
+    "horizon": "24h",
+    "hard_reservation_policy": "res",
+    "soft_reservation_policy": "res-soft",
+    "acceptance_thresholds": {
+      "max_response_regression_pct": 10.0,
+      "max_reactive_completed_fraction_drop": 0.05
+    }
+  }
+}

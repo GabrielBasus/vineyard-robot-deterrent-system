@@ -1,0 +1,86 @@
+{
+  "scenario": {
+    "num_runs": 3,
+    "seed_start": 123,
+    "duration_s": 900.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 180.0,
+    "warmup_s": 300.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_random_ablation",
+    "reference_system": "res_0p25",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_admitted_total",
+      "native_predictive_dispatched_total",
+      "native_predictive_completed_total",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_total",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_predictive_admitted_total",
+      "native_predictive_dispatched_total",
+      "native_predictive_completed_total",
+      "native_robot_predictive_fraction_mean",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "res_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reserved 0.25 Utility",
+      "description": "Reserved-capacity dispatch using the utility-based predictive chooser.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "predictive_selection_policy": "utility"
+      }
+    },
+    {
+      "key": "res_rand_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Reserved 0.25 Random",
+      "description": "Reserved-capacity dispatch with the random predictive-choice ablation.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "predictive_selection_policy": "random"
+      }
+    }
+  ]
+}

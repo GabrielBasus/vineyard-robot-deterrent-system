@@ -1,0 +1,10 @@
+# Pinned to the versions of the primary (Windows) machine so other machines run the same
+# numerical stack. Python 3.10 (primary: 3.10.6). Verify a new machine with
+# experiments/cross_machine_check.py before using its results.
+numpy==1.26.4
+scipy==1.15.3
+pandas==2.2.3
+psutil==7.2.2
+matplotlib==3.10.1
+pyyaml==6.0.3
+pytest==8.4.2

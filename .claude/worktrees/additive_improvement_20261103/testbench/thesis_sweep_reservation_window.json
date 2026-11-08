@@ -1,0 +1,132 @@
+{
+  "scenario": {
+    "num_runs": 3,
+    "seed_start": 123,
+    "duration_s": 900.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 6,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 180.0,
+    "warmup_s": 300.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "planner_profile": "thesis_calibrated_selective_proposed",
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_sweep_reservation_window",
+    "reference_system": "unc",
+    "metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_reactive_generated_total",
+      "native_predictive_generated_total",
+      "native_reactive_admitted_total",
+      "native_predictive_admitted_total",
+      "native_reactive_completed_total",
+      "native_predictive_completed_total",
+      "native_urgent_reactive_override_total",
+      "native_robot_idle_fraction_mean",
+      "native_reactive_completed_fraction"
+    ],
+    "scoreboard_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate"
+    ],
+    "time_plot_metrics": [
+      "native_value_weighted_exposure",
+      "native_mean_response_time_s",
+      "native_predictive_completed_fraction",
+      "native_robot_predictive_fraction_mean",
+      "native_reactive_load_factor_estimate",
+      "native_reactive_completed_fraction",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Nominal Load UNC",
+      "description": "Current proposed workload with unconstrained thesis dispatch as the previous-system baseline.",
+      "params": {
+        "dispatch_policy": "unc"
+      }
+    },
+    {
+      "key": "res_tw_120",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Nominal Load Res T_W=120",
+      "description": "Reserved-capacity dispatch with swept reservation window.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 120.0
+      }
+    },
+    {
+      "key": "res_tw_300",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Nominal Load Res T_W=300",
+      "description": "Reserved-capacity dispatch with swept reservation window.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 300.0
+      }
+    },
+    {
+      "key": "res_tw_600",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Nominal Load Res T_W=600",
+      "description": "Reserved-capacity dispatch with swept reservation window.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 600.0
+      }
+    },
+    {
+      "key": "res_tw_1200",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Nominal Load Res T_W=1200",
+      "description": "Reserved-capacity dispatch with swept reservation window.",
+      "params": {
+        "dispatch_policy": "res",
+        "reservation_fraction": 0.25,
+        "reservation_window_s": 1200.0
+      }
+    }
+  ]
+}

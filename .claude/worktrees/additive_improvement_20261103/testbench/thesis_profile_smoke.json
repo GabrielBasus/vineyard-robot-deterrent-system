@@ -1,0 +1,132 @@
+{
+  "scenario": {
+    "num_runs": 1,
+    "seed_start": 123,
+    "duration_s": 300.0,
+    "dt": 1.0,
+    "fps": 1,
+    "W": 500.0,
+    "H": 500.0,
+    "NX": 120,
+    "NY": 96,
+    "Nrobots": 4,
+    "uav_fraction": 0.0,
+    "task_replan_period_s": 45.0,
+    "arrival_radius_m": 3.0,
+    "hold_time_s": 20.0,
+    "sample_every_s": 60.0,
+    "warmup_s": 120.0,
+    "extra_params": {
+      "simulation_mode": "proposed",
+      "enable_patrolling": true,
+      "enable_intervention_feedback": true,
+      "include_fallback_patrol": true,
+      "enable_model_scored_deterring": true,
+      "report_metrics_end": false,
+      "telemetry_clear_on_start": false,
+      "telemetry_prompt_save": false
+    }
+  },
+  "outputs": {
+    "outdir": "results/testbench/thesis_profile_smoke",
+    "reference_system": "profile_unc",
+    "metrics": [
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_completed_total",
+      "native_robot_predictive_fraction_mean",
+      "native_urgent_reactive_override_total"
+    ],
+    "scoreboard_metrics": [
+      "native_predictive_admitted_total",
+      "native_predictive_completed_total",
+      "native_robot_predictive_fraction_mean"
+    ],
+    "time_plot_metrics": [
+      "native_predictive_generated_total",
+      "native_predictive_admitted_total",
+      "native_predictive_completed_total",
+      "native_robot_predictive_fraction_mean",
+      "active_tasks"
+    ]
+  },
+  "systems": [
+    {
+      "key": "profile_react",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Profile React",
+      "description": "Smoke-check the thesis_dispatch_react planner profile alias.",
+      "params": {
+        "planner_profile": "thesis_dispatch_react"
+      }
+    },
+    {
+      "key": "profile_unc",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Profile Unc",
+      "description": "Smoke-check the dispatch_unc planner profile alias.",
+      "params": {
+        "planner_profile": "dispatch_unc"
+      }
+    },
+    {
+      "key": "profile_res_0p00",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Profile Res 0.00",
+      "description": "Smoke-check the thesis_dispatch_res_0p00 planner profile alias.",
+      "params": {
+        "planner_profile": "thesis_dispatch_res_0p00"
+      }
+    },
+    {
+      "key": "profile_res_0p10",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Profile Res 0.10",
+      "description": "Smoke-check the res_0p10 planner profile alias.",
+      "params": {
+        "planner_profile": "res_0p10"
+      }
+    },
+    {
+      "key": "profile_res_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Profile Res 0.25",
+      "description": "Smoke-check the res_0p25 planner profile alias.",
+      "params": {
+        "planner_profile": "res_0p25"
+      }
+    },
+    {
+      "key": "profile_res_0p40",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Profile Res 0.40",
+      "description": "Smoke-check the res_0p40 planner profile alias.",
+      "params": {
+        "planner_profile": "res_0p40"
+      }
+    },
+    {
+      "key": "profile_res_rand_0p25",
+      "type": "repo_module",
+      "repo": "current",
+      "module": "DeterrentSystem",
+      "title": "Profile Res Rand 0.25",
+      "description": "Smoke-check the res_rand_0p25 planner profile alias.",
+      "params": {
+        "planner_profile": "res_rand_0p25"
+      }
+    }
+  ]
+}
